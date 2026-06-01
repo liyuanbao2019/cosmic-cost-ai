@@ -1,0 +1,39 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: cosmic-cost-ai
+  servlet:
+    multipart:
+      location: ${COSMIC_MULTIPART_LOCATION:./storage/tmp}
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+cosmic:
+  storage:
+    base-dir: storage
+  output:
+    base-dir: output
+  template:
+    excel-path: ${COSMIC_EXCEL_TEMPLATE:templates/附件3-XX项目功能点拆分表V1.0.xlsx}
+    word-path: ${COSMIC_WORD_TEMPLATE:templates/附件1-XX项目需求说明书V1.0.docx}
+  ai:
+    provider: deepseek
+    base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
+    api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
+    model: ${OPENAI_MODEL:deepseek-v4-pro}
+    timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:180}
+    max-retries: ${OPENAI_MAX_RETRIES:2}

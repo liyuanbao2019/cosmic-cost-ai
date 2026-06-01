@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跳转到 COSMIC 工作台</title>
+</head>
+<body>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const projectId = params.get('projectId');
+  window.location.replace(projectId ? `/index.html?projectId=${encodeURIComponent(projectId)}` : '/index.html');
+</script>
+</body>
+</html>

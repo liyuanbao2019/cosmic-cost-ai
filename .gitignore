@@ -1,0 +1,16 @@
+target/
+.idea/
+.vscode/
+*.iml
+
+storage/**
+!storage/.gitkeep
+
+output/**
+!output/.gitkeep
+
+sample/*
+!sample/.gitkeep
+
+logs/
+*.log

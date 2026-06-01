@@ -1,0 +1,7 @@
+HTTP/1.1 200 
+Content-Disposition: attachment; filename="download.xlsx"; filename*=UTF-8''%E9%99%84%E4%BB%B63-XJ-091-250905-00002-%E5%85%B3%E4%BA%8E%E9%9B%86%E5%AE%A2%E4%B8%80%E7%BA%BF%E7%9B%B4%E9%80%9A%E8%BD%A6%E6%96%B0%E5%A2%9E%E9%80%9A%E7%9F%A5%E5%85%AC%E5%91%8A%E5%8A%9F%E8%83%BD%E6%A8%A1%E5%9D%97%E7%9A%84%E9%9C%80%E6%B1%82%E8%AF%B4%E6%98%8E%E7%9A%84%E9%9C%80%E6%B1%82%E5%8A%9F%E8%83%BD%E7%82%B9%E6%8B%86%E5%88%86%E8%A1%A8V1.0.xlsx
+Accept-Ranges: bytes
+Content-Type: application/octet-stream
+Content-Length: 71510
+Date: Mon, 01 Jun 2026 06:04:40 GMT
+
