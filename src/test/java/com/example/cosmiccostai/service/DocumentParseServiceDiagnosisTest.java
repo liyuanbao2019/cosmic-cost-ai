@@ -11,7 +11,7 @@ class DocumentParseServiceDiagnosisTest {
 
     @Test
     void recognizesNonStandardRequirementSectionTitle() throws Exception {
-        Object diagnosis = diagnose("一.背景及目标\n二.归属系统\n三.需求规则\n统计规则优化。");
+        Object diagnosis = diagnose("一.背景及目标\n二.归属系统\n三.业务功能\n统计规则优化。");
         assertTrue((Boolean) field(diagnosis, "recognized"));
     }
 

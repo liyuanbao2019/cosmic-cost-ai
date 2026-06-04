@@ -171,11 +171,7 @@ public class DocumentParseService {
             }
         }
 
-        String extracted = detail.toString().trim();
-        if (StringUtils.hasText(extracted)) {
-            return extracted;
-        }
-        return fallbackRequirementDetailPreview(lines);
+        return detail.toString().trim();
     }
 
     private boolean isSectionBoundary(String line) {
@@ -195,72 +191,27 @@ public class DocumentParseService {
                 || "归属系统".equals(normalized);
     }
 
-    private String fallbackRequirementDetailPreview(String[] lines) {
-        StringBuilder builder = new StringBuilder();
-        boolean passedFrontMatter = false;
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!StringUtils.hasText(line) || isCatalogLine(line)) {
-                continue;
-            }
-            String title = normalizeSectionTitle(line);
-            if ("背景及目标".equals(title) || "归属系统".equals(title) || "系统现状".equals(title)
-                    || "总体描述".equals(title) || "建设目标".equals(title) || "建设必要性".equals(title)) {
-                passedFrontMatter = true;
-                continue;
-            }
-            if (!passedFrontMatter && looksLikeBusinessRequirement(line)) {
-                passedFrontMatter = true;
-            }
-            if (passedFrontMatter && !isSectionBoundary(line) && !looksLikeOnlyTitle(line)) {
-                builder.append(line).append(System.lineSeparator());
-            }
-        }
-        return builder.toString().trim();
-    }
-
-    private boolean isCatalogLine(String line) {
-        return line.contains("......") || line.matches(".*\\.{3,}\\s*\\d+\\s*$");
-    }
-
-    private boolean looksLikeOnlyTitle(String line) {
-        String title = normalizeSectionTitle(line);
-        return title.length() <= 12 && !containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现");
-    }
-
     private RequirementDiagnosis diagnoseRequirementSection(String text) {
         if (!StringUtils.hasText(text)) {
             return new RequirementDiagnosis(false,
                     "未解析到有效文档正文。",
                     "请确认上传的是包含正文内容的 docx 文件，且需求内容不是纯图片。");
         }
-        String[] lines = text.split("\\r?\\n");
-        for (String rawLine : lines) {
-            if (isRequirementSection(rawLine)) {
-                return new RequirementDiagnosis(true, "", "");
-            }
-        }
-        for (String rawLine : lines) {
-            if (looksLikeBusinessRequirement(rawLine)) {
-                return new RequirementDiagnosis(false,
-                        "未识别到标准的需求章节标题，系统将尝试从疑似需求段落中提取内容。",
-                        "建议在需求正文前增加清晰标题，例如“需求细则：”“需求内容：”或“需求规则：”，并将具体业务规则放在该标题之后。");
-            }
+        String requirementDetail = extractRequirementDetailPreview(text);
+        if (StringUtils.hasText(requirementDetail)) {
+            return new RequirementDiagnosis(true, "", "");
         }
         return new RequirementDiagnosis(false,
-                "未识别到需求细则、需求内容或明显的业务规则描述。",
-                "请在需求文档中增加“需求细则：”或“需求内容：”标识，并在其下填写新增、修改、查询、统计、保存等具体业务需求。");
+                "未识别到有效的需求内容。",
+                "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。");
     }
 
     private boolean isRequirementSection(String line) {
         String normalized = normalizeSectionTitle(line);
-        return "需求细则".equals(normalized)
-                || "需求内容".equals(normalized)
-                || "需求规则".equals(normalized)
-                || "需求明细".equals(normalized)
-                || "业务需求".equals(normalized)
-                || "功能需求".equals(normalized)
-                || "功能需求说明".equals(normalized);
+        return "需求内容".equals(normalized)
+                || "需求细则".equals(normalized)
+                || "业务功能".equals(normalized)
+                || "功能描述".equals(normalized);
     }
 
     private String normalizeSectionTitle(String line) {
@@ -274,22 +225,6 @@ public class DocumentParseService {
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
                 .replaceAll("[:：]+$", "")
                 .trim();
-    }
-
-    private boolean looksLikeBusinessRequirement(String line) {
-        return containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现", "规则", "数据", "字段");
-    }
-
-    private boolean containsAny(String text, String... keywords) {
-        if (!StringUtils.hasText(text)) {
-            return false;
-        }
-        for (String keyword : keywords) {
-            if (text.contains(keyword)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static class ParsedDocument {

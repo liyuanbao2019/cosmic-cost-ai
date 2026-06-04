@@ -111,7 +111,7 @@ public class AiExtractionService {
             functions = fallbackFunctions(requirementDetail);
         }
         if (functions.isEmpty()) {
-            throw new BusinessException("AI未识别到功能点。请在需求文档中使用“需求细则/需求内容/需求规则”等标题，并在标题下用（1）（2）列出每个规则、字段或业务动作。");
+            throw new BusinessException("AI未识别到功能点。请在需求文档中使用“需求内容/需求细则/业务功能/功能描述”等大标题，并在标题下用（1）（2）列出每个规则、字段或业务动作。");
         }
 
         Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
@@ -210,22 +210,15 @@ public class AiExtractionService {
                 detail.append(line).append(System.lineSeparator());
             }
         }
-        String extracted = detail.toString().trim();
-        if (StringUtils.hasText(extracted)) {
-            return extracted;
-        }
-        return fallbackRequirementDetail(lines);
+        return detail.toString().trim();
     }
 
     private boolean isRequirementSection(String line) {
         String normalized = normalizeSectionTitle(line);
-        return "需求细则".equals(normalized)
-                || "需求内容".equals(normalized)
-                || "需求规则".equals(normalized)
-                || "需求明细".equals(normalized)
-                || "业务需求".equals(normalized)
-                || "功能需求".equals(normalized)
-                || "功能需求说明".equals(normalized);
+        return "需求内容".equals(normalized)
+                || "需求细则".equals(normalized)
+                || "业务功能".equals(normalized)
+                || "功能描述".equals(normalized);
     }
 
     private boolean isSectionBoundary(String line) {
@@ -248,35 +241,6 @@ public class AiExtractionService {
                 || "归属系统".equals(normalized);
     }
 
-    private String fallbackRequirementDetail(String[] lines) {
-        StringBuilder builder = new StringBuilder();
-        boolean passedFrontMatter = false;
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!StringUtils.hasText(line) || isCatalogLine(line)) {
-                continue;
-            }
-            String title = normalizeSectionTitle(line);
-            if ("背景及目标".equals(title) || "归属系统".equals(title) || "系统现状".equals(title)
-                    || "总体描述".equals(title) || "建设目标".equals(title) || "建设必要性".equals(title)) {
-                passedFrontMatter = true;
-                continue;
-            }
-            if (!passedFrontMatter && looksLikeBusinessRequirement(line)) {
-                passedFrontMatter = true;
-            }
-            if (passedFrontMatter && !isSectionBoundary(line) && !looksLikeOnlyTitle(line)) {
-                builder.append(line).append(System.lineSeparator());
-            }
-        }
-        String fallback = builder.toString().trim();
-        if (StringUtils.hasText(fallback)) {
-            return fallback;
-        }
-        String joined = String.join(System.lineSeparator(), lines).trim();
-        return joined.length() > 8000 ? joined.substring(0, 8000) : joined;
-    }
-
     private String normalizeSectionTitle(String line) {
         if (!StringUtils.hasText(line)) {
             return "";
@@ -288,19 +252,6 @@ public class AiExtractionService {
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
                 .replaceAll("[:：]+$", "");
         return value.trim();
-    }
-
-    private boolean isCatalogLine(String line) {
-        return line.contains("......") || line.matches(".*\\.{3,}\\s*\\d+\\s*$");
-    }
-
-    private boolean looksLikeOnlyTitle(String line) {
-        String title = normalizeSectionTitle(line);
-        return title.length() <= 12 && !containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现");
-    }
-
-    private boolean looksLikeBusinessRequirement(String line) {
-        return containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现", "规则", "数据", "字段");
     }
 
     private boolean containsAny(String text, String... keywords) {

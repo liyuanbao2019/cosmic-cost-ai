@@ -530,7 +530,11 @@
       setMessage("正在解析文档内容...");
       const parsed = await request("/api/projects/" + currentProjectId + "/parse", {method: "POST"});
       $("preview").textContent = parsed.data.preview || "";
-      showRequirementParseWarning(parsed.data || {});
+      if (showRequirementParseWarning(parsed.data || {})) {
+        $("parsePanel").classList.remove("hidden");
+        setMessage("未识别到需求内容，请按提示修改文档后重新上传。", "error");
+        return;
+      }
       markDone("parse");
       $("parsePanel").classList.add("hidden");
       setMessage("解析完成，点击「解析」节点可查看预览");
@@ -553,11 +557,12 @@
 
   function showRequirementParseWarning(data) {
     if (!data || data.requirementRecognized) {
-      return;
+      return false;
     }
-    const warning = data.requirementWarning || "未识别到标准的需求章节标题。";
-    const suggestion = data.requirementSuggestion || "建议在需求正文前增加“需求细则：”“需求内容：”或“需求规则：”标识，并将具体业务需求放在该标题之后。";
+    const warning = data.requirementWarning || "未识别到有效的需求内容。";
+    const suggestion = data.requirementSuggestion || "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。";
     showDialog("需求内容识别提示", warning + "\n\n解决方案：\n" + suggestion);
+    return true;
   }
 
   async function loadReviewFromProjectId() {
