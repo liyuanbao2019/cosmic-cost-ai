@@ -1,6 +1,7 @@
 package com.example.cosmiccostai.controller;
 
 import com.example.cosmiccostai.common.ApiResponse;
+import com.example.cosmiccostai.dto.AiPromptResponse;
 import com.example.cosmiccostai.dto.ConsistencyCheckResponse;
 import com.example.cosmiccostai.dto.CosmicAnalyzeResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
@@ -78,6 +79,12 @@ public class ProjectController {
     @PostMapping("/{projectId}/extract")
     public ApiResponse<ExtractResponse> extract(@PathVariable String projectId) {
         return ApiResponse.ok(aiExtractionService.extract(projectId));
+    }
+
+    @Operation(summary = "Get AI prompt", description = "Return the model name and full prompt used before AI extraction.")
+    @GetMapping("/{projectId}/ai-prompt")
+    public ApiResponse<AiPromptResponse> getAiPrompt(@PathVariable String projectId) {
+        return ApiResponse.ok(aiExtractionService.getPrompt(projectId));
     }
 
     @Operation(summary = "COSMIC analysis", description = "Analyze extracted functions and generate entry/read/write/exit/cfp.")

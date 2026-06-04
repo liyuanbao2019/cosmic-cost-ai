@@ -1,6 +1,7 @@
 package com.example.cosmiccostai.service;
 
 import com.example.cosmiccostai.common.BusinessException;
+import com.example.cosmiccostai.dto.AiPromptResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.model.ExtractedFunction;
 import com.example.cosmiccostai.model.ProjectMetadata;
@@ -71,6 +72,8 @@ public class AiExtractionService {
         writeText(requirementDetailPath, requirementDetail);
 
         String prompt = buildPrompt(requirementDetail);
+        Path promptPath = projectDir.resolve("ai-prompt.txt");
+        writeText(promptPath, prompt);
         log.info("Calling AI extraction, projectId={}, model={}, baseUrl={}, requirementDetailLength={}, promptLength={}, timeoutSeconds={}",
                 projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
         String aiResult = callAi(prompt);
@@ -97,6 +100,48 @@ public class AiExtractionService {
         response.setStatus(metadata.getStatus());
         response.setFunctions(functions);
         return response;
+    }
+
+    public AiPromptResponse getPrompt(String projectId) {
+        ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+        validateMetadata(metadata);
+
+        Path projectDir = fileStorageService.resolveProjectDir(projectId);
+        Path promptPath = projectDir.resolve("ai-prompt.txt");
+        String prompt;
+        if (Files.exists(promptPath)) {
+            prompt = readText(promptPath);
+        } else {
+            String requirementDetail = resolveRequirementDetail(metadata, projectDir);
+            prompt = buildPrompt(requirementDetail);
+        }
+
+        AiPromptResponse response = new AiPromptResponse();
+        response.setProjectId(projectId);
+        response.setModelName(model);
+        response.setPrompt(prompt);
+        response.setPromptPath(Files.exists(promptPath) ? promptPath.toString() : "");
+        return response;
+    }
+
+    private String resolveRequirementDetail(ProjectMetadata metadata, Path projectDir) {
+        if (StringUtils.hasText(metadata.getRequirementDetailPath())) {
+            Path requirementDetailPath = Paths.get(metadata.getRequirementDetailPath());
+            if (Files.exists(requirementDetailPath)) {
+                return readText(requirementDetailPath);
+            }
+        }
+
+        String documentText = readText(Paths.get(metadata.getDocumentTextPath()));
+        String requirementDetail = extractRequirementDetail(documentText);
+        if (!StringUtils.hasText(requirementDetail)) {
+            throw new BusinessException("Requirement detail section is empty");
+        }
+        Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
+        writeText(requirementDetailPath, requirementDetail);
+        metadata.setRequirementDetailPath(requirementDetailPath.toString());
+        fileStorageService.saveMetadata(metadata);
+        return requirementDetail;
     }
 
     private void validateMetadata(ProjectMetadata metadata) {

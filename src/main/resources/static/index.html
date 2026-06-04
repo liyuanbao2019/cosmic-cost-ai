@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260601-2">
+  <link rel="stylesheet" href="/app.css?v=20260601-3">
 </head>
 <body>
 <header class="topbar">
@@ -47,6 +47,17 @@
     <div class="dialog-actions">
       <button id="export-dialog-close" class="dialog-btn ghost-btn" onclick="closeExportDialog()">关闭</button>
     </div>
+  </div>
+</div>
+
+<div id="ai-prompt-dialog-overlay" class="dialog-overlay hidden" onclick="closeAiPromptDialogOnOverlay(event)">
+  <div class="dialog ai-prompt-dialog">
+    <div class="ai-prompt-header">
+      <h3 class="dialog-title">AI 拆分调用提示词</h3>
+      <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
+    </div>
+    <div class="ai-prompt-meta">模型名称：<b id="aiPromptModel">-</b></div>
+    <pre id="aiPromptText" class="ai-prompt-text"></pre>
   </div>
 </div>
 
@@ -191,6 +202,25 @@
 
     <div class="actions sticky-actions">
       <button type="button" class="secondary" onclick="saveReview()">保存</button>
+      <button type="button" onclick="addReviewRow()">新增一行</button>
+      <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
+      <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
+      <div class="batch-tools">
+        <select id="batchField" onchange="onBatchFieldChange()">
+          <option value="level1Module">一级模块</option>
+          <option value="level2Module">二级模块</option>
+          <option value="level3Module">三级模块</option>
+          <option value="functionProcess">功能过程</option>
+          <option value="subProcessDescription">子过程描述</option>
+          <option value="movementType">类型</option>
+          <option value="dataGroup">数据组</option>
+          <option value="dataAttributes">数据属性</option>
+          <option value="reuseDegree">复用度</option>
+        </select>
+        <input id="batchValue" type="text" placeholder="批量修改为">
+        <select id="batchSelectValue" class="hidden"></select>
+        <button type="button" class="ghost" onclick="applyBatchChange()">应用到选中</button>
+      </div>
       <button type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
     </div>
 
@@ -198,6 +228,7 @@
       <table id="reviewTable">
         <thead>
         <tr>
+          <th class="w-select"><input id="selectAllRows" type="checkbox" onchange="toggleAllRows(this.checked)"></th>
           <th class="w-module">一级模块</th>
           <th class="w-module">二级模块</th>
           <th class="w-module">三级模块</th>
@@ -208,6 +239,7 @@
           <th class="w-attr">数据属性</th>
           <th class="w-reuse">复用度</th>
           <th class="w-cfp">CFP</th>
+          <th class="w-actions">操作</th>
         </tr>
         </thead>
         <tbody id="reviewBody"></tbody>
@@ -224,6 +256,7 @@
 <script>
   let currentProjectId = "";
   let splitRows = [];
+  let selectedRows = {};
   const reuseOptions = ["新增", "复用", "利旧"];
   const movementOptions = ["E", "R", "W", "X"];
 
@@ -295,7 +328,7 @@
     const el = $("step-" + step);
     el.classList.add("done");
     el.classList.remove("active");
-    if (step === "parse") {
+    if (step === "parse" || step === "ai") {
       el.classList.add("clickable");
     }
     updateFlowProgress();
@@ -312,6 +345,34 @@
   function handleStepClick(stepName) {
     if (stepName === "parse") {
       toggleParsePreview();
+    } else if (stepName === "ai") {
+      showAiPrompt();
+    }
+  }
+
+  async function showAiPrompt() {
+    if (!currentProjectId) {
+      showDialog("暂无项目", "请先上传需求文档并开始拆分。");
+      return;
+    }
+    try {
+      const response = await request("/api/projects/" + currentProjectId + "/ai-prompt");
+      const data = response.data || {};
+      $("aiPromptModel").textContent = data.modelName || "-";
+      $("aiPromptText").textContent = data.prompt || "暂无提示词内容。";
+      $("ai-prompt-dialog-overlay").classList.remove("hidden");
+    } catch (error) {
+      showDialog("暂无法查看 AI 提示词", error.message || "请先完成文档解析后再查看。");
+    }
+  }
+
+  function closeAiPromptDialog() {
+    $("ai-prompt-dialog-overlay").classList.add("hidden");
+  }
+
+  function closeAiPromptDialogOnOverlay(event) {
+    if (event.target === $("ai-prompt-dialog-overlay")) {
+      closeAiPromptDialog();
     }
   }
 
@@ -335,6 +396,7 @@
   function resetPage() {
     currentProjectId = "";
     splitRows = [];
+    selectedRows = {};
     $("fileInput").value = "";
     $("projectName").value = "";
     $("preview").textContent = "";
@@ -430,10 +492,17 @@
   function renderTable() {
     const body = $("reviewBody");
     body.innerHTML = "";
+    syncSelectedRows();
+    const selectAll = $("selectAllRows");
+    if (selectAll) {
+      const selectedCount = selectedRowIndexes().length;
+      selectAll.checked = splitRows.length > 0 && selectedCount === splitRows.length;
+      selectAll.indeterminate = selectedCount > 0 && selectedCount < splitRows.length;
+    }
     if (!splitRows.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 10;
+      td.colSpan = 12;
       td.className = "empty";
       td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
       tr.appendChild(td);
@@ -443,6 +512,7 @@
 
     splitRows.forEach(function (row, index) {
       const tr = document.createElement("tr");
+      addRowSelectCell(tr, index);
       addTextCell(tr, row, index, "level1Module");
       addTextCell(tr, row, index, "level2Module");
       addTextCell(tr, row, index, "level3Module");
@@ -456,8 +526,28 @@
       cfp.className = "cfp-cell";
       cfp.textContent = formatCfp(row.cfp);
       tr.appendChild(cfp);
+      addActionCell(tr, index);
       body.appendChild(tr);
     });
+  }
+
+  function addRowSelectCell(tr, index) {
+    const td = document.createElement("td");
+    td.className = "row-select-cell";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = !!selectedRows[index];
+    checkbox.dataset.index = index;
+    checkbox.addEventListener("change", function () {
+      if (checkbox.checked) {
+        selectedRows[index] = true;
+      } else {
+        delete selectedRows[index];
+      }
+      renderTable();
+    });
+    td.appendChild(checkbox);
+    tr.appendChild(td);
   }
 
   function addTextCell(tr, row, index, field) {
@@ -488,6 +578,28 @@
     tr.appendChild(td);
   }
 
+  function addActionCell(tr, index) {
+    const td = document.createElement("td");
+    td.className = "row-actions";
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "ghost mini";
+    copyButton.textContent = "复制";
+    copyButton.onclick = function () {
+      copyRow(index);
+    };
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "ghost mini danger";
+    deleteButton.textContent = "删除";
+    deleteButton.onclick = function () {
+      deleteRow(index);
+    };
+    td.appendChild(copyButton);
+    td.appendChild(deleteButton);
+    tr.appendChild(td);
+  }
+
   function onCellChange(event) {
     const target = event.target;
     const index = Number(target.dataset.index);
@@ -497,6 +609,170 @@
     if (field === "reuseDegree") {
       renderTable();
     }
+    updateStats();
+  }
+
+  function blankReviewRow(baseRow) {
+    const base = baseRow || {};
+    return normalizeRow({
+      projectName: base.projectName || $("projectName").value || "",
+      level1Module: base.level1Module || "",
+      level2Module: base.level2Module || "",
+      level3Module: base.level3Module || "",
+      functionalUser: base.functionalUser || "发起者：用户\n接收者：系统",
+      triggerEvent: base.triggerEvent || base.functionProcess || "",
+      functionProcess: base.functionProcess || "",
+      subProcessDescription: base.subProcessDescription || "",
+      movementType: base.movementType || "E",
+      dataGroup: base.dataGroup || "",
+      dataAttributes: base.dataAttributes || "",
+      reuseDegree: base.reuseDegree || "新增",
+      cfp: base.cfp || 1
+    });
+  }
+
+  function cloneRow(row) {
+    return normalizeRow(JSON.parse(JSON.stringify(row || {})));
+  }
+
+  function addReviewRow() {
+    const base = splitRows.length ? splitRows[splitRows.length - 1] : {};
+    splitRows.push(blankReviewRow(base));
+    selectedRows = {};
+    selectedRows[splitRows.length - 1] = true;
+    renderTable();
+    updateStats();
+  }
+
+  function copyRow(index) {
+    if (index < 0 || index >= splitRows.length) {
+      return;
+    }
+    splitRows.splice(index + 1, 0, cloneRow(splitRows[index]));
+    selectedRows = {};
+    selectedRows[index + 1] = true;
+    renderTable();
+    updateStats();
+  }
+
+  function deleteRow(index) {
+    if (index < 0 || index >= splitRows.length) {
+      return;
+    }
+    if (splitRows.length === 1) {
+      showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
+      return;
+    }
+    splitRows.splice(index, 1);
+    selectedRows = {};
+    renderTable();
+    updateStats();
+  }
+
+  function toggleAllRows(checked) {
+    selectedRows = {};
+    if (checked) {
+      splitRows.forEach(function (_, index) {
+        selectedRows[index] = true;
+      });
+    }
+    renderTable();
+  }
+
+  function selectedRowIndexes() {
+    return Object.keys(selectedRows)
+      .map(function (value) { return Number(value); })
+      .filter(function (index) { return index >= 0 && index < splitRows.length; })
+      .sort(function (a, b) { return a - b; });
+  }
+
+  function syncSelectedRows() {
+    const next = {};
+    selectedRowIndexes().forEach(function (index) {
+      next[index] = true;
+    });
+    selectedRows = next;
+  }
+
+  function copySelectedRows() {
+    const indexes = selectedRowIndexes();
+    if (!indexes.length) {
+      showDialog("请选择行", "请先勾选需要复制的拆分行。");
+      return;
+    }
+    const copies = indexes.map(function (index) {
+      return cloneRow(splitRows[index]);
+    });
+    splitRows = splitRows.concat(copies);
+    selectedRows = {};
+    for (let i = splitRows.length - copies.length; i < splitRows.length; i++) {
+      selectedRows[i] = true;
+    }
+    renderTable();
+    updateStats();
+  }
+
+  function deleteSelectedRows() {
+    const indexes = selectedRowIndexes();
+    if (!indexes.length) {
+      showDialog("请选择行", "请先勾选需要删除的拆分行。");
+      return;
+    }
+    if (indexes.length >= splitRows.length) {
+      showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
+      return;
+    }
+    const deleteMap = {};
+    indexes.forEach(function (index) {
+      deleteMap[index] = true;
+    });
+    splitRows = splitRows.filter(function (_, index) {
+      return !deleteMap[index];
+    });
+    selectedRows = {};
+    renderTable();
+    updateStats();
+  }
+
+  function onBatchFieldChange() {
+    const field = $("batchField").value;
+    const input = $("batchValue");
+    const select = $("batchSelectValue");
+    select.innerHTML = "";
+    let options = null;
+    if (field === "movementType") {
+      options = movementOptions;
+    } else if (field === "reuseDegree") {
+      options = reuseOptions;
+    }
+    if (options) {
+      options.forEach(function (item) {
+        const option = document.createElement("option");
+        option.value = item;
+        option.textContent = item;
+        select.appendChild(option);
+      });
+      select.classList.remove("hidden");
+      input.classList.add("hidden");
+    } else {
+      select.classList.add("hidden");
+      input.classList.remove("hidden");
+    }
+  }
+
+  function applyBatchChange() {
+    const indexes = selectedRowIndexes();
+    if (!indexes.length) {
+      showDialog("请选择行", "请先勾选需要批量修改的拆分行。");
+      return;
+    }
+    const field = $("batchField").value;
+    const value = $("batchSelectValue").classList.contains("hidden") ? $("batchValue").value : $("batchSelectValue").value;
+    indexes.forEach(function (index) {
+      splitRows[index][field] = value;
+      splitRows[index] = normalizeRow(splitRows[index]);
+    });
+    renderTable();
     updateStats();
   }
 
@@ -773,6 +1049,12 @@
       loadReviewFromProjectId().catch(function () {
         setMessage("当前项目尚未生成审核数据，请上传或继续执行处理流程。", "error");
       });
+    }
+  });
+
+  window.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") {
+      closeAiPromptDialog();
     }
   });
 </script>
