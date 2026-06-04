@@ -45,6 +45,7 @@ import java.util.Map;
 public class ExcelExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final int TEMPLATE_CLEAR_ROW_LIMIT = 500;
 
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
@@ -91,7 +92,7 @@ public class ExcelExportService {
                 }
             }
         } catch (IOException ex) {
-            throw new BusinessException("Export Excel failed", ex);
+            throw new BusinessException("Export Excel failed: " + ex.getClass().getSimpleName() + " " + ex.getMessage(), ex);
         }
 
         metadata.setExcelOutputPath(actualOutputPath.toString());
@@ -127,11 +128,7 @@ public class ExcelExportService {
         if (!Files.exists(preferredPath)) {
             return preferredPath;
         }
-        try (OutputStream ignored = Files.newOutputStream(preferredPath)) {
-            return preferredPath;
-        } catch (IOException ex) {
-            return uniqueOutputPath(preferredPath);
-        }
+        return uniqueOutputPath(preferredPath);
     }
 
     private Path uniqueOutputPath(Path preferredPath) {
@@ -204,8 +201,22 @@ public class ExcelExportService {
             }
         }
 
-        Path parent = Paths.get("..");
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(parent, "*.xlsx")) {
+        Path template = findTemplateInDirectory(Paths.get("templates"));
+        if (template != null) {
+            return template;
+        }
+        template = findTemplateInDirectory(Paths.get(".."));
+        if (template != null) {
+            return template;
+        }
+        throw new BusinessException("Excel template not found");
+    }
+
+    private Path findTemplateInDirectory(Path directory) {
+        if (!Files.isDirectory(directory)) {
+            return null;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.xlsx")) {
             for (Path path : stream) {
                 String name = path.getFileName().toString();
                 if (name.startsWith(zh("\u9644\u4ef63")) && !name.startsWith("~$")) {
@@ -215,7 +226,7 @@ public class ExcelExportService {
         } catch (IOException ex) {
             throw new BusinessException("Find Excel template failed", ex);
         }
-        throw new BusinessException("Excel template not found");
+        return null;
     }
 
     private int fillSheet(Sheet sheet, ProjectMetadata metadata, List<FunctionSplitRow> rows) {
@@ -237,21 +248,35 @@ public class ExcelExportService {
             setCell(row, 7, splitRow.getSubProcessDescription());
             setCell(row, 8, splitRow.getMovementType());
             setCell(row, 9, splitRow.getDataGroup());
-            setCell(row, 10, splitRow.getDataAttributes());
-            setCell(row, 11, splitRow.getReuseDegree());
-            String formula = "IF(L" + (rowIndex + 1) + "=\"" + zh("\u65b0\u589e") + "\",1,IF(L"
-                    + (rowIndex + 1) + "=\"" + zh("\u590d\u7528") + "\",1/3,IF(L"
-                    + (rowIndex + 1) + "=\"" + zh("\u5229\u65e7") + "\",0)))";
-            setFormula(row, 12, formula);
-            rowIndex++;
-            movementRows++;
-        }
+                setCell(row, 10, splitRow.getDataAttributes());
+                setCell(row, 11, splitRow.getReuseDegree());
+                String formula = "IF(L" + (rowIndex + 1) + "=\"" + zh("\u65b0\u589e") + "\",1,IF(L"
+                        + (rowIndex + 1) + "=\"" + zh("\u590d\u7528") + "\",1/3,IF(L"
+                        + (rowIndex + 1) + "=\"" + zh("\u5229\u65e7") + "\",0)))";
+                setFormula(row, 12, formula);
+                setCell(row, 13, splitRow.getFunctionDescription());
+                setCell(row, 14, splitRow.getSequenceDiagram());
+                rowIndex++;
+                movementRows++;
+            }
 
-        int lastDataRow = rowIndex - 1;
-        applyDataBorders(sheet, 5, lastDataRow, 0, 12);
+            int lastDataRow = rowIndex - 1;
+        writeExtendedHeaders(sheet);
+        applyDataBorders(sheet, 5, lastDataRow, 0, 14);
         mergeHierarchyColumns(sheet, rows, 5, lastDataRow);
         addReuseDegreeValidation(sheet, 5, rowIndex - 1);
         return movementRows;
+    }
+
+    private void writeExtendedHeaders(Sheet sheet) {
+        Row titleRow = getOrCreateRow(sheet, 2);
+        Row helpRow = getOrCreateRow(sheet, 4);
+        setCell(titleRow, 13, zh("\u529f\u80fd\u63cf\u8ff0"));
+        setCell(titleRow, 14, zh("\u65f6\u5e8f\u56fe"));
+        setCell(helpRow, 13, zh("\u8be5\u529f\u80fd\u8fc7\u7a0b\u7684\u4e1a\u52a1\u76ee\u7684\u3001\u5904\u7406\u5bf9\u8c61\u548c\u8f93\u51fa\u7ed3\u679c\u3002"));
+        setCell(helpRow, 14, zh("\u683c\u5f0f\u4e3a\u201c\u53c2\u4e0e\u8005A->\u53c2\u4e0e\u8005B\u201d\uff0c\u591a\u4e2a\u6b65\u9aa4\u7528\u82f1\u6587\u5206\u53f7\u5206\u9694\u3002"));
+        sheet.setColumnWidth(13, 48 * 256);
+        sheet.setColumnWidth(14, 28 * 256);
     }
 
     private void applyDataBorders(Sheet sheet, int firstRow, int lastRow, int firstCol, int lastCol) {
@@ -383,12 +408,13 @@ public class ExcelExportService {
             }
         }
 
-        for (int r = 5; r <= Math.max(sheet.getLastRowNum(), 120); r++) {
+        int lastRowToClear = Math.min(Math.max(sheet.getLastRowNum(), 120), TEMPLATE_CLEAR_ROW_LIMIT);
+        for (int r = 5; r <= lastRowToClear; r++) {
             Row row = sheet.getRow(r);
             if (row == null) {
                 continue;
             }
-            for (int c = 0; c <= 12; c++) {
+            for (int c = 0; c <= 14; c++) {
                 Cell cell = row.getCell(c);
                 if (cell != null) {
                     cell.setBlank();
@@ -413,7 +439,7 @@ public class ExcelExportService {
             return;
         }
         target.setHeight(source.getHeight());
-        for (int c = 0; c <= 12; c++) {
+        for (int c = 0; c <= 14; c++) {
             Cell sourceCell = source.getCell(c);
             Cell targetCell = target.getCell(c);
             if (targetCell == null) {
@@ -534,6 +560,8 @@ public class ExcelExportService {
             row.setMovementType(type);
             row.setDataGroup(dataGroup);
             row.setDataAttributes(dataAttributes);
+            row.setFunctionDescription(buildFunctionDescription(result.getDescription(), description, dataAttributes));
+            row.setSequenceDiagram(defaultSequenceDiagram(type, description, dataGroup, dataAttributes));
             row.setReuseDegree(zh("\u65b0\u589e"));
             row.setCfp(1);
             rows.add(row);
@@ -565,6 +593,9 @@ public class ExcelExportService {
             if (!StringUtils.hasText(row.getSubProcessDescription())) {
                 row.setSubProcessDescription(row.getFunctionProcess());
             }
+            if (shouldRegenerateFunctionDescription(row)) {
+                row.setFunctionDescription(buildFunctionDescription(null, row.getSubProcessDescription(), row.getDataAttributes()));
+            }
             if (!StringUtils.hasText(row.getFunctionalUser())) {
                 row.setFunctionalUser(zh("\u53d1\u8d77\u8005\uff1a\u7528\u6237\n\u63a5\u6536\u8005\uff1a\u7cfb\u7edf"));
             }
@@ -577,6 +608,8 @@ public class ExcelExportService {
             if (!StringUtils.hasText(row.getDataAttributes())) {
                 row.setDataAttributes(zh("\u7f16\u53f7\u3001\u72b6\u6001\u3001\u65f6\u95f4"));
             }
+            row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
+                    row.getDataGroup(), row.getDataAttributes()));
             row.setReuseDegree(normalizeReuseDegree(row.getReuseDegree()));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
             lastLevel1 = row.getLevel1Module();
@@ -600,6 +633,62 @@ public class ExcelExportService {
             return 0;
         }
         return 1;
+    }
+
+    private String buildFunctionDescription(String requirementDescription, String subProcessDescription, String dataAttributes) {
+        String subprocess = safe(subProcessDescription);
+        String attributes = safe(dataAttributes);
+        String requirement = safe(requirementDescription);
+        if (StringUtils.hasText(requirement)) {
+            return requirement + zh("\u5176\u4e2d\uff0c") + subprocess + zh("\uff0c\u6d89\u53ca") + attributes + zh("\u3002");
+        }
+        return subprocess + zh("\uff0c\u6d89\u53ca") + attributes + zh("\u3002");
+    }
+
+    private boolean shouldRegenerateFunctionDescription(FunctionSplitRow row) {
+        String value = safe(row.getFunctionDescription());
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        return value.equals(safe(row.getFunctionProcess())) || value.equals(safe(row.getSubProcessDescription()));
+    }
+
+    private String defaultSequenceDiagram(String movementType, String subProcessDescription, String dataGroup, String dataAttributes) {
+        if ("E".equals(movementType)) {
+            return "UI->UI";
+        }
+        if ("R".equals(movementType)) {
+            if (isBackendRead(subProcessDescription, dataGroup, dataAttributes)) {
+                return zh("\u540e\u53f0\u670d\u52a1->\u540e\u53f0\u670d\u52a1");
+            }
+            return zh("UI->\u540e\u53f0\u670d\u52a1");
+        }
+        if ("W".equals(movementType)) {
+            return zh("\u540e\u53f0\u670d\u52a1->UI");
+        }
+        return zh("\u540e\u53f0\u670d\u52a1->UI");
+    }
+
+    private boolean isBackendRead(String subProcessDescription, String dataGroup, String dataAttributes) {
+        String text = safe(subProcessDescription) + " " + safe(dataGroup) + " " + safe(dataAttributes);
+        return containsAny(text, zh("\u6570\u636e\u5904\u7406"), zh("\u8ba1\u7b97"), zh("\u6c47\u603b"), zh("\u7edf\u8ba1"),
+                zh("\u6821\u9a8c"), zh("\u8f6c\u6362"), zh("\u4fdd\u5b58"), zh("\u5199\u5165"), zh("\u66f4\u65b0"));
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private String zh(String value) {

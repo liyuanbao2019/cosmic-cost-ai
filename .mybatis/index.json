@@ -1,11 +1,11 @@
 {
   "version": "1.0",
-  "timestamp": 1780283121044,
+  "timestamp": 1780563006619,
   "projectRoot": "d:\\cosmic\\cosmic-cost-ai",
   "entries": [
     {
       "path": "target\\classes\\com\\example\\cosmiccostai\\CosmicCostAiApplication.class",
-      "mtime": 1780282437770.4077,
+      "mtime": 1780559545261.8096,
       "size": 773
     }
   ]

@@ -54,10 +54,14 @@
   <div class="dialog ai-prompt-dialog">
     <div class="ai-prompt-header">
       <h3 class="dialog-title">AI 拆分调用提示词</h3>
-      <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
+      <div class="dialog-header-actions" style="display: flex; gap: 8px; flex-shrink: 0;">
+        <button id="resendAiPromptBtn" type="button" class="secondary" onclick="resendAiPrompt()">重新发送 AI 拆分</button>
+        <button type="button" onclick="copyAiPrompt(this)">复制提示词</button>
+        <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
+      </div>
     </div>
     <div class="ai-prompt-meta">模型名称：<b id="aiPromptModel">-</b></div>
-    <pre id="aiPromptText" class="ai-prompt-text"></pre>
+    <textarea id="aiPromptText" class="ai-prompt-text" spellcheck="false"></textarea>
   </div>
 </div>
 
@@ -70,21 +74,19 @@
       </div>
     </div>
 
-    <div class="form-grid">
-      <label>
-        <span>项目名称</span>
-        <input id="projectName" type="text" placeholder="选填，默认使用文件名">
-      </label>
-      <label>
-        <span>需求文档 <em>（请上传需求文档（docx 或 pdf），点击「上传并开始处理」）</em></span>
+    <input id="projectName" type="hidden">
+    <div class="upload-row">
+      <div class="upload-field">
+        <label for="fileInput">
+          <span>需求文档 <em>（请上传需求文档（docx 或 pdf））</em></span>
+        </label>
         <input id="fileInput" type="file" accept=".docx,.pdf">
-      </label>
-    </div>
-
-    <div class="actions">
-      <button id="runBtn" type="button" onclick="runAll()">开始拆分</button>
-      <button type="button" class="secondary" onclick="startNewTask()">新建任务</button>
-      <button type="button" class="ghost" onclick="resetPage()">重置</button>
+      </div>
+      <div class="actions">
+        <button id="runBtn" type="button" onclick="runAll()">开始拆分</button>
+        <button type="button" class="secondary" onclick="startNewTask()">新建任务</button>
+        <button type="button" class="ghost" onclick="resetPage()">重置</button>
+      </div>
     </div>
 
     <!-- <div id="message" class="message"></div> -->
@@ -211,7 +213,9 @@
           <option value="level2Module">二级模块</option>
           <option value="level3Module">三级模块</option>
           <option value="functionProcess">功能过程</option>
+          <option value="functionDescription">功能描述</option>
           <option value="subProcessDescription">子过程描述</option>
+          <option value="sequenceDiagram">时序图</option>
           <option value="movementType">类型</option>
           <option value="dataGroup">数据组</option>
           <option value="dataAttributes">数据属性</option>
@@ -233,7 +237,9 @@
           <th class="w-module">二级模块</th>
           <th class="w-module">三级模块</th>
           <th class="w-process">功能过程</th>
+          <th class="w-desc">功能描述</th>
           <th class="w-desc">子过程描述</th>
+          <th class="w-data">时序图</th>
           <th class="w-type">类型</th>
           <th class="w-data">数据组</th>
           <th class="w-attr">数据属性</th>
@@ -259,6 +265,7 @@
   let selectedRows = {};
   const reuseOptions = ["新增", "复用", "利旧"];
   const movementOptions = ["E", "R", "W", "X"];
+  const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
 
   function $(id) {
     return document.getElementById(id);
@@ -359,7 +366,7 @@
       const response = await request("/api/projects/" + currentProjectId + "/ai-prompt");
       const data = response.data || {};
       $("aiPromptModel").textContent = data.modelName || "-";
-      $("aiPromptText").textContent = data.prompt || "暂无提示词内容。";
+      $("aiPromptText").value = data.prompt || "";
       $("ai-prompt-dialog-overlay").classList.remove("hidden");
     } catch (error) {
       showDialog("暂无法查看 AI 提示词", error.message || "请先完成文档解析后再查看。");
@@ -370,10 +377,91 @@
     $("ai-prompt-dialog-overlay").classList.add("hidden");
   }
 
+  async function copyAiPrompt(btn) {
+    const text = $("aiPromptText").value || "";
+    if (!text) {
+      showDialog("无内容", "提示词内容为空，无法复制。");
+      return;
+    }
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      }
+      if (btn) {
+        const originalText = btn.textContent;
+        btn.textContent = "已复制！";
+        btn.style.background = "linear-gradient(135deg, var(--success) 0%, #059669 100%)";
+        btn.style.boxShadow = "0 2px 6px rgba(16, 185, 129, 0.3)";
+        btn.disabled = true;
+        setTimeout(function () {
+          btn.textContent = originalText;
+          btn.style.background = "";
+          btn.style.boxShadow = "";
+          btn.disabled = false;
+        }, 2000);
+      }
+    } catch (err) {
+      showDialog("复制失败", "无法复制提示词，请手动选择复制。");
+    }
+  }
+
   function closeAiPromptDialogOnOverlay(event) {
     if (event.target === $("ai-prompt-dialog-overlay")) {
       closeAiPromptDialog();
     }
+  }
+
+  async function resendAiPrompt() {
+    if (!currentProjectId) {
+      showDialog("暂无项目", "请先上传需求文档并完成文档解析。");
+      return;
+    }
+    const prompt = ($("aiPromptText").value || "").trim();
+    if (!prompt) {
+      showDialog("提示词为空", "请先填写 AI 拆分提示词，再重新发送。");
+      return;
+    }
+    const btn = $("resendAiPromptBtn");
+    await withBusy(async function () {
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = "发送中...";
+      }
+      try {
+        markActive("ai");
+        setMessage("正在使用修改后的提示词重新调用 AI 拆分...");
+        await request("/api/projects/" + currentProjectId + "/ai-prompt/extract", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({prompt: prompt})
+        });
+        markDone("ai");
+
+        markActive("cosmic");
+        setMessage("正在基于新的 AI 拆分结果重新生成 COSMIC 数据...");
+        await request("/api/projects/" + currentProjectId + "/cosmic", {method: "POST"});
+        markDone("cosmic");
+
+        await loadReview();
+        markActive("review");
+        closeAiPromptDialog();
+        setMessage("已按修改后的提示词重新完成 AI 拆分，请审核下方功能点。", "success");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = "重新发送 AI 拆分";
+        }
+      }
+    });
   }
 
   function updateFlowProgress() {
@@ -442,6 +530,7 @@
       setMessage("正在解析文档内容...");
       const parsed = await request("/api/projects/" + currentProjectId + "/parse", {method: "POST"});
       $("preview").textContent = parsed.data.preview || "";
+      showRequirementParseWarning(parsed.data || {});
       markDone("parse");
       $("parsePanel").classList.add("hidden");
       setMessage("解析完成，点击「解析」节点可查看预览");
@@ -460,6 +549,15 @@
       markActive("review");
       setMessage("处理完成，请在下方审核功能点，保存后再导出。", "success");
     });
+  }
+
+  function showRequirementParseWarning(data) {
+    if (!data || data.requirementRecognized) {
+      return;
+    }
+    const warning = data.requirementWarning || "未识别到标准的需求章节标题。";
+    const suggestion = data.requirementSuggestion || "建议在需求正文前增加“需求细则：”“需求内容：”或“需求规则：”标识，并将具体业务需求放在该标题之后。";
+    showDialog("需求内容识别提示", warning + "\n\n解决方案：\n" + suggestion);
   }
 
   async function loadReviewFromProjectId() {
@@ -502,7 +600,7 @@
     if (!splitRows.length) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 12;
+      td.colSpan = 14;
       td.className = "empty";
       td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
       tr.appendChild(td);
@@ -517,7 +615,9 @@
       addTextCell(tr, row, index, "level2Module");
       addTextCell(tr, row, index, "level3Module");
       addTextCell(tr, row, index, "functionProcess");
+      addTextCell(tr, row, index, "functionDescription");
       addTextCell(tr, row, index, "subProcessDescription");
+      addSelectCell(tr, row, index, "sequenceDiagram", sequenceDiagramOptions);
       addSelectCell(tr, row, index, "movementType", movementOptions);
       addTextCell(tr, row, index, "dataGroup");
       addTextCell(tr, row, index, "dataAttributes");
@@ -622,7 +722,9 @@
       functionalUser: base.functionalUser || "发起者：用户\n接收者：系统",
       triggerEvent: base.triggerEvent || base.functionProcess || "",
       functionProcess: base.functionProcess || "",
+      functionDescription: base.functionDescription || "",
       subProcessDescription: base.subProcessDescription || "",
+      sequenceDiagram: base.sequenceDiagram || "",
       movementType: base.movementType || "E",
       dataGroup: base.dataGroup || "",
       dataAttributes: base.dataAttributes || "",
@@ -744,6 +846,8 @@
       options = movementOptions;
     } else if (field === "reuseDegree") {
       options = reuseOptions;
+    } else if (field === "sequenceDiagram") {
+      options = sequenceDiagramOptions;
     }
     if (options) {
       options.forEach(function (item) {
@@ -786,6 +890,8 @@
     next.movementType = movementOptions.indexOf(next.movementType) >= 0 ? next.movementType : "E";
     next.dataGroup = textOr(next.dataGroup, next.functionProcess);
     next.dataAttributes = textOr(next.dataAttributes, next.subProcessDescription);
+    next.functionDescription = textOr(next.functionDescription, defaultFunctionDescription(next.subProcessDescription, next.dataAttributes));
+    next.sequenceDiagram = sequenceDiagramOptions.indexOf(next.sequenceDiagram) >= 0 ? next.sequenceDiagram : defaultSequenceDiagram(next.movementType, next.subProcessDescription, next.dataGroup, next.dataAttributes);
     next.reuseDegree = reuseOptions.indexOf(next.reuseDegree) >= 0 ? next.reuseDegree : "新增";
     next.cfp = cfpByReuse(next.reuseDegree);
     if (!next.projectName && $("projectName").value) {
@@ -797,6 +903,40 @@
   function textOr(value, fallback) {
     const text = (value == null ? "" : String(value)).trim();
     return text || fallback || "";
+  }
+
+  function defaultFunctionDescription(subProcessDescription, dataAttributes) {
+    const subProcess = textOr(subProcessDescription, "处理功能子过程");
+    const attributes = textOr(dataAttributes, "相关数据属性");
+    return subProcess + "，涉及" + attributes + "。";
+  }
+
+  function defaultSequenceDiagram(movementType, subProcessDescription, dataGroup, dataAttributes) {
+    if (movementType === "E") {
+      return "UI->UI";
+    }
+    if (movementType === "R") {
+      if (isBackendRead(subProcessDescription, dataGroup, dataAttributes)) {
+        return "后台服务->后台服务";
+      }
+      return "UI->后台服务";
+    }
+    if (movementType === "W") {
+      return "后台服务->UI";
+    }
+    if (movementType === "X") {
+      return "后台服务->UI";
+    }
+    return "UI->UI";
+  }
+
+  function isBackendRead(subProcessDescription, dataGroup, dataAttributes) {
+    const text = [subProcessDescription, dataGroup, dataAttributes].map(function (value) {
+      return value == null ? "" : String(value);
+    }).join(" ");
+    return ["数据处理", "计算", "汇总", "统计", "校验", "转换", "保存", "写入", "更新"].some(function (keyword) {
+      return text.indexOf(keyword) >= 0;
+    });
   }
 
   function cfpByReuse(reuseDegree) {

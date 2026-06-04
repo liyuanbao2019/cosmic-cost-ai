@@ -9,10 +9,12 @@ public class FunctionSplitRow {
     private String functionalUser;
     private String triggerEvent;
     private String functionProcess;
+    private String functionDescription;
     private String subProcessDescription;
     private String movementType;
     private String dataGroup;
     private String dataAttributes;
+    private String sequenceDiagram;
     private String reuseDegree;
     private double cfp;
 
@@ -72,6 +74,14 @@ public class FunctionSplitRow {
         this.functionProcess = functionProcess;
     }
 
+    public String getFunctionDescription() {
+        return functionDescription;
+    }
+
+    public void setFunctionDescription(String functionDescription) {
+        this.functionDescription = functionDescription;
+    }
+
     public String getSubProcessDescription() {
         return subProcessDescription;
     }
@@ -102,6 +112,14 @@ public class FunctionSplitRow {
 
     public void setDataAttributes(String dataAttributes) {
         this.dataAttributes = dataAttributes;
+    }
+
+    public String getSequenceDiagram() {
+        return sequenceDiagram;
+    }
+
+    public void setSequenceDiagram(String sequenceDiagram) {
+        this.sequenceDiagram = sequenceDiagram;
     }
 
     public String getReuseDegree() {

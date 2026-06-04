@@ -117,6 +117,8 @@ public class ReviewService {
             row.setMovementType(type);
             row.setDataGroup(dataGroup);
             row.setDataAttributes(dataAttributes);
+            row.setFunctionDescription(buildFunctionDescription(result.getDescription(), description, dataAttributes));
+            row.setSequenceDiagram(defaultSequenceDiagram(type, description, dataGroup, dataAttributes));
             row.setReuseDegree(zh("\u65b0\u589e"));
             row.setCfp(1);
             rows.add(row);
@@ -150,6 +152,9 @@ public class ReviewService {
             if (!StringUtils.hasText(row.getSubProcessDescription())) {
                 row.setSubProcessDescription(row.getFunctionProcess());
             }
+            if (shouldRegenerateFunctionDescription(row)) {
+                row.setFunctionDescription(buildFunctionDescription(null, row.getSubProcessDescription(), row.getDataAttributes()));
+            }
             row.setMovementType(normalizeMovementType(row.getMovementType()));
             if (!StringUtils.hasText(row.getFunctionalUser())) {
                 row.setFunctionalUser(zh("\u53d1\u8d77\u8005\uff1a\u7528\u6237\n\u63a5\u6536\u8005\uff1a\u7cfb\u7edf"));
@@ -163,6 +168,8 @@ public class ReviewService {
             if (!StringUtils.hasText(row.getDataAttributes())) {
                 row.setDataAttributes(zh("\u7f16\u53f7\u3001\u72b6\u6001\u3001\u65f6\u95f4"));
             }
+            row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
+                    row.getDataGroup(), row.getDataAttributes()));
             row.setReuseDegree(normalizeReuseDegree(row.getReuseDegree()));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
             lastLevel1 = row.getLevel1Module();
@@ -178,6 +185,63 @@ public class ReviewService {
             return value;
         }
         return "E";
+    }
+
+    private String buildFunctionDescription(String requirementDescription, String subProcessDescription, String dataAttributes) {
+        String subprocess = safe(subProcessDescription);
+        String attributes = safe(dataAttributes);
+        String requirement = safe(requirementDescription);
+        if (StringUtils.hasText(requirement)) {
+            return requirement + zh("\u5176\u4e2d\uff0c") + subprocess + zh("\uff0c\u6d89\u53ca") + attributes + zh("\u3002");
+        }
+        return subprocess + zh("\uff0c\u6d89\u53ca") + attributes + zh("\u3002");
+    }
+
+    private boolean shouldRegenerateFunctionDescription(FunctionSplitRow row) {
+        String value = safe(row.getFunctionDescription());
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        return value.equals(safe(row.getFunctionProcess())) || value.equals(safe(row.getSubProcessDescription()));
+    }
+
+    private String defaultSequenceDiagram(String movementType, String subProcessDescription, String dataGroup, String dataAttributes) {
+        String type = normalizeMovementType(movementType);
+        if ("E".equals(type)) {
+            return "UI->UI";
+        }
+        if ("R".equals(type)) {
+            if (isBackendRead(subProcessDescription, dataGroup, dataAttributes)) {
+                return zh("\u540e\u53f0\u670d\u52a1->\u540e\u53f0\u670d\u52a1");
+            }
+            return zh("UI->\u540e\u53f0\u670d\u52a1");
+        }
+        if ("W".equals(type)) {
+            return zh("\u540e\u53f0\u670d\u52a1->UI");
+        }
+        return zh("\u540e\u53f0\u670d\u52a1->UI");
+    }
+
+    private boolean isBackendRead(String subProcessDescription, String dataGroup, String dataAttributes) {
+        String text = safe(subProcessDescription) + " " + safe(dataGroup) + " " + safe(dataAttributes);
+        return containsAny(text, zh("\u6570\u636e\u5904\u7406"), zh("\u8ba1\u7b97"), zh("\u6c47\u603b"), zh("\u7edf\u8ba1"),
+                zh("\u6821\u9a8c"), zh("\u8f6c\u6362"), zh("\u4fdd\u5b58"), zh("\u5199\u5165"), zh("\u66f4\u65b0"));
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private double cfpByReuse(String reuseDegree) {
@@ -207,7 +271,8 @@ public class ReviewService {
                 result = new CosmicResult();
                 result.setModule(row.getLevel1Module());
                 result.setFunction(process);
-                result.setDescription(row.getSubProcessDescription());
+                result.setDescription(row.getFunctionDescription());
+                result.setSequenceDiagram(row.getSequenceDiagram());
                 map.put(process, result);
             }
             if ("E".equals(row.getMovementType())) {

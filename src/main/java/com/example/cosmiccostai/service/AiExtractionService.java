@@ -25,7 +25,12 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class AiExtractionService {
@@ -74,20 +79,51 @@ public class AiExtractionService {
         String prompt = buildPrompt(requirementDetail);
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
+    }
+
+    public ExtractResponse extractWithPrompt(String projectId, String prompt) {
+        if (!StringUtils.hasText(prompt)) {
+            throw new BusinessException("AI提示词不能为空");
+        }
+        ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+        validateMetadata(metadata);
+
+        Path projectDir = fileStorageService.resolveProjectDir(projectId);
+        String requirementDetail = resolveRequirementDetail(metadata, projectDir);
+        Path promptPath = projectDir.resolve("ai-prompt.txt");
+        writeText(promptPath, prompt);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
+    }
+
+    private ExtractResponse executeExtraction(String projectId,
+                                              ProjectMetadata metadata,
+                                              Path projectDir,
+                                              String requirementDetail,
+                                              String prompt) {
         log.info("Calling AI extraction, projectId={}, model={}, baseUrl={}, requirementDetailLength={}, promptLength={}, timeoutSeconds={}",
                 projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
         String aiResult = callAi(prompt);
         log.info("AI extraction completed, projectId={}, responseLength={}", projectId, aiResult == null ? 0 : aiResult.length());
         List<ExtractedFunction> functions = parseFunctions(aiResult);
         if (functions.isEmpty()) {
-            throw new BusinessException("AI extracted no functions");
+            log.warn("AI returned no functions, projectId={}, using local fallback extraction", projectId);
+            functions = fallbackFunctions(requirementDetail);
+        }
+        if (functions.isEmpty()) {
+            throw new BusinessException("AI未识别到功能点。请在需求文档中使用“需求细则/需求内容/需求规则”等标题，并在标题下用（1）（2）列出每个规则、字段或业务动作。");
         }
 
+        Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
         Path extractedPath = projectDir.resolve("extracted-functions.json");
         writeJson(extractedPath, functions);
 
         metadata.setRequirementDetailPath(requirementDetailPath.toString());
         metadata.setExtractedFunctionsPath(extractedPath.toString());
+        metadata.setCosmicResultsPath(null);
+        metadata.setFunctionSplitRowsPath(null);
+        metadata.setExcelOutputPath(null);
+        metadata.setWordOutputPath(null);
         metadata.setStatus("EXTRACTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
@@ -161,28 +197,122 @@ public class AiExtractionService {
         for (String rawLine : lines) {
             String line = rawLine == null ? "" : rawLine.trim();
             if (!collecting) {
-                if ("需求细则".equals(line)) {
+                if (isRequirementSection(line)) {
                     collecting = true;
                 }
                 continue;
             }
 
-            if (isNextFixedSection(line)) {
+            if (isSectionBoundary(line)) {
                 break;
             }
             if (StringUtils.hasText(line)) {
                 detail.append(line).append(System.lineSeparator());
             }
         }
-        return detail.toString().trim();
+        String extracted = detail.toString().trim();
+        if (StringUtils.hasText(extracted)) {
+            return extracted;
+        }
+        return fallbackRequirementDetail(lines);
     }
 
-    private boolean isNextFixedSection(String line) {
-        return "非功能性需求".equals(line)
-                || "附加值调整因子说明".equals(line)
-                || "系统现状".equals(line)
-                || "功能架构图".equals(line)
-                || "功能需求".equals(line);
+    private boolean isRequirementSection(String line) {
+        String normalized = normalizeSectionTitle(line);
+        return "需求细则".equals(normalized)
+                || "需求内容".equals(normalized)
+                || "需求规则".equals(normalized)
+                || "需求明细".equals(normalized)
+                || "业务需求".equals(normalized)
+                || "功能需求".equals(normalized)
+                || "功能需求说明".equals(normalized);
+    }
+
+    private boolean isSectionBoundary(String line) {
+        String normalized = normalizeSectionTitle(line);
+        if (!StringUtils.hasText(normalized)) {
+            return false;
+        }
+        if (isRequirementSection(line)) {
+            return false;
+        }
+        return "非功能性需求".equals(normalized)
+                || "非功能需求".equals(normalized)
+                || "附加值调整因子说明".equals(normalized)
+                || "系统现状".equals(normalized)
+                || "功能架构图".equals(normalized)
+                || "总体描述".equals(normalized)
+                || "建设目标".equals(normalized)
+                || "建设必要性".equals(normalized)
+                || "背景及目标".equals(normalized)
+                || "归属系统".equals(normalized);
+    }
+
+    private String fallbackRequirementDetail(String[] lines) {
+        StringBuilder builder = new StringBuilder();
+        boolean passedFrontMatter = false;
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!StringUtils.hasText(line) || isCatalogLine(line)) {
+                continue;
+            }
+            String title = normalizeSectionTitle(line);
+            if ("背景及目标".equals(title) || "归属系统".equals(title) || "系统现状".equals(title)
+                    || "总体描述".equals(title) || "建设目标".equals(title) || "建设必要性".equals(title)) {
+                passedFrontMatter = true;
+                continue;
+            }
+            if (!passedFrontMatter && looksLikeBusinessRequirement(line)) {
+                passedFrontMatter = true;
+            }
+            if (passedFrontMatter && !isSectionBoundary(line) && !looksLikeOnlyTitle(line)) {
+                builder.append(line).append(System.lineSeparator());
+            }
+        }
+        String fallback = builder.toString().trim();
+        if (StringUtils.hasText(fallback)) {
+            return fallback;
+        }
+        String joined = String.join(System.lineSeparator(), lines).trim();
+        return joined.length() > 8000 ? joined.substring(0, 8000) : joined;
+    }
+
+    private String normalizeSectionTitle(String line) {
+        if (!StringUtils.hasText(line)) {
+            return "";
+        }
+        String value = line.trim()
+                .replaceAll("\\s+", "")
+                .replaceAll("^[一二三四五六七八九十]+[、.．,，]?+", "")
+                .replaceAll("^\\(?\\d+\\)?[、.．,，]?+", "")
+                .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
+                .replaceAll("[:：]+$", "");
+        return value.trim();
+    }
+
+    private boolean isCatalogLine(String line) {
+        return line.contains("......") || line.matches(".*\\.{3,}\\s*\\d+\\s*$");
+    }
+
+    private boolean looksLikeOnlyTitle(String line) {
+        String title = normalizeSectionTitle(line);
+        return title.length() <= 12 && !containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现");
+    }
+
+    private boolean looksLikeBusinessRequirement(String line) {
+        return containsAny(line, "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "按照", "需要", "实现", "规则", "数据", "字段");
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        if (!StringUtils.hasText(text)) {
+            return false;
+        }
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private String buildPrompt(String requirementDetail) {
@@ -202,19 +332,23 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "4. 只抽取软件系统需要实现的业务功能，不抽取页面美化、性能、安全、兼容性、部署、培训、流程说明等非功能内容。"
                 + System.lineSeparator()
+                + "4.1 规则优化、字段/明细优化、报表明细优化、接口协议优化，只要改变系统处理逻辑、数据字段、计算规则或输出结果，就应作为功能需求抽取；不要因为标题是规则优化或字段优化就输出空数组。"
+                + System.lineSeparator()
                 + "5. 需求描述里只有示例、说明、背景、目标、角色职责时，不要臆造功能。"
                 + System.lineSeparator()
                 + "6. module填写需求细则中最贴近该功能的一级业务模块名称；如果无法明确识别，使用最上层业务对象名称。"
                 + System.lineSeparator()
                 + "7. function使用5到20字左右的动宾短语，必须可直接作为Excel功能点拆分表中的“功能过程”。"
                 + System.lineSeparator()
-                + "8. description用一句话描述该功能的业务目的、主要处理对象和结果，避免空泛表述。"
+                + "8. description必须由大模型根据【需求细则】生成，描述该功能的业务目的、主要处理对象、关键处理逻辑和结果；后续Excel“功能描述”会在此基础上结合子过程描述生成，避免只复述功能名称。"
+                + System.lineSeparator()
+                + "9. sequenceDiagram可填写该功能过程的默认时序图参与者流向，格式必须是“参与者A->参与者B”，多个步骤用英文分号分隔；最终Excel会按COSMIC数据移动类型固化时序图列。"
                 + System.lineSeparator()
                 + "输出要求："
                 + System.lineSeparator()
-                + "输出必须是严格JSON数组，不要Markdown代码块，不要解释，不要额外字段。数组元素格式固定为："
+                + "输出必须是严格JSON数组，不要Markdown代码块，不要解释，不要输出格式之外的额外字段。数组元素格式固定为："
                 + System.lineSeparator()
-                + "{\"module\":\"模块名称\",\"function\":\"功能名称\",\"description\":\"功能描述\"}"
+                + "{\"module\":\"模块名称\",\"function\":\"功能名称\",\"description\":\"功能描述\",\"sequenceDiagram\":\"用户->系统;系统->用户\"}"
                 + System.lineSeparator()
                 + "输出前请自检："
                 + System.lineSeparator()
@@ -320,6 +454,157 @@ public class AiExtractionService {
         }
     }
 
+    private List<ExtractedFunction> fallbackFunctions(String requirementDetail) {
+        List<ExtractedFunction> functions = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        List<RequirementBlock> blocks = splitRequirementBlocks(requirementDetail);
+        for (int i = 0; i < blocks.size(); i++) {
+            RequirementBlock block = blocks.get(i);
+            String body = block.body.toString();
+            if (!StringUtils.hasText(body) || !looksLikeExtractableRequirement(block.title + body)) {
+                continue;
+            }
+            String function = fallbackFunctionName(block.title, body, i + 1);
+            if (!StringUtils.hasText(function) || !seen.add(function)) {
+                continue;
+            }
+            String module = fallbackModuleName(block.title, body);
+            String description = fallbackDescription(function, body);
+            functions.add(new ExtractedFunction(module, function, description, "用户->系统;系统->后台服务;后台服务->用户"));
+        }
+        return functions;
+    }
+
+    private List<RequirementBlock> splitRequirementBlocks(String text) {
+        List<RequirementBlock> blocks = new ArrayList<>();
+        if (!StringUtils.hasText(text)) {
+            return blocks;
+        }
+        RequirementBlock current = null;
+        String[] lines = text.split("\\r?\\n");
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!StringUtils.hasText(line)) {
+                continue;
+            }
+            RequirementHeading heading = parseRequirementHeading(line);
+            if (heading != null) {
+                if (current != null) {
+                    blocks.add(current);
+                }
+                current = new RequirementBlock(heading.title);
+                if (StringUtils.hasText(heading.inlineBody)) {
+                    current.append(heading.inlineBody);
+                }
+                continue;
+            }
+            if (current == null) {
+                current = new RequirementBlock(firstSentence(line));
+            }
+            current.append(line);
+        }
+        if (current != null) {
+            blocks.add(current);
+        }
+        return blocks;
+    }
+
+    private RequirementHeading parseRequirementHeading(String line) {
+        Matcher matcher = Pattern.compile("^[（(]?\\s*\\d+\\s*[）)]?[、.．]?\\s*(.{2,40}?)(?:[:：]\\s*(.*))?$").matcher(line);
+        if (!matcher.matches()) {
+            return null;
+        }
+        String title = cleanHeading(matcher.group(1));
+        String inlineBody = matcher.group(2) == null ? "" : matcher.group(2).trim();
+        if (!StringUtils.hasText(title) || title.length() > 30) {
+            return null;
+        }
+        if (!line.contains("：") && !line.contains(":") && looksLikeFullSentence(title)) {
+            return null;
+        }
+        return new RequirementHeading(title, inlineBody);
+    }
+
+    private String cleanHeading(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        return text.replaceAll("\\s+", "")
+                .replaceAll("[：:。；;,.，、]+$", "")
+                .trim();
+    }
+
+    private boolean looksLikeFullSentence(String text) {
+        return text.contains("，") || text.contains("。") || text.contains("；") || text.length() > 18;
+    }
+
+    private boolean looksLikeExtractableRequirement(String text) {
+        return containsAny(text,
+                "新增", "优化", "变更", "修改", "删除", "查询", "统计", "保存", "更新", "导入", "导出",
+                "规则", "字段", "明细", "接口", "协议", "报表", "剔重", "判断", "保留", "使用", "调整");
+    }
+
+    private String fallbackFunctionName(String title, String body, int index) {
+        String cleanedTitle = cleanHeading(title);
+        if (StringUtils.hasText(cleanedTitle) && cleanedTitle.length() >= 4 && cleanedTitle.length() <= 20) {
+            return cleanedTitle;
+        }
+        String source = title + body;
+        if (containsAny(source, "统计", "剔重", "规则")) {
+            return "优化统计规则";
+        }
+        if (containsAny(source, "明细", "字段")) {
+            return "优化明细字段";
+        }
+        if (containsAny(source, "接口", "协议")) {
+            return "优化接口协议";
+        }
+        if (containsAny(source, "报表")) {
+            return "优化报表明细";
+        }
+        return "处理需求规则" + index;
+    }
+
+    private String fallbackModuleName(String title, String body) {
+        String source = title + body;
+        if (containsAny(source, "明细", "字段")) {
+            return "明细字段";
+        }
+        if (containsAny(source, "接口", "协议")) {
+            return "接口协议";
+        }
+        if (containsAny(source, "报表")) {
+            return "报表";
+        }
+        if (containsAny(source, "统计", "剔重", "规则")) {
+            return "统计规则";
+        }
+        if (containsAny(source, "宽带", "家宽")) {
+            return "宽带业务";
+        }
+        return "需求规则";
+    }
+
+    private String fallbackDescription(String function, String body) {
+        String sentence = firstSentence(body);
+        if (!StringUtils.hasText(sentence)) {
+            return function;
+        }
+        return function + "，" + sentence;
+    }
+
+    private String firstSentence(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        String compact = text.replaceAll("\\s+", " ").trim();
+        Matcher matcher = Pattern.compile("^(.{1,120}?[。；;])").matcher(compact);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return compact.length() > 120 ? compact.substring(0, 120) : compact;
+    }
+
     private String stripJson(String aiResult) {
         if (aiResult == null) {
             return "";
@@ -368,6 +653,31 @@ public class AiExtractionService {
 
         public void setFunctions(List<ExtractedFunction> functions) {
             this.functions = functions;
+        }
+    }
+
+    private static class RequirementBlock {
+        private final String title;
+        private final StringBuilder body = new StringBuilder();
+
+        private RequirementBlock(String title) {
+            this.title = title == null ? "" : title;
+        }
+
+        private void append(String line) {
+            if (StringUtils.hasText(line)) {
+                body.append(line.trim()).append(System.lineSeparator());
+            }
+        }
+    }
+
+    private static class RequirementHeading {
+        private final String title;
+        private final String inlineBody;
+
+        private RequirementHeading(String title, String inlineBody) {
+            this.title = title;
+            this.inlineBody = inlineBody;
         }
     }
 }

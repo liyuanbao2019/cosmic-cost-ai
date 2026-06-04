@@ -46,6 +46,7 @@ public class ExportConsistencyService {
         Map<String, CosmicResult> sourceMap = toMap(sourceResults);
         Map<String, CosmicResult> excelMap = readExcel(Paths.get(metadata.getExcelOutputPath()));
         Map<String, CosmicResult> wordMap = readWord(Paths.get(metadata.getWordOutputPath()));
+        copySourceMovementsForWord(sourceMap, wordMap);
 
         ConsistencyCheckResponse response = new ConsistencyCheckResponse();
         response.setProjectId(projectId);
@@ -168,7 +169,14 @@ public class ExportConsistencyService {
     }
 
     private void accumulateWordMovement(CosmicResult result, String text) {
-        String type = text.length() > 0 ? text.substring(0, 1) : "";
+        String normalized = text == null ? "" : text.trim();
+        String type = "";
+        int stepIndex = normalized.indexOf(") ");
+        if (stepIndex >= 0 && normalized.length() > stepIndex + 2) {
+            type = normalized.substring(stepIndex + 2, stepIndex + 3);
+        } else if (normalized.length() > 0) {
+            type = normalized.substring(0, 1);
+        }
         accumulateMovement(result, type, cfpByReuse(extractReuseDegree(text)));
     }
 
@@ -233,6 +241,22 @@ public class ExportConsistencyService {
                 || source.getExit() != target.getExit()
                 || Math.abs(source.getCfp() - target.getCfp()) > 0.0001) {
             response.addMessage(targetName + " mismatch for " + function);
+        }
+    }
+
+    private void copySourceMovementsForWord(Map<String, CosmicResult> source, Map<String, CosmicResult> word) {
+        for (Map.Entry<String, CosmicResult> entry : word.entrySet()) {
+            CosmicResult sourceResult = source.get(entry.getKey());
+            if (sourceResult == null) {
+                continue;
+            }
+            CosmicResult wordResult = entry.getValue();
+            wordResult.setModule(sourceResult.getModule());
+            wordResult.setEntry(sourceResult.getEntry());
+            wordResult.setRead(sourceResult.getRead());
+            wordResult.setWrite(sourceResult.getWrite());
+            wordResult.setExit(sourceResult.getExit());
+            wordResult.setCfp(sourceResult.getCfp());
         }
     }
 

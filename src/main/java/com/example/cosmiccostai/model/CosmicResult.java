@@ -5,6 +5,7 @@ public class CosmicResult {
     private String module;
     private String function;
     private String description;
+    private String sequenceDiagram;
     private int entry;
     private int read;
     private int write;
@@ -33,6 +34,14 @@ public class CosmicResult {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getSequenceDiagram() {
+        return sequenceDiagram;
+    }
+
+    public void setSequenceDiagram(String sequenceDiagram) {
+        this.sequenceDiagram = sequenceDiagram;
     }
 
     public int getEntry() {

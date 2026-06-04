@@ -5,6 +5,7 @@ public class ExtractedFunction {
     private String module;
     private String function;
     private String description;
+    private String sequenceDiagram;
 
     public ExtractedFunction() {
     }
@@ -13,6 +14,13 @@ public class ExtractedFunction {
         this.module = module;
         this.function = function;
         this.description = description;
+    }
+
+    public ExtractedFunction(String module, String function, String description, String sequenceDiagram) {
+        this.module = module;
+        this.function = function;
+        this.description = description;
+        this.sequenceDiagram = sequenceDiagram;
     }
 
     public String getModule() {
@@ -37,5 +45,13 @@ public class ExtractedFunction {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public String getSequenceDiagram() {
+        return sequenceDiagram;
+    }
+
+    public void setSequenceDiagram(String sequenceDiagram) {
+        this.sequenceDiagram = sequenceDiagram;
     }
 }

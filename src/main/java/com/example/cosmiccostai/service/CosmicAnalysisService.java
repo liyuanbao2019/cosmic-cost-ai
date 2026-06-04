@@ -102,6 +102,7 @@ public class CosmicAnalysisService {
         result.setModule(function.getModule());
         result.setFunction(function.getFunction());
         result.setDescription(function.getDescription());
+        result.setSequenceDiagram(function.getSequenceDiagram());
         result.setEntry(entry);
         result.setRead(read);
         result.setWrite(write);

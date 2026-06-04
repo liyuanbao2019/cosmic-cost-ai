@@ -10,6 +10,9 @@ public class ParseResponse {
     private int textLength;
     private String status;
     private String preview;
+    private boolean requirementRecognized;
+    private String requirementWarning;
+    private String requirementSuggestion;
 
     public String getProjectId() {
         return projectId;
@@ -73,5 +76,29 @@ public class ParseResponse {
 
     public void setPreview(String preview) {
         this.preview = preview;
+    }
+
+    public boolean isRequirementRecognized() {
+        return requirementRecognized;
+    }
+
+    public void setRequirementRecognized(boolean requirementRecognized) {
+        this.requirementRecognized = requirementRecognized;
+    }
+
+    public String getRequirementWarning() {
+        return requirementWarning;
+    }
+
+    public void setRequirementWarning(String requirementWarning) {
+        this.requirementWarning = requirementWarning;
+    }
+
+    public String getRequirementSuggestion() {
+        return requirementSuggestion;
+    }
+
+    public void setRequirementSuggestion(String requirementSuggestion) {
+        this.requirementSuggestion = requirementSuggestion;
     }
 }

@@ -27,6 +27,7 @@
         <pdfbox.version>2.0.31</pdfbox.version>
         <commons-compress.version>1.26.2</commons-compress.version>
         <commons-io.version>2.16.1</commons-io.version>
+        <plantuml.version>1.2024.7</plantuml.version>
     </properties>
 
     <dependencies>
@@ -122,6 +123,11 @@
             <groupId>com.deepoove</groupId>
             <artifactId>poi-tl</artifactId>
             <version>${poi-tl.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.sourceforge.plantuml</groupId>
+            <artifactId>plantuml-mit</artifactId>
+            <version>${plantuml.version}</version>
         </dependency>
 
         <dependency>
