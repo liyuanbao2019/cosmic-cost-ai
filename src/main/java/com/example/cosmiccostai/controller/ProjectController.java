@@ -3,7 +3,6 @@ package com.example.cosmiccostai.controller;
 import com.example.cosmiccostai.common.ApiResponse;
 import com.example.cosmiccostai.dto.AiPromptRequest;
 import com.example.cosmiccostai.dto.AiPromptResponse;
-import com.example.cosmiccostai.dto.ConsistencyCheckResponse;
 import com.example.cosmiccostai.dto.CosmicAnalyzeResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
@@ -17,7 +16,6 @@ import com.example.cosmiccostai.service.CosmicAnalysisService;
 import com.example.cosmiccostai.service.DocumentParseService;
 import com.example.cosmiccostai.service.ExcelExportService;
 import com.example.cosmiccostai.service.ExportFileService;
-import com.example.cosmiccostai.service.ExportConsistencyService;
 import com.example.cosmiccostai.service.ReviewService;
 import com.example.cosmiccostai.service.WordExportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -49,7 +47,6 @@ public class ProjectController {
     private final ReviewService reviewService;
     private final ExcelExportService excelExportService;
     private final WordExportService wordExportService;
-    private final ExportConsistencyService exportConsistencyService;
     private final ExportFileService exportFileService;
 
     public ProjectController(DocumentParseService documentParseService,
@@ -58,7 +55,6 @@ public class ProjectController {
                              ReviewService reviewService,
                              ExcelExportService excelExportService,
                              WordExportService wordExportService,
-                             ExportConsistencyService exportConsistencyService,
                              ExportFileService exportFileService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
@@ -66,7 +62,6 @@ public class ProjectController {
         this.reviewService = reviewService;
         this.excelExportService = excelExportService;
         this.wordExportService = wordExportService;
-        this.exportConsistencyService = exportConsistencyService;
         this.exportFileService = exportFileService;
     }
 
@@ -124,12 +119,6 @@ public class ProjectController {
         return ApiResponse.ok(wordExportService.export(projectId));
     }
 
-    @Operation(summary = "Check export consistency", description = "Check whether Excel and Word are consistent with reviewed COSMIC results.")
-    @GetMapping("/{projectId}/exports/consistency")
-    public ApiResponse<ConsistencyCheckResponse> checkConsistency(@PathVariable String projectId) {
-        return ApiResponse.ok(exportConsistencyService.check(projectId));
-    }
-
     @Operation(summary = "Get export file info", description = "Return export file path, download URL, and local open capability.")
     @GetMapping("/{projectId}/exports/{fileType}/info")
     public ApiResponse<ExportFileActionResponse> exportFileInfo(@PathVariable String projectId,
@@ -164,6 +153,9 @@ public class ProjectController {
         }
         if ("word".equalsIgnoreCase(fileType)) {
             return "download.docx";
+        }
+        if ("business".equalsIgnoreCase(fileType)) {
+            return "download.xlsx";
         }
         return "download";
     }

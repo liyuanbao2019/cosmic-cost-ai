@@ -71,6 +71,8 @@ public class ExportFileService {
         String path;
         if ("excel".equalsIgnoreCase(fileType)) {
             path = metadata.getExcelOutputPath();
+        } else if ("business".equalsIgnoreCase(fileType)) {
+            path = metadata.getBusinessRequirementOutputPath();
         } else if ("word".equalsIgnoreCase(fileType)) {
             path = metadata.getWordOutputPath();
         } else {

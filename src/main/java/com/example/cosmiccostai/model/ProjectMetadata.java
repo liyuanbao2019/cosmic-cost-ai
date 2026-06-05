@@ -12,6 +12,7 @@ public class ProjectMetadata {
     private String cosmicResultsPath;
     private String functionSplitRowsPath;
     private String excelOutputPath;
+    private String businessRequirementOutputPath;
     private String wordOutputPath;
     private long fileSize;
     private String fileType;
@@ -97,6 +98,14 @@ public class ProjectMetadata {
 
     public void setExcelOutputPath(String excelOutputPath) {
         this.excelOutputPath = excelOutputPath;
+    }
+
+    public String getBusinessRequirementOutputPath() {
+        return businessRequirementOutputPath;
+    }
+
+    public void setBusinessRequirementOutputPath(String businessRequirementOutputPath) {
+        this.businessRequirementOutputPath = businessRequirementOutputPath;
     }
 
     public String getWordOutputPath() {

@@ -38,6 +38,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -67,10 +68,13 @@ public class ExcelExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> splitRows = readOrCreateSplitRows(metadata, results);
-        Path templatePath = resolveTemplatePath();
+        Path templatePath = resolveTemplatePath(zh("\u9644\u4ef63"));
+        Path businessTemplatePath = resolveTemplatePath(zh("\u9644\u4ef62"));
         Path projectOutputDir = outputBaseDir.resolve(projectId);
         Path outputPath = projectOutputDir.resolve(buildExcelOutputFileName(metadata));
+        Path businessOutputPath = projectOutputDir.resolve(buildBusinessRequirementOutputFileName(metadata));
         Path actualOutputPath = outputPath;
+        Path actualBusinessOutputPath = businessOutputPath;
 
         int movementRows;
         double totalCfp = 0;
@@ -91,11 +95,20 @@ public class ExcelExportService {
                     workbook.write(outputStream);
                 }
             }
+            try (InputStream inputStream = Files.newInputStream(businessTemplatePath);
+                 Workbook workbook = new XSSFWorkbook(inputStream)) {
+                fillBusinessRequirementSheet(workbook, metadata, splitRows);
+                actualBusinessOutputPath = writableOutputPath(businessOutputPath);
+                try (OutputStream outputStream = Files.newOutputStream(actualBusinessOutputPath)) {
+                    workbook.write(outputStream);
+                }
+            }
         } catch (IOException ex) {
             throw new BusinessException("Export Excel failed: " + ex.getClass().getSimpleName() + " " + ex.getMessage(), ex);
         }
 
         metadata.setExcelOutputPath(actualOutputPath.toString());
+        metadata.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
         metadata.setStatus("EXCEL_EXPORTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
@@ -103,6 +116,7 @@ public class ExcelExportService {
         ExcelExportResponse response = new ExcelExportResponse();
         response.setProjectId(projectId);
         response.setExcelOutputPath(actualOutputPath.toString());
+        response.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
         response.setFunctionCount(results.size());
         response.setMovementRowCount(movementRows);
         response.setTotalCfp(totalCfp);
@@ -122,6 +136,11 @@ public class ExcelExportService {
     private String buildExcelOutputFileName(ProjectMetadata metadata) {
         String sourceName = sourceBaseName(metadata);
         return zh("\u9644\u4ef63-") + sourceName + zh("\u7684\u9700\u6c42\u529f\u80fd\u70b9\u62c6\u5206\u8868V1.0.xlsx");
+    }
+
+    private String buildBusinessRequirementOutputFileName(ProjectMetadata metadata) {
+        String sourceName = sourceBaseName(metadata);
+        return zh("\u9644\u4ef62-") + sourceName + zh("\u7684\u4e1a\u52a1\u9700\u6c42\u4fe1\u606f\u6c47\u603b\u8868V1.0.xlsx");
     }
 
     private Path writableOutputPath(Path preferredPath) throws IOException {
@@ -193,33 +212,33 @@ public class ExcelExportService {
         return rows;
     }
 
-    private Path resolveTemplatePath() {
+    private Path resolveTemplatePath(String templatePrefix) {
         if (StringUtils.hasText(configuredTemplatePath)) {
             Path path = Paths.get(configuredTemplatePath);
-            if (Files.exists(path)) {
+            if (Files.exists(path) && path.getFileName().toString().startsWith(templatePrefix)) {
                 return path;
             }
         }
 
-        Path template = findTemplateInDirectory(Paths.get("templates"));
+        Path template = findTemplateInDirectory(Paths.get("templates"), templatePrefix);
         if (template != null) {
             return template;
         }
-        template = findTemplateInDirectory(Paths.get(".."));
+        template = findTemplateInDirectory(Paths.get(".."), templatePrefix);
         if (template != null) {
             return template;
         }
-        throw new BusinessException("Excel template not found");
+        throw new BusinessException("Excel template not found: " + templatePrefix);
     }
 
-    private Path findTemplateInDirectory(Path directory) {
+    private Path findTemplateInDirectory(Path directory, String templatePrefix) {
         if (!Files.isDirectory(directory)) {
             return null;
         }
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.xlsx")) {
             for (Path path : stream) {
                 String name = path.getFileName().toString();
-                if (name.startsWith(zh("\u9644\u4ef63")) && !name.startsWith("~$")) {
+                if (name.startsWith(templatePrefix) && !name.startsWith("~$")) {
                     return path;
                 }
             }
@@ -279,6 +298,105 @@ public class ExcelExportService {
         sheet.setColumnWidth(14, 28 * 256);
     }
 
+    private void fillBusinessRequirementSheet(Workbook workbook, ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+        Sheet sheet = workbook.getSheet(zh("\u529f\u80fd\u9700\u6c42\u5217\u8868"));
+        if (sheet == null) {
+            sheet = workbook.getSheetAt(0);
+        }
+        clearBusinessRequirementData(sheet);
+
+        Map<Short, CellStyle> styleCache = new HashMap<Short, CellStyle>();
+        List<BusinessRequirementGroup> groups = groupBusinessRequirements(metadata, rows);
+        int firstDataRow = 10;
+        double totalCfp = 0;
+        for (int i = 0; i < groups.size(); i++) {
+            BusinessRequirementGroup group = groups.get(i);
+            int rowIndex = firstDataRow + i;
+            Row row = getOrCreateRow(sheet, rowIndex);
+            copyRowStyle(sheet, 10, rowIndex, styleCache);
+            totalCfp += group.cfp;
+
+            setCell(row, 0, String.format("%03d", i + 1));
+            setCell(row, 1, projectName(metadata));
+            setCell(row, 2, "");
+            setCell(row, 3, group.level1);
+            setCell(row, 4, group.level2);
+            setCell(row, 5, group.level3);
+            setCell(row, 6, group.changeType);
+            setNumericCell(row, 7, group.cfp);
+            setNumericCell(row, 8, group.cfp);
+        }
+
+        Row summaryRow = getOrCreateRow(sheet, 3);
+        setNumericCell(summaryRow, 0, 1);
+        setCell(summaryRow, 1, projectName(metadata));
+        setCell(summaryRow, 2, "");
+        setNumericCell(summaryRow, 3, groups.size());
+        setNumericCell(summaryRow, 4, totalCfp);
+
+        Row totalRow = getOrCreateRow(sheet, 5);
+        setNumericCell(totalRow, 3, groups.size());
+        setNumericCell(totalRow, 4, totalCfp);
+
+        int lastDataRow = firstDataRow + groups.size() - 1;
+        applyDataBorders(sheet, firstDataRow, lastDataRow, 0, 8);
+    }
+
+    private List<BusinessRequirementGroup> groupBusinessRequirements(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+        Map<String, BusinessRequirementGroup> groupMap = new LinkedHashMap<String, BusinessRequirementGroup>();
+        for (FunctionSplitRow row : rows) {
+            String level1 = safeText(row.getLevel1Module());
+            String level2 = safeText(row.getLevel2Module());
+            String level3 = safeText(row.getLevel3Module());
+            String key = level1 + "\u001f" + level2 + "\u001f" + level3;
+            BusinessRequirementGroup group = groupMap.get(key);
+            if (group == null) {
+                group = new BusinessRequirementGroup();
+                group.level1 = level1;
+                group.level2 = level2;
+                group.level3 = level3;
+                group.changeType = businessChangeType(row.getReuseDegree());
+                groupMap.put(key, group);
+            }
+            if (zh("\u65b0\u589e").equals(row.getReuseDegree())) {
+                group.changeType = zh("\u65b0\u589e");
+            }
+            group.cfp += row.getCfp();
+        }
+        return new ArrayList<BusinessRequirementGroup>(groupMap.values());
+    }
+
+    private String projectName(ProjectMetadata metadata) {
+        if (StringUtils.hasText(metadata.getName())) {
+            return metadata.getName();
+        }
+        return sourceBaseName(metadata);
+    }
+
+    private String safeText(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String businessChangeType(String reuseDegree) {
+        return zh("\u65b0\u589e").equals(reuseDegree) ? zh("\u65b0\u589e") : zh("\u4f18\u5316");
+    }
+
+    private void clearBusinessRequirementData(Sheet sheet) {
+        int lastRowToClear = Math.min(Math.max(sheet.getLastRowNum(), 120), TEMPLATE_CLEAR_ROW_LIMIT);
+        for (int r = 3; r <= lastRowToClear; r++) {
+            Row row = sheet.getRow(r);
+            if (row == null) {
+                continue;
+            }
+            for (int c = 0; c <= 8; c++) {
+                Cell cell = row.getCell(c);
+                if (cell != null && (r >= 10 || (r == 3 && c <= 4) || (r == 5 && (c == 3 || c == 4)))) {
+                    cell.setBlank();
+                }
+            }
+        }
+    }
+
     private void applyDataBorders(Sheet sheet, int firstRow, int lastRow, int firstCol, int lastCol) {
         if (lastRow < firstRow) {
             return;
@@ -318,6 +436,9 @@ public class ExcelExportService {
         mergeSameContentColumn(sheet, rows, firstRow, lastRow, 1, 0);
         mergeSameContentColumn(sheet, rows, firstRow, lastRow, 2, 1);
         mergeSameContentColumn(sheet, rows, firstRow, lastRow, 3, 2);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 4, 3);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 5, 4);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 6, 5);
     }
 
     private void mergeSameContentColumn(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow, int colIndex, int parentColIndex) {
@@ -387,6 +508,12 @@ public class ExcelExportService {
             value = row.getLevel2Module();
         } else if (colIndex == 3) {
             value = row.getLevel3Module();
+        } else if (colIndex == 4) {
+            value = row.getFunctionalUser();
+        } else if (colIndex == 5) {
+            value = row.getTriggerEvent();
+        } else if (colIndex == 6) {
+            value = row.getFunctionProcess();
         } else {
             value = "";
         }
@@ -510,6 +637,14 @@ public class ExcelExportService {
             cell = row.createCell(col);
         }
         cell.setCellValue(value == null ? "" : value);
+    }
+
+    private void setNumericCell(Row row, int col, double value) {
+        Cell cell = row.getCell(col);
+        if (cell == null) {
+            cell = row.createCell(col);
+        }
+        cell.setCellValue(value);
     }
 
     private void setFormula(Row row, int col, String formula) {
@@ -695,4 +830,11 @@ public class ExcelExportService {
         return value;
     }
 
+    private static class BusinessRequirementGroup {
+        private String level1;
+        private String level2;
+        private String level3;
+        private String changeType;
+        private double cfp;
+    }
 }

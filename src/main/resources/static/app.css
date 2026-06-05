@@ -334,6 +334,10 @@ main {
   flex: 1;
 }
 
+.project-select-field {
+  flex: 0 0 280px;
+}
+
 .upload-field label span {
   display: block;
   margin-bottom: 5px;
@@ -415,6 +419,13 @@ textarea {
   padding-right: 4px;
 }
 
+.primary-tools,
+.review-view-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .batch-tools {
   display: inline-flex;
   align-items: center;
@@ -423,6 +434,34 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--soft);
+}
+
+.review-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 210px) 120px 130px auto auto;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.review-filter-bar input,
+.review-filter-bar select {
+  height: 36px;
+  font-size: 12px;
+}
+
+.filter-count {
+  color: var(--secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.filter-count b {
+  color: var(--primary);
 }
 
 .batch-tools select,
@@ -593,11 +632,12 @@ button.mini {
 
 .table-wrap {
   width: 100%;
-  max-height: 500px;
+  max-height: min(640px, calc(100vh - 300px));
   overflow: auto;
   border: 1.5px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
+  position: relative;
 }
 
 .w-select {
@@ -654,7 +694,7 @@ button.mini {
 }
 
 table {
-  width: 100%;
+  width: max-content;
   min-width: 100%;
   border-collapse: collapse;
   table-layout: auto;
@@ -664,10 +704,10 @@ th,
 td {
   border-right: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
-  padding: 8px 10px;
+  padding: 7px 10px;
   vertical-align: top;
   white-space: nowrap;
-  max-width: 300px;
+  max-width: 280px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -682,7 +722,7 @@ td select {
 th {
   position: sticky;
   top: 0;
-  z-index: 3;
+  z-index: 6;
   background: linear-gradient(135deg, var(--soft) 0%, #f1f5f9 100%);
   color: var(--secondary);
   text-align: left;
@@ -696,8 +736,16 @@ td {
   background: var(--panel);
 }
 
+tbody tr:hover td {
+  background: #ecfeff;
+}
+
 tbody tr:nth-child(even) td {
   background: var(--soft);
+}
+
+tbody tr:nth-child(even):hover td {
+  background: #ecfeff;
 }
 
 td textarea,
@@ -714,6 +762,93 @@ td select {
 td textarea {
   overflow: visible;
   min-height: 36px;
+}
+
+.field-level1Module,
+.field-level2Module,
+.field-level3Module,
+.field-functionProcess {
+  min-width: 136px;
+}
+
+.field-functionDescription,
+.field-subProcessDescription,
+.field-dataAttributes {
+  min-width: 230px;
+}
+
+.cell-preview {
+  display: -webkit-box;
+  min-height: 38px;
+  max-height: 58px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.edit-cell-btn {
+  margin-top: 6px;
+  height: 26px;
+  padding: 0 10px;
+}
+
+.compact-review .table-wrap {
+  max-height: min(700px, calc(100vh - 260px));
+}
+
+.compact-review th,
+.compact-review td {
+  padding: 5px 8px;
+}
+
+.compact-review td textarea,
+.compact-review td select {
+  min-height: 30px;
+  padding: 4px 7px;
+}
+
+.compact-review .cell-preview {
+  min-height: 28px;
+  max-height: 40px;
+  -webkit-line-clamp: 2;
+}
+
+.compact-review .edit-cell-btn {
+  height: 24px;
+  margin-top: 4px;
+}
+
+#reviewTable th:nth-child(1),
+#reviewTable td:nth-child(1) {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+}
+
+#reviewTable th:nth-child(2),
+#reviewTable td:nth-child(2) {
+  position: sticky;
+  left: 42px;
+  z-index: 4;
+}
+
+#reviewTable th:nth-child(5),
+#reviewTable td:nth-child(5) {
+  position: sticky;
+  left: 172px;
+  z-index: 4;
+  box-shadow: 8px 0 12px rgba(15, 23, 42, 0.06);
+}
+
+#reviewTable th:nth-child(1),
+#reviewTable th:nth-child(2),
+#reviewTable th:nth-child(5) {
+  z-index: 8;
 }
 
 .cfp-cell {
@@ -833,8 +968,13 @@ td textarea {
 }
 
 .export-dialog {
-  max-width: 560px;
+  width: min(680px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(760px, calc(100vh - 32px));
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .ai-prompt-dialog {
@@ -902,15 +1042,59 @@ td textarea {
   font: 12px/1.7 Consolas, "Courier New", monospace;
 }
 
+.cell-editor-dialog {
+  width: min(780px, calc(100vw - 48px));
+  max-width: none;
+  max-height: min(680px, calc(100vh - 48px));
+  padding: 0;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.cell-editor-dialog .dialog-actions {
+  padding: 12px 18px 18px;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.cell-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.cell-editor-header .dialog-title {
+  margin: 0;
+}
+
+.cell-editor-text {
+  flex: 1;
+  width: calc(100% - 36px);
+  min-height: 320px;
+  margin: 16px 18px 0;
+  resize: vertical;
+  overflow: auto;
+  line-height: 1.7;
+  box-sizing: border-box;
+}
+
 .export-dialog .dialog-title {
   text-align: center;
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .export-progress-list {
   display: grid;
   gap: 10px;
   margin-bottom: 18px;
+  flex-shrink: 0;
 }
 
 .export-progress-row {
@@ -967,6 +1151,9 @@ td textarea {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   margin-top: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .material-summary b {
@@ -993,6 +1180,11 @@ td textarea {
   background: #ffffff;
 }
 
+.material-file > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+
 .material-file span {
   display: block;
   font-weight: 600;
@@ -1002,8 +1194,9 @@ td textarea {
 
 .material-file code {
   display: block;
-  max-width: 330px;
+  max-width: 100%;
   word-break: break-all;
+  overflow-wrap: anywhere;
   color: var(--text-light);
   font-size: 11px;
 }
@@ -1025,6 +1218,7 @@ td textarea {
   display: flex;
   justify-content: center;
   margin-top: 18px;
+  flex-shrink: 0;
 }
 
 .ghost-btn {
@@ -1103,6 +1297,11 @@ td textarea {
     gap: 12px;
   }
 
+  .project-select-field {
+    flex: none;
+    width: 100%;
+  }
+
   main {
     width: 100%;
     max-width: 100vw;
@@ -1165,5 +1364,56 @@ td textarea {
     flex-direction: column;
     align-items: flex-start;
     gap: 8px;
+  }
+
+  .sticky-actions,
+  .primary-tools,
+  .review-view-tools,
+  .batch-tools {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .primary-tools,
+  .review-view-tools {
+    flex-wrap: wrap;
+  }
+
+  .review-filter-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .filter-count {
+    white-space: normal;
+  }
+
+  .dialog-overlay {
+    padding: 12px;
+  }
+
+  .export-dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 20px 18px;
+  }
+
+  .export-progress-row,
+  .material-file {
+    align-items: flex-start;
+  }
+
+  .material-file {
+    flex-direction: column;
+  }
+
+  .material-file-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .material-file-actions button,
+  .material-file-actions .button-link {
+    flex: 1;
+    min-width: 96px;
   }
 }

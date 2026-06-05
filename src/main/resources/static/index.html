@@ -1,1207 +1,1466 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
   <link rel="stylesheet" href="/app.css?v=20260601-3">
 </head>
+
 <body>
-<header class="topbar">
-  <h1>COSMIC 软件造价 AI 工作台</h1>
-</header>
+  <header class="topbar">
+    <h1>COSMIC 软件造价 AI 工作台</h1>
+  </header>
 
-<div id="dialog-overlay" class="dialog-overlay hidden">
-  <div class="dialog">
-    <div class="dialog-icon">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="12"/>
-        <line x1="12" y1="16" x2="12.01" y2="16"/>
-      </svg>
-    </div>
-    <h3 id="dialog-title" class="dialog-title">欢迎使用 COSMIC 软件造价 AI 工作台</h3>
-    <p id="dialog-message" class="dialog-message">请先上传需求文档（docx 或 pdf），然后点击「开始拆分」</p>
-    <button class="dialog-btn" onclick="closeDialog()">知道了</button>
-  </div>
-</div>
-
-<div id="export-dialog-overlay" class="dialog-overlay hidden">
-  <div class="dialog export-dialog">
-    <h3 class="dialog-title">导出送审材料</h3>
-    <div class="export-progress-list">
-      <div class="export-progress-row" id="export-step-excel">
-        <span>1、导出 Excel</span>
-        <b>等待中</b>
+  <div id="dialog-overlay" class="dialog-overlay hidden">
+    <div class="dialog">
+      <div class="dialog-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
       </div>
-      <div class="export-progress-row" id="export-step-word">
-        <span>2、导出 Word</span>
-        <b>等待中</b>
-      </div>
-      <div class="export-progress-row" id="export-step-check">
-        <span>3、一致性检查</span>
-        <b>等待中</b>
-      </div>
-    </div>
-    <div id="export-material-result" class="export-material-result hidden"></div>
-    <div class="dialog-actions">
-      <button id="export-dialog-close" class="dialog-btn ghost-btn" onclick="closeExportDialog()">关闭</button>
+      <h3 id="dialog-title" class="dialog-title">欢迎使用 COSMIC 软件造价 AI 工作台</h3>
+      <p id="dialog-message" class="dialog-message">请先上传需求文档（docx 或 pdf），然后点击「开始拆分」</p>
+      <button class="dialog-btn" onclick="closeDialog()">知道了</button>
     </div>
   </div>
-</div>
 
-<div id="ai-prompt-dialog-overlay" class="dialog-overlay hidden" onclick="closeAiPromptDialogOnOverlay(event)">
-  <div class="dialog ai-prompt-dialog">
-    <div class="ai-prompt-header">
-      <h3 class="dialog-title">AI 拆分调用提示词</h3>
-      <div class="dialog-header-actions" style="display: flex; gap: 8px; flex-shrink: 0;">
-        <button id="resendAiPromptBtn" type="button" class="secondary" onclick="resendAiPrompt()">重新发送 AI 拆分</button>
-        <button type="button" onclick="copyAiPrompt(this)">复制提示词</button>
-        <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
+  <div id="export-dialog-overlay" class="dialog-overlay hidden">
+    <div class="dialog export-dialog">
+      <h3 class="dialog-title">导出送审材料</h3>
+      <div class="export-progress-list">
+        <div class="export-progress-row" id="export-step-excel">
+          <span>1、导出功能点拆分表</span>
+          <b>等待中</b>
+        </div>
+        <div class="export-progress-row" id="export-step-business">
+          <span>2、导出业务需求汇总表</span>
+          <b>等待中</b>
+        </div>
+        <div class="export-progress-row" id="export-step-word">
+          <span>3、导出需求说明书</span>
+          <b>等待中</b>
+        </div>
+      </div>
+      <div id="export-material-result" class="export-material-result hidden"></div>
+      <div class="dialog-actions">
+        <button id="export-dialog-close" class="dialog-btn ghost-btn" onclick="closeExportDialog()">关闭</button>
       </div>
     </div>
-    <div class="ai-prompt-meta">模型名称：<b id="aiPromptModel">-</b></div>
-    <textarea id="aiPromptText" class="ai-prompt-text" spellcheck="false"></textarea>
   </div>
-</div>
 
-<main>
-  <section class="panel">
-    <div class="panel-header">
-      <div class="panel-title-row">
-        <h2>上传需求文档</h2>
-        <span id="projectBadge" class="badge muted">未上传</span>
+  <div id="ai-prompt-dialog-overlay" class="dialog-overlay hidden" onclick="closeAiPromptDialogOnOverlay(event)">
+    <div class="dialog ai-prompt-dialog">
+      <div class="ai-prompt-header">
+        <h3 class="dialog-title">AI 拆分调用提示词</h3>
+        <div class="dialog-header-actions" style="display: flex; gap: 8px; flex-shrink: 0;">
+          <button id="resendAiPromptBtn" type="button" class="secondary" onclick="resendAiPrompt()">重新发送 AI 拆分</button>
+          <button type="button" onclick="copyAiPrompt(this)">复制提示词</button>
+          <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
+        </div>
+      </div>
+      <div class="ai-prompt-meta">模型名称：<b id="aiPromptModel">-</b></div>
+      <textarea id="aiPromptText" class="ai-prompt-text" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div id="cell-editor-overlay" class="dialog-overlay hidden" onclick="closeCellEditorOnOverlay(event)">
+    <div class="dialog cell-editor-dialog">
+      <div class="cell-editor-header">
+        <h3 id="cell-editor-title" class="dialog-title">编辑内容</h3>
+        <button type="button" class="ghost" onclick="closeCellEditor()">关闭</button>
+      </div>
+      <textarea id="cell-editor-text" class="cell-editor-text" spellcheck="false"></textarea>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" onclick="closeCellEditor()">取消</button>
+        <button type="button" onclick="saveCellEditor()">保存</button>
       </div>
     </div>
+  </div>
 
-    <input id="projectName" type="hidden">
-    <div class="upload-row">
-      <div class="upload-field">
-        <label for="fileInput">
-          <span>需求文档 <em>（请上传需求文档（docx 或 pdf））</em></span>
-        </label>
-        <input id="fileInput" type="file" accept=".docx,.pdf">
+  <main>
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <h2>上传需求文档</h2>
+          <span id="projectBadge" class="badge muted">未上传</span>
+        </div>
       </div>
-      <div class="actions">
-        <button id="runBtn" type="button" onclick="runAll()">开始拆分</button>
-        <button type="button" class="secondary" onclick="startNewTask()">新建任务</button>
-        <button type="button" class="ghost" onclick="resetPage()">重置</button>
+
+      <div class="upload-row">
+        <div class="upload-field project-select-field">
+          <label for="projectName">
+            <span>项目名称 <em>（必须和备案项目名称一致）</em></span>
+          </label>
+          <select id="projectName">
+            <option value="">-- 请选择 --</option>
+            <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
+            <option value="26年运维管理">26年运维管理</option>
+            <option value="26年共享采集">26年共享采集</option>
+            <option value="26年家客运维">26年家客运维</option>
+          </select>
+        </div>
+        <div class="upload-field">
+          <label for="fileInput">
+            <span>需求文档 <em>（请上传需求文档（docx 或 pdf））</em></span>
+          </label>
+          <input id="fileInput" type="file" accept=".docx,.pdf">
+        </div>
+        <div class="actions">
+          <button id="runBtn" type="button" onclick="runAll()">开始拆分</button>
+          <button type="button" class="secondary" onclick="startNewTask()">新建任务</button>
+          <button type="button" class="ghost" onclick="resetPage()">重置</button>
+        </div>
       </div>
-    </div>
 
-    <!-- <div id="message" class="message"></div> -->
-  </section>
+      <!-- <div id="message" class="message"></div> -->
+    </section>
 
-  <section class="panel">
-    <div class="panel-header">
-      <h2>处理流程</h2>
-    </div>
-
-    <div class="flow-wrapper">
-      <div class="flow-track">
-        <div class="flow-progress"></div>
+    <section class="panel">
+      <div class="panel-header">
+        <h2>处理流程</h2>
       </div>
-      <div class="flow-steps">
-        <div class="flow-step-wrap">
-          <div id="step-upload" class="flow-step active" onclick="handleStepClick('upload')">
-            <div class="step-circle">
-              <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
-              <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
+
+      <div class="flow-wrapper">
+        <div class="flow-track">
+          <div class="flow-progress"></div>
+        </div>
+        <div class="flow-steps">
+          <div class="flow-step-wrap">
+            <div id="step-upload" class="flow-step active" onclick="handleStepClick('upload')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
             </div>
+            <span class="step-label">上传</span>
           </div>
-          <span class="step-label">上传</span>
-        </div>
-        <div class="flow-step-wrap">
-          <div id="step-parse" class="flow-step" onclick="handleStepClick('parse')">
-            <div class="step-circle">
-              <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                <polyline points="14 2 14 8 20 8"/>
-                <line x1="16" y1="13" x2="8" y2="13"/>
-                <line x1="16" y1="17" x2="8" y2="17"/>
-              </svg>
-              <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
+          <div class="flow-step-wrap">
+            <div id="step-parse" class="flow-step" onclick="handleStepClick('parse')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                  <line x1="16" y1="13" x2="8" y2="13" />
+                  <line x1="16" y1="17" x2="8" y2="17" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
             </div>
+            <span class="step-label">解析</span>
           </div>
-          <span class="step-label">解析</span>
-        </div>
-        <div class="flow-step-wrap">
-          <div id="step-ai" class="flow-step" onclick="handleStepClick('ai')">
-            <div class="step-circle">
-              <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 2a4 4 0 0 1 4 4c0 1.1-.4 2.1-1.1 2.9l.7.7a4 4 0 0 1-1.3 6.4 4 4 0 0 1-6.6-1.3l-.7.7A4 4 0 1 1 12 2z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-              <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
+          <div class="flow-step-wrap">
+            <div id="step-ai" class="flow-step" onclick="handleStepClick('ai')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path
+                    d="M12 2a4 4 0 0 1 4 4c0 1.1-.4 2.1-1.1 2.9l.7.7a4 4 0 0 1-1.3 6.4 4 4 0 0 1-6.6-1.3l-.7.7A4 4 0 1 1 12 2z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
             </div>
+            <span class="step-label">AI 拆分</span>
           </div>
-          <span class="step-label">AI 拆分</span>
-        </div>
-        <div class="flow-step-wrap">
-          <div id="step-cosmic" class="flow-step" onclick="handleStepClick('cosmic')">
-            <div class="step-circle">
-              <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <line x1="3" y1="9" x2="21" y2="9"/>
-                <line x1="9" y1="21" x2="9" y2="9"/>
-              </svg>
-              <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
+          <div class="flow-step-wrap">
+            <div id="step-cosmic" class="flow-step" onclick="handleStepClick('cosmic')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                  <line x1="3" y1="9" x2="21" y2="9" />
+                  <line x1="9" y1="21" x2="9" y2="9" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
             </div>
+            <span class="step-label">COSMIC</span>
           </div>
-          <span class="step-label">COSMIC</span>
-        </div>
-        <div class="flow-step-wrap">
-          <div id="step-review" class="flow-step" onclick="handleStepClick('review')">
-            <div class="step-circle">
-              <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-                <polyline points="22 4 12 14.01 9 11.01"/>
-              </svg>
-              <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
+          <div class="flow-step-wrap">
+            <div id="step-review" class="flow-step" onclick="handleStepClick('review')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
             </div>
+            <span class="step-label">审核导出</span>
           </div>
-          <span class="step-label">审核导出</span>
         </div>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section id="parsePanel" class="panel hidden">
-    <div class="panel-header">
-      <div class="panel-title-row">
-        <h2>解析预览</h2>
-        <button type="button" class="ghost" onclick="toggleParsePreview()">收起</button>
-      </div>
-    </div>
-    <pre id="preview" class="preview"></pre>
-  </section>
-
-  <section id="reviewPanel" class="panel hidden">
-    <div class="panel-header">
-      <div class="panel-title-row">
-        <h2>功能点拆分表</h2>
-        <div class="stats">
-          <span>状态：<b id="statusText">-</b></span>
-          <span>功能过程：<b id="functionCount">0</b></span>
-          <span>总 CFP：<b id="totalCfp">0</b></span>
+    <section id="parsePanel" class="panel hidden">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <h2>解析预览</h2>
+          <button type="button" class="ghost" onclick="toggleParsePreview()">收起</button>
         </div>
       </div>
-    </div>
+      <pre id="preview" class="preview"></pre>
+    </section>
 
-    <div class="actions sticky-actions">
-      <button type="button" class="secondary" onclick="saveReview()">保存</button>
-      <button type="button" onclick="addReviewRow()">新增一行</button>
-      <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
-      <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
-      <div class="batch-tools">
-        <select id="batchField" onchange="onBatchFieldChange()">
-          <option value="level1Module">一级模块</option>
-          <option value="level2Module">二级模块</option>
-          <option value="level3Module">三级模块</option>
-          <option value="functionProcess">功能过程</option>
-          <option value="functionDescription">功能描述</option>
-          <option value="subProcessDescription">子过程描述</option>
-          <option value="sequenceDiagram">时序图</option>
-          <option value="movementType">类型</option>
-          <option value="dataGroup">数据组</option>
-          <option value="dataAttributes">数据属性</option>
-          <option value="reuseDegree">复用度</option>
+    <section id="reviewPanel" class="panel hidden">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <h2>功能点拆分表</h2>
+          <div class="stats">
+            <span>状态：<b id="statusText">-</b></span>
+            <span>功能过程：<b id="functionCount">0</b></span>
+            <span>总 CFP：<b id="totalCfp">0</b></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions sticky-actions">
+        <div class="primary-tools">
+          <button type="button" class="secondary" onclick="saveReview()">保存</button>
+          <button type="button" onclick="addReviewRow()">新增一行</button>
+          <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
+          <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
+        </div>
+        <div class="batch-tools">
+          <select id="batchField" onchange="onBatchFieldChange()">
+            <option value="level1Module">一级模块</option>
+            <option value="level2Module">二级模块</option>
+            <option value="level3Module">三级模块</option>
+            <option value="functionProcess">功能过程</option>
+            <option value="functionDescription">功能描述</option>
+            <option value="subProcessDescription">子过程描述</option>
+            <option value="sequenceDiagram">时序图</option>
+            <option value="movementType">类型</option>
+            <option value="dataGroup">数据组</option>
+            <option value="dataAttributes">数据属性</option>
+            <option value="reuseDegree">复用度</option>
+          </select>
+          <input id="batchValue" type="text" placeholder="批量修改为">
+          <select id="batchSelectValue" class="hidden"></select>
+          <button type="button" class="ghost" onclick="applyBatchChange()">应用到选中</button>
+        </div>
+        <div class="review-view-tools">
+          <button id="densityBtn" type="button" class="ghost" onclick="toggleReviewDensity()">紧凑视图</button>
+          <button type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
+        </div>
+      </div>
+
+      <div class="review-filter-bar">
+        <input id="reviewSearch" type="search" placeholder="搜索模块、功能过程、描述、数据组" oninput="onReviewFilterChange()">
+        <select id="filterLevel1" onchange="onReviewFilterChange()">
+          <option value="">全部一级模块</option>
         </select>
-        <input id="batchValue" type="text" placeholder="批量修改为">
-        <select id="batchSelectValue" class="hidden"></select>
-        <button type="button" class="ghost" onclick="applyBatchChange()">应用到选中</button>
+        <select id="filterMovement" onchange="onReviewFilterChange()">
+          <option value="">全部类型</option>
+        </select>
+        <select id="filterReuse" onchange="onReviewFilterChange()">
+          <option value="">全部复用度</option>
+        </select>
+        <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
+        <span class="filter-count">当前显示：<b id="filteredCount">0</b></span>
       </div>
-      <button type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
-    </div>
 
-    <div class="table-wrap">
-      <table id="reviewTable">
-        <thead>
-        <tr>
-          <th class="w-select"><input id="selectAllRows" type="checkbox" onchange="toggleAllRows(this.checked)"></th>
-          <th class="w-module">一级模块</th>
-          <th class="w-module">二级模块</th>
-          <th class="w-module">三级模块</th>
-          <th class="w-process">功能过程</th>
-          <th class="w-desc">功能描述</th>
-          <th class="w-desc">子过程描述</th>
-          <th class="w-data">时序图</th>
-          <th class="w-type">类型</th>
-          <th class="w-data">数据组</th>
-          <th class="w-attr">数据属性</th>
-          <th class="w-reuse">复用度</th>
-          <th class="w-cfp">CFP</th>
-          <th class="w-actions">操作</th>
-        </tr>
-        </thead>
-        <tbody id="reviewBody"></tbody>
-      </table>
-    </div>
-  </section>
+      <div class="table-wrap">
+        <table id="reviewTable">
+          <thead>
+            <tr>
+              <th class="w-select"><input id="selectAllRows" type="checkbox" onchange="toggleAllRows(this.checked)">
+              </th>
+              <th class="w-module">一级模块</th>
+              <th class="w-module">二级模块</th>
+              <th class="w-module">三级模块</th>
+              <th class="w-process">功能过程</th>
+              <th class="w-desc">功能描述</th>
+              <th class="w-desc">子过程描述</th>
+              <th class="w-data">时序图</th>
+              <th class="w-type">类型</th>
+              <th class="w-data">数据组</th>
+              <th class="w-attr">数据属性</th>
+              <th class="w-reuse">复用度</th>
+              <th class="w-cfp">CFP</th>
+              <th class="w-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="reviewBody"></tbody>
+        </table>
+      </div>
+    </section>
 
-  <section id="outputPanel" class="panel hidden">
-    <h2>导出结果</h2>
-    <div id="outputList" class="output-list"></div>
-  </section>
-</main>
+    <section id="outputPanel" class="panel hidden">
+      <h2>导出结果</h2>
+      <div id="outputList" class="output-list"></div>
+    </section>
+  </main>
 
-<script>
-  let currentProjectId = "";
-  let splitRows = [];
-  let selectedRows = {};
-  const reuseOptions = ["新增", "复用", "利旧"];
-  const movementOptions = ["E", "R", "W", "X"];
-  const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
+  <script>
+    let currentProjectId = "";
+    let splitRows = [];
+    let selectedRows = {};
+    let reviewDensity = "comfortable";
+    let cellEditorState = null;
+    const reuseOptions = ["新增", "复用", "利旧"];
+    const movementOptions = ["E", "R", "W", "X"];
+    const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
+    const compactTextFields = {
+      functionDescription: "功能描述",
+      subProcessDescription: "子过程描述",
+      dataAttributes: "数据属性"
+    };
 
-  function $(id) {
-    return document.getElementById(id);
-  }
-
-  function setMessage(text, type) {
-    const box = $("message");
-    if (box) {
-      box.textContent = text;
-      box.className = "message " + (type || "");
+    function $(id) {
+      return document.getElementById(id);
     }
-  }
 
-  function showDialog(title, message) {
-    $("dialog-title").textContent = title;
-    $("dialog-message").textContent = message;
-    $("dialog-overlay").classList.remove("hidden");
-  }
-
-  function closeDialog() {
-    $("dialog-overlay").classList.add("hidden");
-  }
-
-  function openExportDialog() {
-    resetExportProgressDialog();
-    $("export-dialog-overlay").classList.remove("hidden");
-  }
-
-  function closeExportDialog() {
-    $("export-dialog-overlay").classList.add("hidden");
-  }
-
-  function resetExportProgressDialog() {
-    ["excel", "word", "check"].forEach(function (step) {
-      setExportStep(step, "等待中", "pending");
-    });
-    $("export-material-result").classList.add("hidden");
-    $("export-material-result").innerHTML = "";
-    $("export-dialog-close").disabled = false;
-  }
-
-  function setExportStep(step, text, state) {
-    const row = $("export-step-" + step);
-    row.className = "export-progress-row " + (state || "pending");
-    row.querySelector("b").textContent = text;
-  }
-
-  function setBusy(busy) {
-    $("runBtn").disabled = busy;
-    document.body.classList.toggle("busy", busy);
-  }
-
-  function markActive(step) {
-    ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
-      const el = $("step-" + name);
-      if (name === step) {
-        el.classList.add("active");
-        el.classList.remove("done");
-      } else {
-        el.classList.remove("active");
+    function setMessage(text, type) {
+      const box = $("message");
+      if (box) {
+        box.textContent = text;
+        box.className = "message " + (type || "");
       }
-    });
-    updateFlowProgress();
-  }
-
-  function markDone(step) {
-    const el = $("step-" + step);
-    el.classList.add("done");
-    el.classList.remove("active");
-    if (step === "parse" || step === "ai") {
-      el.classList.add("clickable");
     }
-    updateFlowProgress();
-  }
 
-  function toggleParsePreview() {
-    const panel = $("parsePanel");
-    const step = $("step-parse");
-    if (step.classList.contains("done")) {
-      panel.classList.toggle("hidden");
+    function showDialog(title, message) {
+      $("dialog-title").textContent = title;
+      $("dialog-message").textContent = message;
+      $("dialog-overlay").classList.remove("hidden");
     }
-  }
 
-  function handleStepClick(stepName) {
-    if (stepName === "parse") {
-      toggleParsePreview();
-    } else if (stepName === "ai") {
-      showAiPrompt();
+    function closeDialog() {
+      $("dialog-overlay").classList.add("hidden");
     }
-  }
 
-  async function showAiPrompt() {
-    if (!currentProjectId) {
-      showDialog("暂无项目", "请先上传需求文档并开始拆分。");
-      return;
+    function openExportDialog() {
+      resetExportProgressDialog();
+      $("export-dialog-overlay").classList.remove("hidden");
     }
-    try {
-      const response = await request("/api/projects/" + currentProjectId + "/ai-prompt");
-      const data = response.data || {};
-      $("aiPromptModel").textContent = data.modelName || "-";
-      $("aiPromptText").value = data.prompt || "";
-      $("ai-prompt-dialog-overlay").classList.remove("hidden");
-    } catch (error) {
-      showDialog("暂无法查看 AI 提示词", error.message || "请先完成文档解析后再查看。");
-    }
-  }
 
-  function closeAiPromptDialog() {
-    $("ai-prompt-dialog-overlay").classList.add("hidden");
-  }
-
-  async function copyAiPrompt(btn) {
-    const text = $("aiPromptText").value || "";
-    if (!text) {
-      showDialog("无内容", "提示词内容为空，无法复制。");
-      return;
+    function closeExportDialog() {
+      $("export-dialog-overlay").classList.add("hidden");
     }
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
+
+    function resetExportProgressDialog() {
+      ["excel", "business", "word"].forEach(function (step) {
+        setExportStep(step, "等待中", "pending");
+      });
+      $("export-material-result").classList.add("hidden");
+      $("export-material-result").innerHTML = "";
+      $("export-dialog-close").disabled = false;
+    }
+
+    function setExportStep(step, text, state) {
+      const row = $("export-step-" + step);
+      row.className = "export-progress-row " + (state || "pending");
+      row.querySelector("b").textContent = text;
+    }
+
+    function setBusy(busy) {
+      $("runBtn").disabled = busy;
+      document.body.classList.toggle("busy", busy);
+    }
+
+    function markActive(step) {
+      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+        const el = $("step-" + name);
+        if (name === step) {
+          el.classList.add("active");
+          el.classList.remove("done");
+        } else {
+          el.classList.remove("active");
+        }
+      });
+      updateFlowProgress();
+    }
+
+    function markDone(step) {
+      const el = $("step-" + step);
+      el.classList.add("done");
+      el.classList.remove("active");
+      if (step === "parse" || step === "ai") {
+        el.classList.add("clickable");
       }
-      if (btn) {
-        const originalText = btn.textContent;
-        btn.textContent = "已复制！";
-        btn.style.background = "linear-gradient(135deg, var(--success) 0%, #059669 100%)";
-        btn.style.boxShadow = "0 2px 6px rgba(16, 185, 129, 0.3)";
-        btn.disabled = true;
-        setTimeout(function () {
-          btn.textContent = originalText;
-          btn.style.background = "";
-          btn.style.boxShadow = "";
-          btn.disabled = false;
-        }, 2000);
+      updateFlowProgress();
+    }
+
+    function toggleParsePreview() {
+      const panel = $("parsePanel");
+      const step = $("step-parse");
+      if (step.classList.contains("done")) {
+        panel.classList.toggle("hidden");
       }
-    } catch (err) {
-      showDialog("复制失败", "无法复制提示词，请手动选择复制。");
     }
-  }
 
-  function closeAiPromptDialogOnOverlay(event) {
-    if (event.target === $("ai-prompt-dialog-overlay")) {
-      closeAiPromptDialog();
+    function handleStepClick(stepName) {
+      if (stepName === "parse") {
+        toggleParsePreview();
+      } else if (stepName === "ai") {
+        showAiPrompt();
+      }
     }
-  }
 
-  async function resendAiPrompt() {
-    if (!currentProjectId) {
-      showDialog("暂无项目", "请先上传需求文档并完成文档解析。");
-      return;
-    }
-    const prompt = ($("aiPromptText").value || "").trim();
-    if (!prompt) {
-      showDialog("提示词为空", "请先填写 AI 拆分提示词，再重新发送。");
-      return;
-    }
-    const btn = $("resendAiPromptBtn");
-    await withBusy(async function () {
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "发送中...";
+    async function showAiPrompt() {
+      if (!currentProjectId) {
+        showDialog("暂无项目", "请先上传需求文档并开始拆分。");
+        return;
       }
       try {
+        const response = await request("/api/projects/" + currentProjectId + "/ai-prompt");
+        const data = response.data || {};
+        $("aiPromptModel").textContent = data.modelName || "-";
+        $("aiPromptText").value = data.prompt || "";
+        $("ai-prompt-dialog-overlay").classList.remove("hidden");
+      } catch (error) {
+        showDialog("暂无法查看 AI 提示词", error.message || "请先完成文档解析后再查看。");
+      }
+    }
+
+    function closeAiPromptDialog() {
+      $("ai-prompt-dialog-overlay").classList.add("hidden");
+    }
+
+    async function copyAiPrompt(btn) {
+      const text = $("aiPromptText").value || "";
+      if (!text) {
+        showDialog("无内容", "提示词内容为空，无法复制。");
+        return;
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          document.execCommand("copy");
+          document.body.removeChild(textarea);
+        }
+        if (btn) {
+          const originalText = btn.textContent;
+          btn.textContent = "已复制！";
+          btn.style.background = "linear-gradient(135deg, var(--success) 0%, #059669 100%)";
+          btn.style.boxShadow = "0 2px 6px rgba(16, 185, 129, 0.3)";
+          btn.disabled = true;
+          setTimeout(function () {
+            btn.textContent = originalText;
+            btn.style.background = "";
+            btn.style.boxShadow = "";
+            btn.disabled = false;
+          }, 2000);
+        }
+      } catch (err) {
+        showDialog("复制失败", "无法复制提示词，请手动选择复制。");
+      }
+    }
+
+    function closeAiPromptDialogOnOverlay(event) {
+      if (event.target === $("ai-prompt-dialog-overlay")) {
+        closeAiPromptDialog();
+      }
+    }
+
+    async function resendAiPrompt() {
+      if (!currentProjectId) {
+        showDialog("暂无项目", "请先上传需求文档并完成文档解析。");
+        return;
+      }
+      const prompt = ($("aiPromptText").value || "").trim();
+      if (!prompt) {
+        showDialog("提示词为空", "请先填写 AI 拆分提示词，再重新发送。");
+        return;
+      }
+      const btn = $("resendAiPromptBtn");
+      await withBusy(async function () {
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "发送中...";
+        }
+        try {
+          markActive("ai");
+          setMessage("正在使用修改后的提示词重新调用 AI 拆分...");
+          await request("/api/projects/" + currentProjectId + "/ai-prompt/extract", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: prompt })
+          });
+          markDone("ai");
+
+          markActive("cosmic");
+          setMessage("正在基于新的 AI 拆分结果重新生成 COSMIC 数据...");
+          await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
+          markDone("cosmic");
+
+          await loadReview();
+          markActive("review");
+          closeAiPromptDialog();
+          setMessage("已按修改后的提示词重新完成 AI 拆分，请审核下方功能点。", "success");
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = "重新发送 AI 拆分";
+          }
+        }
+      });
+    }
+
+    function updateFlowProgress() {
+      const progressEl = document.querySelector(".flow-progress");
+      if (!progressEl) return;
+      const steps = ["upload", "parse", "ai", "cosmic", "review"];
+      const doneCount = steps.filter(function (name) {
+        const el = $("step-" + name);
+        return el && el.classList.contains("done");
+      }).length;
+      const activeIndex = steps.findIndex(function (name) {
+        const el = $("step-" + name);
+        return el && el.classList.contains("active");
+      });
+      const progress = activeIndex >= 0 ? activeIndex : doneCount;
+      const percent = (progress / (steps.length - 1)) * 100;
+      progressEl.style.width = percent + "%";
+    }
+
+    function resetPage() {
+      currentProjectId = "";
+      splitRows = [];
+      selectedRows = {};
+      reviewDensity = "comfortable";
+      cellEditorState = null;
+      $("fileInput").value = "";
+      $("projectName").value = "";
+      if ($("reviewSearch")) {
+        resetReviewFilters();
+      }
+      if ($("reviewPanel")) {
+        $("reviewPanel").classList.remove("compact-review");
+      }
+      if ($("densityBtn")) {
+        $("densityBtn").textContent = "紧凑视图";
+      }
+      $("preview").textContent = "";
+      $("projectBadge").textContent = "未上传";
+      $("projectBadge").className = "badge muted";
+      $("parsePanel").classList.add("hidden");
+      $("reviewPanel").classList.add("hidden");
+      $("outputPanel").classList.add("hidden");
+      $("outputList").innerHTML = "";
+      setMessage("");
+      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+        const el = $("step-" + name);
+        if (name === "upload") {
+          el.className = "flow-step active";
+        } else {
+          el.className = "flow-step pending";
+        }
+      });
+      updateFlowProgress();
+      history.replaceState(null, "", "/index.html");
+    }
+
+    async function runAll() {
+      if (!$("projectName").value) {
+        showDialog("请选择项目名称", "请先选择项目名称，再点击「开始拆分」");
+        return;
+      }
+      const file = $("fileInput").files[0];
+      if (!file) {
+        showDialog("请先上传需求文档", "请选择 docx 或 pdf 格式的需求文档，然后点击「开始拆分」");
+        return;
+      }
+      await withBusy(async function () {
+        markActive("upload");
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
+        setMessage("正在上传文档...");
+        const upload = await request("/api/files/upload", { method: "POST", body: formData });
+        currentProjectId = upload.data.projectId;
+        $("projectBadge").textContent = currentProjectId;
+        $("projectBadge").className = "badge";
+        history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
+        markDone("upload");
+
+        markActive("parse");
+        setMessage("正在解析文档内容...");
+        const parsed = await request("/api/projects/" + currentProjectId + "/parse", { method: "POST" });
+        $("preview").textContent = parsed.data.preview || "";
+        if (showRequirementParseWarning(parsed.data || {})) {
+          $("parsePanel").classList.remove("hidden");
+          setMessage("未识别到需求内容，请按提示修改文档后重新上传。", "error");
+          return;
+        }
+        markDone("parse");
+        $("parsePanel").classList.add("hidden");
+        setMessage("解析完成，点击「解析」节点可查看预览");
+
         markActive("ai");
-        setMessage("正在使用修改后的提示词重新调用 AI 拆分...");
-        await request("/api/projects/" + currentProjectId + "/ai-prompt/extract", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({prompt: prompt})
-        });
+        setMessage("正在调用 AI 拆分需求细则，请稍等...");
+        await request("/api/projects/" + currentProjectId + "/extract", { method: "POST" });
         markDone("ai");
 
         markActive("cosmic");
-        setMessage("正在基于新的 AI 拆分结果重新生成 COSMIC 数据...");
-        await request("/api/projects/" + currentProjectId + "/cosmic", {method: "POST"});
+        setMessage("正在生成 COSMIC 功能点拆分数据...");
+        await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
         markDone("cosmic");
 
         await loadReview();
         markActive("review");
-        closeAiPromptDialog();
-        setMessage("已按修改后的提示词重新完成 AI 拆分，请审核下方功能点。", "success");
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = "重新发送 AI 拆分";
-        }
-      }
-    });
-  }
-
-  function updateFlowProgress() {
-    const progressEl = document.querySelector(".flow-progress");
-    if (!progressEl) return;
-    const steps = ["upload", "parse", "ai", "cosmic", "review"];
-    const doneCount = steps.filter(function(name) {
-      const el = $("step-" + name);
-      return el && el.classList.contains("done");
-    }).length;
-    const activeIndex = steps.findIndex(function(name) {
-      const el = $("step-" + name);
-      return el && el.classList.contains("active");
-    });
-    const progress = activeIndex >= 0 ? activeIndex : doneCount;
-    const percent = (progress / (steps.length - 1)) * 100;
-    progressEl.style.width = percent + "%";
-  }
-
-  function resetPage() {
-    currentProjectId = "";
-    splitRows = [];
-    selectedRows = {};
-    $("fileInput").value = "";
-    $("projectName").value = "";
-    $("preview").textContent = "";
-    $("projectBadge").textContent = "未上传";
-    $("projectBadge").className = "badge muted";
-    $("parsePanel").classList.add("hidden");
-    $("reviewPanel").classList.add("hidden");
-    $("outputPanel").classList.add("hidden");
-    $("outputList").innerHTML = "";
-    setMessage("");
-    ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
-      const el = $("step-" + name);
-      if (name === "upload") {
-        el.className = "flow-step active";
-      } else {
-        el.className = "flow-step pending";
-      }
-    });
-    updateFlowProgress();
-    history.replaceState(null, "", "/index.html");
-  }
-
-  async function runAll() {
-    const file = $("fileInput").files[0];
-    if (!file) {
-      showDialog("请先上传需求文档", "请选择 docx 或 pdf 格式的需求文档，然后点击「开始拆分」");
-      return;
-    }
-    await withBusy(async function () {
-      markActive("upload");
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
-      setMessage("正在上传文档...");
-      const upload = await request("/api/files/upload", {method: "POST", body: formData});
-      currentProjectId = upload.data.projectId;
-      $("projectBadge").textContent = currentProjectId;
-      $("projectBadge").className = "badge";
-      history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
-      markDone("upload");
-
-      markActive("parse");
-      setMessage("正在解析文档内容...");
-      const parsed = await request("/api/projects/" + currentProjectId + "/parse", {method: "POST"});
-      $("preview").textContent = parsed.data.preview || "";
-      if (showRequirementParseWarning(parsed.data || {})) {
-        $("parsePanel").classList.remove("hidden");
-        setMessage("未识别到需求内容，请按提示修改文档后重新上传。", "error");
-        return;
-      }
-      markDone("parse");
-      $("parsePanel").classList.add("hidden");
-      setMessage("解析完成，点击「解析」节点可查看预览");
-
-      markActive("ai");
-      setMessage("正在调用 AI 拆分需求细则，请稍等...");
-      await request("/api/projects/" + currentProjectId + "/extract", {method: "POST"});
-      markDone("ai");
-
-      markActive("cosmic");
-      setMessage("正在生成 COSMIC 功能点拆分数据...");
-      await request("/api/projects/" + currentProjectId + "/cosmic", {method: "POST"});
-      markDone("cosmic");
-
-      await loadReview();
-      markActive("review");
-      setMessage("处理完成，请在下方审核功能点，保存后再导出。", "success");
-    });
-  }
-
-  function showRequirementParseWarning(data) {
-    if (!data || data.requirementRecognized) {
-      return false;
-    }
-    const warning = data.requirementWarning || "未识别到有效的需求内容。";
-    const suggestion = data.requirementSuggestion || "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。";
-    showDialog("需求内容识别提示", warning + "\n\n解决方案：\n" + suggestion);
-    return true;
-  }
-
-  async function loadReviewFromProjectId() {
-    const params = new URLSearchParams(location.search);
-    const id = params.get("projectId") || currentProjectId;
-    if (!id) {
-      setMessage("当前页面没有项目 ID，请先上传文档。", "error");
-      return;
-    }
-    currentProjectId = id;
-    await withBusy(loadReview);
-  }
-
-  function startNewTask() {
-    history.replaceState(null, "", "/index.html");
-    resetPage();
-  }
-
-  async function loadReview() {
-    const response = await request("/api/projects/" + currentProjectId + "/review");
-    const data = response.data || {};
-    splitRows = (data.splitRows || []).map(normalizeRow);
-    $("statusText").textContent = data.status || "ANALYZED";
-    $("reviewPanel").classList.remove("hidden");
-    renderTable();
-    updateStats();
-    markDone("review");
-  }
-
-  function renderTable() {
-    const body = $("reviewBody");
-    body.innerHTML = "";
-    syncSelectedRows();
-    const selectAll = $("selectAllRows");
-    if (selectAll) {
-      const selectedCount = selectedRowIndexes().length;
-      selectAll.checked = splitRows.length > 0 && selectedCount === splitRows.length;
-      selectAll.indeterminate = selectedCount > 0 && selectedCount < splitRows.length;
-    }
-    if (!splitRows.length) {
-      const tr = document.createElement("tr");
-      const td = document.createElement("td");
-      td.colSpan = 14;
-      td.className = "empty";
-      td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
-      tr.appendChild(td);
-      body.appendChild(tr);
-      return;
-    }
-
-    splitRows.forEach(function (row, index) {
-      const tr = document.createElement("tr");
-      addRowSelectCell(tr, index);
-      addTextCell(tr, row, index, "level1Module");
-      addTextCell(tr, row, index, "level2Module");
-      addTextCell(tr, row, index, "level3Module");
-      addTextCell(tr, row, index, "functionProcess");
-      addTextCell(tr, row, index, "functionDescription");
-      addTextCell(tr, row, index, "subProcessDescription");
-      addSelectCell(tr, row, index, "sequenceDiagram", sequenceDiagramOptions);
-      addSelectCell(tr, row, index, "movementType", movementOptions);
-      addTextCell(tr, row, index, "dataGroup");
-      addTextCell(tr, row, index, "dataAttributes");
-      addSelectCell(tr, row, index, "reuseDegree", reuseOptions);
-      const cfp = document.createElement("td");
-      cfp.className = "cfp-cell";
-      cfp.textContent = formatCfp(row.cfp);
-      tr.appendChild(cfp);
-      addActionCell(tr, index);
-      body.appendChild(tr);
-    });
-  }
-
-  function addRowSelectCell(tr, index) {
-    const td = document.createElement("td");
-    td.className = "row-select-cell";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = !!selectedRows[index];
-    checkbox.dataset.index = index;
-    checkbox.addEventListener("change", function () {
-      if (checkbox.checked) {
-        selectedRows[index] = true;
-      } else {
-        delete selectedRows[index];
-      }
-      renderTable();
-    });
-    td.appendChild(checkbox);
-    tr.appendChild(td);
-  }
-
-  function addTextCell(tr, row, index, field) {
-    const td = document.createElement("td");
-    const input = document.createElement("textarea");
-    input.value = row[field] || "";
-    input.dataset.index = index;
-    input.dataset.field = field;
-    input.addEventListener("input", onCellChange);
-    td.appendChild(input);
-    tr.appendChild(td);
-  }
-
-  function addSelectCell(tr, row, index, field, options) {
-    const td = document.createElement("td");
-    const select = document.createElement("select");
-    options.forEach(function (item) {
-      const option = document.createElement("option");
-      option.value = item;
-      option.textContent = item;
-      select.appendChild(option);
-    });
-    select.value = row[field] || options[0];
-    select.dataset.index = index;
-    select.dataset.field = field;
-    select.addEventListener("change", onCellChange);
-    td.appendChild(select);
-    tr.appendChild(td);
-  }
-
-  function addActionCell(tr, index) {
-    const td = document.createElement("td");
-    td.className = "row-actions";
-    const copyButton = document.createElement("button");
-    copyButton.type = "button";
-    copyButton.className = "ghost mini";
-    copyButton.textContent = "复制";
-    copyButton.onclick = function () {
-      copyRow(index);
-    };
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "ghost mini danger";
-    deleteButton.textContent = "删除";
-    deleteButton.onclick = function () {
-      deleteRow(index);
-    };
-    td.appendChild(copyButton);
-    td.appendChild(deleteButton);
-    tr.appendChild(td);
-  }
-
-  function onCellChange(event) {
-    const target = event.target;
-    const index = Number(target.dataset.index);
-    const field = target.dataset.field;
-    splitRows[index][field] = target.value;
-    splitRows[index] = normalizeRow(splitRows[index]);
-    if (field === "reuseDegree") {
-      renderTable();
-    }
-    updateStats();
-  }
-
-  function blankReviewRow(baseRow) {
-    const base = baseRow || {};
-    return normalizeRow({
-      projectName: base.projectName || $("projectName").value || "",
-      level1Module: base.level1Module || "",
-      level2Module: base.level2Module || "",
-      level3Module: base.level3Module || "",
-      functionalUser: base.functionalUser || "发起者：用户\n接收者：系统",
-      triggerEvent: base.triggerEvent || base.functionProcess || "",
-      functionProcess: base.functionProcess || "",
-      functionDescription: base.functionDescription || "",
-      subProcessDescription: base.subProcessDescription || "",
-      sequenceDiagram: base.sequenceDiagram || "",
-      movementType: base.movementType || "E",
-      dataGroup: base.dataGroup || "",
-      dataAttributes: base.dataAttributes || "",
-      reuseDegree: base.reuseDegree || "新增",
-      cfp: base.cfp || 1
-    });
-  }
-
-  function cloneRow(row) {
-    return normalizeRow(JSON.parse(JSON.stringify(row || {})));
-  }
-
-  function addReviewRow() {
-    const base = splitRows.length ? splitRows[splitRows.length - 1] : {};
-    splitRows.push(blankReviewRow(base));
-    selectedRows = {};
-    selectedRows[splitRows.length - 1] = true;
-    renderTable();
-    updateStats();
-  }
-
-  function copyRow(index) {
-    if (index < 0 || index >= splitRows.length) {
-      return;
-    }
-    splitRows.splice(index + 1, 0, cloneRow(splitRows[index]));
-    selectedRows = {};
-    selectedRows[index + 1] = true;
-    renderTable();
-    updateStats();
-  }
-
-  function deleteRow(index) {
-    if (index < 0 || index >= splitRows.length) {
-      return;
-    }
-    if (splitRows.length === 1) {
-      showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
-      return;
-    }
-    splitRows.splice(index, 1);
-    selectedRows = {};
-    renderTable();
-    updateStats();
-  }
-
-  function toggleAllRows(checked) {
-    selectedRows = {};
-    if (checked) {
-      splitRows.forEach(function (_, index) {
-        selectedRows[index] = true;
+        setMessage("处理完成，请在下方审核功能点，保存后再导出。", "success");
       });
     }
-    renderTable();
-  }
 
-  function selectedRowIndexes() {
-    return Object.keys(selectedRows)
-      .map(function (value) { return Number(value); })
-      .filter(function (index) { return index >= 0 && index < splitRows.length; })
-      .sort(function (a, b) { return a - b; });
-  }
+    function showRequirementParseWarning(data) {
+      if (!data || data.requirementRecognized) {
+        return false;
+      }
+      const warning = data.requirementWarning || "未识别到有效的需求内容。";
+      const suggestion = data.requirementSuggestion || "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。";
+      showDialog("需求内容识别提示", warning + "\n\n解决方案：\n" + suggestion);
+      return true;
+    }
 
-  function syncSelectedRows() {
-    const next = {};
-    selectedRowIndexes().forEach(function (index) {
-      next[index] = true;
-    });
-    selectedRows = next;
-  }
+    async function loadReviewFromProjectId() {
+      const params = new URLSearchParams(location.search);
+      const id = params.get("projectId") || currentProjectId;
+      if (!id) {
+        setMessage("当前页面没有项目 ID，请先上传文档。", "error");
+        return;
+      }
+      currentProjectId = id;
+      await withBusy(loadReview);
+    }
 
-  function copySelectedRows() {
-    const indexes = selectedRowIndexes();
-    if (!indexes.length) {
-      showDialog("请选择行", "请先勾选需要复制的拆分行。");
-      return;
+    function startNewTask() {
+      history.replaceState(null, "", "/index.html");
+      resetPage();
     }
-    const copies = indexes.map(function (index) {
-      return cloneRow(splitRows[index]);
-    });
-    splitRows = splitRows.concat(copies);
-    selectedRows = {};
-    for (let i = splitRows.length - copies.length; i < splitRows.length; i++) {
-      selectedRows[i] = true;
-    }
-    renderTable();
-    updateStats();
-  }
 
-  function deleteSelectedRows() {
-    const indexes = selectedRowIndexes();
-    if (!indexes.length) {
-      showDialog("请选择行", "请先勾选需要删除的拆分行。");
-      return;
+    async function loadReview() {
+      const response = await request("/api/projects/" + currentProjectId + "/review");
+      const data = response.data || {};
+      splitRows = (data.splitRows || []).map(normalizeRow);
+      if (splitRows.length > 0 && splitRows[0].projectName) {
+        const select = $("projectName");
+        const val = splitRows[0].projectName;
+        let hasOption = false;
+        for (let i = 0; i < select.options.length; i++) {
+          if (select.options[i].value === val) {
+            hasOption = true;
+            break;
+          }
+        }
+        if (hasOption) {
+          select.value = val;
+        }
+      }
+      $("statusText").textContent = data.status || "ANALYZED";
+      $("reviewPanel").classList.remove("hidden");
+      renderTable();
+      updateStats();
+      markDone("review");
     }
-    if (indexes.length >= splitRows.length) {
-      showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
-      return;
-    }
-    const deleteMap = {};
-    indexes.forEach(function (index) {
-      deleteMap[index] = true;
-    });
-    splitRows = splitRows.filter(function (_, index) {
-      return !deleteMap[index];
-    });
-    selectedRows = {};
-    renderTable();
-    updateStats();
-  }
 
-  function onBatchFieldChange() {
-    const field = $("batchField").value;
-    const input = $("batchValue");
-    const select = $("batchSelectValue");
-    select.innerHTML = "";
-    let options = null;
-    if (field === "movementType") {
-      options = movementOptions;
-    } else if (field === "reuseDegree") {
-      options = reuseOptions;
-    } else if (field === "sequenceDiagram") {
-      options = sequenceDiagramOptions;
+    function renderTable() {
+      const body = $("reviewBody");
+      body.innerHTML = "";
+      syncSelectedRows();
+      updateReviewFilterOptions();
+      const visibleRows = filteredRowEntries();
+      const visibleSelectedCount = visibleRows.filter(function (entry) {
+        return !!selectedRows[entry.index];
+      }).length;
+      const selectAll = $("selectAllRows");
+      if (selectAll) {
+        selectAll.checked = visibleRows.length > 0 && visibleSelectedCount === visibleRows.length;
+        selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleRows.length;
+      }
+      if (!splitRows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 14;
+        td.className = "empty";
+        td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        updateFilteredCount(0);
+        return;
+      }
+      if (!visibleRows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 14;
+        td.className = "empty";
+        td.textContent = "没有符合筛选条件的数据。";
+        tr.appendChild(td);
+        body.appendChild(tr);
+        updateFilteredCount(0);
+        return;
+      }
+
+      visibleRows.forEach(function (entry) {
+        const row = entry.row;
+        const index = entry.index;
+        const tr = document.createElement("tr");
+        addRowSelectCell(tr, index);
+        addTextCell(tr, row, index, "level1Module");
+        addTextCell(tr, row, index, "level2Module");
+        addTextCell(tr, row, index, "level3Module");
+        addTextCell(tr, row, index, "functionProcess");
+        addTextCell(tr, row, index, "functionDescription");
+        addTextCell(tr, row, index, "subProcessDescription");
+        addSelectCell(tr, row, index, "sequenceDiagram", sequenceDiagramOptions);
+        addSelectCell(tr, row, index, "movementType", movementOptions);
+        addTextCell(tr, row, index, "dataGroup");
+        addTextCell(tr, row, index, "dataAttributes");
+        addSelectCell(tr, row, index, "reuseDegree", reuseOptions);
+        const cfp = document.createElement("td");
+        cfp.className = "cfp-cell";
+        cfp.textContent = formatCfp(row.cfp);
+        tr.appendChild(cfp);
+        addActionCell(tr, index);
+        body.appendChild(tr);
+      });
+      updateFilteredCount(visibleRows.length);
     }
-    if (options) {
+
+    function addRowSelectCell(tr, index) {
+      const td = document.createElement("td");
+      td.className = "row-select-cell";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = !!selectedRows[index];
+      checkbox.dataset.index = index;
+      checkbox.addEventListener("change", function () {
+        if (checkbox.checked) {
+          selectedRows[index] = true;
+        } else {
+          delete selectedRows[index];
+        }
+        renderTable();
+      });
+      td.appendChild(checkbox);
+      tr.appendChild(td);
+    }
+
+    function addTextCell(tr, row, index, field) {
+      const td = document.createElement("td");
+      td.className = "field-" + field;
+      if (compactTextFields[field]) {
+        const preview = document.createElement("div");
+        preview.className = "cell-preview";
+        preview.textContent = row[field] || "";
+        preview.title = row[field] || "";
+        const editButton = document.createElement("button");
+        editButton.type = "button";
+        editButton.className = "ghost mini edit-cell-btn";
+        editButton.textContent = "编辑";
+        editButton.onclick = function () {
+          openCellEditor(index, field);
+        };
+        td.appendChild(preview);
+        td.appendChild(editButton);
+        tr.appendChild(td);
+        return;
+      }
+      const input = document.createElement("textarea");
+      input.value = row[field] || "";
+      input.dataset.index = index;
+      input.dataset.field = field;
+      input.addEventListener("input", onCellChange);
+      td.appendChild(input);
+      tr.appendChild(td);
+    }
+
+    function addSelectCell(tr, row, index, field, options) {
+      const td = document.createElement("td");
+      td.className = "field-" + field;
+      const select = document.createElement("select");
       options.forEach(function (item) {
         const option = document.createElement("option");
         option.value = item;
         option.textContent = item;
         select.appendChild(option);
       });
-      select.classList.remove("hidden");
-      input.classList.add("hidden");
-    } else {
-      select.classList.add("hidden");
-      input.classList.remove("hidden");
+      select.value = row[field] || options[0];
+      select.dataset.index = index;
+      select.dataset.field = field;
+      select.addEventListener("change", onCellChange);
+      td.appendChild(select);
+      tr.appendChild(td);
     }
-  }
 
-  function applyBatchChange() {
-    const indexes = selectedRowIndexes();
-    if (!indexes.length) {
-      showDialog("请选择行", "请先勾选需要批量修改的拆分行。");
-      return;
+    function filteredRowEntries() {
+      const search = textOr($("reviewSearch") ? $("reviewSearch").value : "", "").toLowerCase();
+      const level1 = $("filterLevel1") ? $("filterLevel1").value : "";
+      const movement = $("filterMovement") ? $("filterMovement").value : "";
+      const reuse = $("filterReuse") ? $("filterReuse").value : "";
+      return splitRows
+        .map(function (row, index) {
+          return { row: row, index: index };
+        })
+        .filter(function (entry) {
+          const row = entry.row;
+          if (level1 && row.level1Module !== level1) {
+            return false;
+          }
+          if (movement && row.movementType !== movement) {
+            return false;
+          }
+          if (reuse && row.reuseDegree !== reuse) {
+            return false;
+          }
+          if (!search) {
+            return true;
+          }
+          return [
+            row.level1Module,
+            row.level2Module,
+            row.level3Module,
+            row.functionProcess,
+            row.functionDescription,
+            row.subProcessDescription,
+            row.sequenceDiagram,
+            row.dataGroup,
+            row.dataAttributes
+          ].some(function (value) {
+            return textOr(value, "").toLowerCase().indexOf(search) >= 0;
+          });
+        });
     }
-    const field = $("batchField").value;
-    const value = $("batchSelectValue").classList.contains("hidden") ? $("batchValue").value : $("batchSelectValue").value;
-    indexes.forEach(function (index) {
-      splitRows[index][field] = value;
-      splitRows[index] = normalizeRow(splitRows[index]);
-    });
-    renderTable();
-    updateStats();
-  }
 
-  function normalizeRow(row) {
-    const next = Object.assign({}, row || {});
-    next.level1Module = textOr(next.level1Module, "未命名模块");
-    next.level2Module = textOr(next.level2Module, next.level1Module);
-    next.level3Module = textOr(next.level3Module, next.level2Module);
-    next.functionProcess = textOr(next.functionProcess, next.level3Module);
-    next.subProcessDescription = textOr(next.subProcessDescription, next.functionProcess);
-    next.movementType = movementOptions.indexOf(next.movementType) >= 0 ? next.movementType : "E";
-    next.dataGroup = textOr(next.dataGroup, next.functionProcess);
-    next.dataAttributes = textOr(next.dataAttributes, next.subProcessDescription);
-    next.functionDescription = textOr(next.functionDescription, defaultFunctionDescription(next.subProcessDescription, next.dataAttributes));
-    next.sequenceDiagram = sequenceDiagramOptions.indexOf(next.sequenceDiagram) >= 0 ? next.sequenceDiagram : defaultSequenceDiagram(next.movementType, next.subProcessDescription, next.dataGroup, next.dataAttributes);
-    next.reuseDegree = reuseOptions.indexOf(next.reuseDegree) >= 0 ? next.reuseDegree : "新增";
-    next.cfp = cfpByReuse(next.reuseDegree);
-    if (!next.projectName && $("projectName").value) {
-      next.projectName = $("projectName").value;
+    function updateReviewFilterOptions() {
+      syncSelectOptions("filterLevel1", uniqueValues(splitRows.map(function (row) { return row.level1Module; })), "全部一级模块");
+      syncSelectOptions("filterMovement", movementOptions, "全部类型");
+      syncSelectOptions("filterReuse", reuseOptions, "全部复用度");
     }
-    return next;
-  }
 
-  function textOr(value, fallback) {
-    const text = (value == null ? "" : String(value)).trim();
-    return text || fallback || "";
-  }
-
-  function defaultFunctionDescription(subProcessDescription, dataAttributes) {
-    const subProcess = textOr(subProcessDescription, "处理功能子过程");
-    const attributes = textOr(dataAttributes, "相关数据属性");
-    return subProcess + "，涉及" + attributes + "。";
-  }
-
-  function defaultSequenceDiagram(movementType, subProcessDescription, dataGroup, dataAttributes) {
-    if (movementType === "E") {
-      return "UI->UI";
+    function uniqueValues(values) {
+      const seen = {};
+      return values
+        .map(function (value) { return textOr(value, ""); })
+        .filter(function (value) {
+          if (!value || seen[value]) {
+            return false;
+          }
+          seen[value] = true;
+          return true;
+        });
     }
-    if (movementType === "R") {
-      if (isBackendRead(subProcessDescription, dataGroup, dataAttributes)) {
-        return "后台服务->后台服务";
+
+    function syncSelectOptions(id, values, allLabel) {
+      const select = $(id);
+      if (!select) {
+        return;
       }
-      return "UI->后台服务";
-    }
-    if (movementType === "W") {
-      return "后台服务->UI";
-    }
-    if (movementType === "X") {
-      return "后台服务->UI";
-    }
-    return "UI->UI";
-  }
-
-  function isBackendRead(subProcessDescription, dataGroup, dataAttributes) {
-    const text = [subProcessDescription, dataGroup, dataAttributes].map(function (value) {
-      return value == null ? "" : String(value);
-    }).join(" ");
-    return ["数据处理", "计算", "汇总", "统计", "校验", "转换", "保存", "写入", "更新"].some(function (keyword) {
-      return text.indexOf(keyword) >= 0;
-    });
-  }
-
-  function cfpByReuse(reuseDegree) {
-    if (reuseDegree === "复用") {
-      return 1 / 3;
-    }
-    if (reuseDegree === "利旧") {
-      return 0;
-    }
-    return 1;
-  }
-
-  function updateStats() {
-    splitRows = splitRows.map(normalizeRow);
-    const processes = {};
-    splitRows.forEach(function (row) {
-      processes[row.functionProcess] = true;
-    });
-    const total = splitRows.reduce(function (sum, row) {
-      return sum + Number(row.cfp || 0);
-    }, 0);
-    $("functionCount").textContent = Object.keys(processes).length;
-    $("totalCfp").textContent = formatCfp(total);
-  }
-
-  async function saveReview() {
-    await withBusy(async function () {
-      splitRows = splitRows.map(normalizeRow);
-      setMessage("正在保存审核修改...");
-      const response = await request("/api/projects/" + currentProjectId + "/review", {
-        method: "PUT",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(splitRows)
+      const current = select.value;
+      select.innerHTML = "";
+      const allOption = document.createElement("option");
+      allOption.value = "";
+      allOption.textContent = allLabel;
+      select.appendChild(allOption);
+      values.forEach(function (value) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
       });
-      splitRows = (response.data.splitRows || []).map(normalizeRow);
+      select.value = values.indexOf(current) >= 0 ? current : "";
+    }
+
+    function onReviewFilterChange() {
+      renderTable();
+    }
+
+    function resetReviewFilters() {
+      $("reviewSearch").value = "";
+      $("filterLevel1").value = "";
+      $("filterMovement").value = "";
+      $("filterReuse").value = "";
+      renderTable();
+    }
+
+    function updateFilteredCount(count) {
+      if ($("filteredCount")) {
+        $("filteredCount").textContent = String(count);
+      }
+    }
+
+    function toggleReviewDensity() {
+      reviewDensity = reviewDensity === "compact" ? "comfortable" : "compact";
+      const panel = $("reviewPanel");
+      if (panel) {
+        panel.classList.toggle("compact-review", reviewDensity === "compact");
+      }
+      $("densityBtn").textContent = reviewDensity === "compact" ? "宽松视图" : "紧凑视图";
+    }
+
+    function openCellEditor(index, field) {
+      cellEditorState = { index: index, field: field };
+      $("cell-editor-title").textContent = compactTextFields[field] || "编辑内容";
+      $("cell-editor-text").value = splitRows[index][field] || "";
+      $("cell-editor-overlay").classList.remove("hidden");
+      $("cell-editor-text").focus();
+    }
+
+    function closeCellEditor() {
+      $("cell-editor-overlay").classList.add("hidden");
+      cellEditorState = null;
+    }
+
+    function closeCellEditorOnOverlay(event) {
+      if (event.target.id === "cell-editor-overlay") {
+        closeCellEditor();
+      }
+    }
+
+    function saveCellEditor() {
+      if (!cellEditorState) {
+        return;
+      }
+      const index = cellEditorState.index;
+      const field = cellEditorState.field;
+      splitRows[index][field] = $("cell-editor-text").value;
+      splitRows[index] = normalizeRow(splitRows[index]);
+      closeCellEditor();
       renderTable();
       updateStats();
-      setMessage("审核数据已保存。", "success");
-    });
-  }
-
-  async function exportExcel() {
-    await withBusy(async function () {
-      await saveReview();
-      setMessage("正在按固定模板导出 Excel...");
-      const response = await request("/api/projects/" + currentProjectId + "/export/excel", {method: "POST"});
-      await showExportResult("Excel", "excel", response.data.excelOutputPath);
-      setMessage("Excel 已导出。", "success");
-    });
-  }
-
-  async function exportWord() {
-    await withBusy(async function () {
-      setMessage("正在按 Excel 内容生成 Word...");
-      const response = await request("/api/projects/" + currentProjectId + "/export/word", {method: "POST"});
-      await showExportResult("Word", "word", response.data.wordOutputPath);
-      setMessage("Word 已导出。", "success");
-    });
-  }
-
-  async function checkConsistency() {
-    await withBusy(async function () {
-      setMessage("正在检查 Excel 和 Word 一致性...");
-      const response = await request("/api/projects/" + currentProjectId + "/exports/consistency");
-      const data = response.data || {};
-      const messages = (data.messages || []).join("；");
-      setMessage((data.matched ? "一致性检查通过。" : "一致性检查未通过。") + (messages ? " " + messages : ""), data.matched ? "success" : "error");
-    });
-  }
-
-  async function exportReviewMaterials() {
-    if (!currentProjectId || !splitRows.length) {
-      showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
-      return;
     }
-    openExportDialog();
-    $("export-dialog-close").disabled = true;
-    await withBusy(async function () {
-      try {
+
+    function addActionCell(tr, index) {
+      const td = document.createElement("td");
+      td.className = "row-actions";
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "ghost mini";
+      copyButton.textContent = "复制";
+      copyButton.onclick = function () {
+        copyRow(index);
+      };
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "ghost mini danger";
+      deleteButton.textContent = "删除";
+      deleteButton.onclick = function () {
+        deleteRow(index);
+      };
+      td.appendChild(copyButton);
+      td.appendChild(deleteButton);
+      tr.appendChild(td);
+    }
+
+    function onCellChange(event) {
+      const target = event.target;
+      const index = Number(target.dataset.index);
+      const field = target.dataset.field;
+      splitRows[index][field] = target.value;
+      splitRows[index] = normalizeRow(splitRows[index]);
+      if (field === "reuseDegree") {
+        renderTable();
+      }
+      updateStats();
+    }
+
+    function blankReviewRow(baseRow) {
+      const base = baseRow || {};
+      return normalizeRow({
+        projectName: base.projectName || $("projectName").value || "",
+        level1Module: base.level1Module || "",
+        level2Module: base.level2Module || "",
+        level3Module: base.level3Module || "",
+        functionalUser: base.functionalUser || "发起者：用户\n接收者：系统",
+        triggerEvent: base.triggerEvent || base.functionProcess || "",
+        functionProcess: base.functionProcess || "",
+        functionDescription: base.functionDescription || "",
+        subProcessDescription: base.subProcessDescription || "",
+        sequenceDiagram: base.sequenceDiagram || "",
+        movementType: base.movementType || "E",
+        dataGroup: base.dataGroup || "",
+        dataAttributes: base.dataAttributes || "",
+        reuseDegree: base.reuseDegree || "新增",
+        cfp: base.cfp || 1
+      });
+    }
+
+    function cloneRow(row) {
+      return normalizeRow(JSON.parse(JSON.stringify(row || {})));
+    }
+
+    function addReviewRow() {
+      const base = splitRows.length ? splitRows[splitRows.length - 1] : {};
+      splitRows.push(blankReviewRow(base));
+      selectedRows = {};
+      selectedRows[splitRows.length - 1] = true;
+      renderTable();
+      updateStats();
+    }
+
+    function copyRow(index) {
+      if (index < 0 || index >= splitRows.length) {
+        return;
+      }
+      splitRows.splice(index + 1, 0, cloneRow(splitRows[index]));
+      selectedRows = {};
+      selectedRows[index + 1] = true;
+      renderTable();
+      updateStats();
+    }
+
+    function deleteRow(index) {
+      if (index < 0 || index >= splitRows.length) {
+        return;
+      }
+      if (splitRows.length === 1) {
+        showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
+        return;
+      }
+      splitRows.splice(index, 1);
+      selectedRows = {};
+      renderTable();
+      updateStats();
+    }
+
+    function toggleAllRows(checked) {
+      const visibleRows = filteredRowEntries();
+      const visibleMap = {};
+      visibleRows.forEach(function (entry) {
+        visibleMap[entry.index] = true;
+      });
+      Object.keys(selectedRows).forEach(function (index) {
+        if (visibleMap[index]) {
+          delete selectedRows[index];
+        }
+      });
+      if (checked) {
+        visibleRows.forEach(function (entry) {
+          selectedRows[entry.index] = true;
+        });
+      }
+      renderTable();
+    }
+
+    function selectedRowIndexes() {
+      return Object.keys(selectedRows)
+        .map(function (value) { return Number(value); })
+        .filter(function (index) { return index >= 0 && index < splitRows.length; })
+        .sort(function (a, b) { return a - b; });
+    }
+
+    function syncSelectedRows() {
+      const next = {};
+      selectedRowIndexes().forEach(function (index) {
+        next[index] = true;
+      });
+      selectedRows = next;
+    }
+
+    function copySelectedRows() {
+      const indexes = selectedRowIndexes();
+      if (!indexes.length) {
+        showDialog("请选择行", "请先勾选需要复制的拆分行。");
+        return;
+      }
+      const copies = indexes.map(function (index) {
+        return cloneRow(splitRows[index]);
+      });
+      splitRows = splitRows.concat(copies);
+      selectedRows = {};
+      for (let i = splitRows.length - copies.length; i < splitRows.length; i++) {
+        selectedRows[i] = true;
+      }
+      renderTable();
+      updateStats();
+    }
+
+    function deleteSelectedRows() {
+      const indexes = selectedRowIndexes();
+      if (!indexes.length) {
+        showDialog("请选择行", "请先勾选需要删除的拆分行。");
+        return;
+      }
+      if (indexes.length >= splitRows.length) {
+        showDialog("至少保留一行", "功能点拆分表至少需要保留一行数据。");
+        return;
+      }
+      const deleteMap = {};
+      indexes.forEach(function (index) {
+        deleteMap[index] = true;
+      });
+      splitRows = splitRows.filter(function (_, index) {
+        return !deleteMap[index];
+      });
+      selectedRows = {};
+      renderTable();
+      updateStats();
+    }
+
+    function onBatchFieldChange() {
+      const field = $("batchField").value;
+      const input = $("batchValue");
+      const select = $("batchSelectValue");
+      select.innerHTML = "";
+      let options = null;
+      if (field === "movementType") {
+        options = movementOptions;
+      } else if (field === "reuseDegree") {
+        options = reuseOptions;
+      } else if (field === "sequenceDiagram") {
+        options = sequenceDiagramOptions;
+      }
+      if (options) {
+        options.forEach(function (item) {
+          const option = document.createElement("option");
+          option.value = item;
+          option.textContent = item;
+          select.appendChild(option);
+        });
+        select.classList.remove("hidden");
+        input.classList.add("hidden");
+      } else {
+        select.classList.add("hidden");
+        input.classList.remove("hidden");
+      }
+    }
+
+    function applyBatchChange() {
+      const indexes = selectedRowIndexes();
+      if (!indexes.length) {
+        showDialog("请选择行", "请先勾选需要批量修改的拆分行。");
+        return;
+      }
+      const field = $("batchField").value;
+      const value = $("batchSelectValue").classList.contains("hidden") ? $("batchValue").value : $("batchSelectValue").value;
+      indexes.forEach(function (index) {
+        splitRows[index][field] = value;
+        splitRows[index] = normalizeRow(splitRows[index]);
+      });
+      renderTable();
+      updateStats();
+    }
+
+    function normalizeRow(row) {
+      const next = Object.assign({}, row || {});
+      next.level1Module = textOr(next.level1Module, "未命名模块");
+      next.level2Module = textOr(next.level2Module, next.level1Module);
+      next.level3Module = textOr(next.level3Module, next.level2Module);
+      next.functionProcess = textOr(next.functionProcess, next.level3Module);
+      next.subProcessDescription = textOr(next.subProcessDescription, next.functionProcess);
+      next.movementType = movementOptions.indexOf(next.movementType) >= 0 ? next.movementType : "E";
+      next.dataGroup = textOr(next.dataGroup, next.functionProcess);
+      next.dataAttributes = textOr(next.dataAttributes, next.subProcessDescription);
+      next.functionDescription = textOr(next.functionDescription, defaultFunctionDescription(next.subProcessDescription, next.dataAttributes));
+      next.sequenceDiagram = sequenceDiagramOptions.indexOf(next.sequenceDiagram) >= 0 ? next.sequenceDiagram : defaultSequenceDiagram(next.movementType, next.subProcessDescription, next.dataGroup, next.dataAttributes);
+      next.reuseDegree = reuseOptions.indexOf(next.reuseDegree) >= 0 ? next.reuseDegree : "新增";
+      next.cfp = cfpByReuse(next.reuseDegree);
+      if (!next.projectName && $("projectName").value) {
+        next.projectName = $("projectName").value;
+      }
+      return next;
+    }
+
+    function textOr(value, fallback) {
+      const text = (value == null ? "" : String(value)).trim();
+      return text || fallback || "";
+    }
+
+    function defaultFunctionDescription(subProcessDescription, dataAttributes) {
+      const subProcess = textOr(subProcessDescription, "处理功能子过程");
+      const attributes = textOr(dataAttributes, "相关数据属性");
+      return subProcess + "，涉及" + attributes + "。";
+    }
+
+    function defaultSequenceDiagram(movementType, subProcessDescription, dataGroup, dataAttributes) {
+      if (movementType === "E") {
+        return "UI->UI";
+      }
+      if (movementType === "R") {
+        if (isBackendRead(subProcessDescription, dataGroup, dataAttributes)) {
+          return "后台服务->后台服务";
+        }
+        return "UI->后台服务";
+      }
+      if (movementType === "W") {
+        return "后台服务->UI";
+      }
+      if (movementType === "X") {
+        return "后台服务->UI";
+      }
+      return "UI->UI";
+    }
+
+    function isBackendRead(subProcessDescription, dataGroup, dataAttributes) {
+      const text = [subProcessDescription, dataGroup, dataAttributes].map(function (value) {
+        return value == null ? "" : String(value);
+      }).join(" ");
+      return ["数据处理", "计算", "汇总", "统计", "校验", "转换", "保存", "写入", "更新"].some(function (keyword) {
+        return text.indexOf(keyword) >= 0;
+      });
+    }
+
+    function cfpByReuse(reuseDegree) {
+      if (reuseDegree === "复用") {
+        return 1 / 3;
+      }
+      if (reuseDegree === "利旧") {
+        return 0;
+      }
+      return 1;
+    }
+
+    function updateStats() {
+      splitRows = splitRows.map(normalizeRow);
+      const processes = {};
+      splitRows.forEach(function (row) {
+        processes[row.functionProcess] = true;
+      });
+      const total = splitRows.reduce(function (sum, row) {
+        return sum + Number(row.cfp || 0);
+      }, 0);
+      $("functionCount").textContent = Object.keys(processes).length;
+      $("totalCfp").textContent = formatCfp(total);
+    }
+
+    async function saveReview() {
+      await withBusy(async function () {
         splitRows = splitRows.map(normalizeRow);
         setMessage("正在保存审核修改...");
-        await request("/api/projects/" + currentProjectId + "/review", {
+        const response = await request("/api/projects/" + currentProjectId + "/review", {
           method: "PUT",
-          headers: {"Content-Type": "application/json"},
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(splitRows)
         });
+        splitRows = (response.data.splitRows || []).map(normalizeRow);
+        renderTable();
+        updateStats();
+        setMessage("审核数据已保存。", "success");
+      });
+    }
 
-        setExportStep("excel", "进行中", "running");
-        setMessage("正在导出 Excel...");
-        const excelResponse = await request("/api/projects/" + currentProjectId + "/export/excel", {method: "POST"});
-        const excelInfo = await getExportInfo("excel", excelResponse.data.excelOutputPath);
-        setExportStep("excel", "已完成", "done");
+    async function exportExcel() {
+      await withBusy(async function () {
+        await saveReview();
+        setMessage("正在按固定模板导出功能点拆分表...");
+        const response = await request("/api/projects/" + currentProjectId + "/export/excel", { method: "POST" });
+        await showExportResult("功能点拆分表", "excel", response.data.excelOutputPath);
+        setMessage("功能点拆分表已导出。", "success");
+      });
+    }
 
-        setExportStep("word", "进行中", "running");
-        setMessage("正在按 Excel 内容生成 Word...");
-        const wordResponse = await request("/api/projects/" + currentProjectId + "/export/word", {method: "POST"});
-        const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
-        setExportStep("word", "已完成", "done");
+    async function exportWord() {
+      await withBusy(async function () {
+        setMessage("正在按功能点拆分表生成需求说明书...");
+        const response = await request("/api/projects/" + currentProjectId + "/export/word", { method: "POST" });
+        await showExportResult("需求说明书", "word", response.data.wordOutputPath);
+        setMessage("需求说明书已导出。", "success");
+      });
+    }
 
-        setExportStep("check", "进行中", "running");
-        setMessage("正在检查 Excel 和 Word 一致性...");
-        const checkResponse = await request("/api/projects/" + currentProjectId + "/exports/consistency");
-        const checkData = checkResponse.data || {};
-        setExportStep("check", checkData.matched ? "已完成" : "未通过", checkData.matched ? "done" : "failed");
+    async function exportReviewMaterials() {
+      if (!currentProjectId || !splitRows.length) {
+        showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
+        return;
+      }
+      openExportDialog();
+      $("export-dialog-close").disabled = true;
+      await withBusy(async function () {
+        try {
+          splitRows = splitRows.map(normalizeRow);
+          setMessage("正在保存审核修改...");
+          await request("/api/projects/" + currentProjectId + "/review", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(splitRows)
+          });
 
-        renderMaterialResult(excelInfo, wordInfo, checkData);
-        $("outputPanel").classList.add("hidden");
-        setMessage(checkData.matched ? "送审材料已导出，一致性检查通过。" : "送审材料已导出，但一致性检查未通过，请查看提示。", checkData.matched ? "success" : "error");
+          setExportStep("excel", "进行中", "running");
+          setExportStep("business", "进行中", "running");
+          setMessage("正在导出功能点拆分表...");
+          const excelResponse = await request("/api/projects/" + currentProjectId + "/export/excel", { method: "POST" });
+          const excelInfo = await getExportInfo("excel", excelResponse.data.excelOutputPath);
+          const businessInfo = await getExportInfo("business", excelResponse.data.businessRequirementOutputPath);
+          setExportStep("excel", "已完成", "done");
+
+          setExportStep("business", "已完成", "done");
+
+          setExportStep("word", "进行中", "running");
+          setMessage("正在按功能点拆分表生成需求说明书...");
+          const wordResponse = await request("/api/projects/" + currentProjectId + "/export/word", { method: "POST" });
+          const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
+          setExportStep("word", "已完成", "done");
+
+          renderMaterialResult(excelInfo, businessInfo, wordInfo);
+          $("outputPanel").classList.add("hidden");
+          setMessage("送审材料已导出。", "success");
+        } catch (error) {
+          markRunningExportFailed();
+          setMessage(error.message || "导出送审材料失败。", "error");
+          throw error;
+        } finally {
+          $("export-dialog-close").disabled = false;
+        }
+      });
+    }
+
+    function markRunningExportFailed() {
+      ["excel", "business", "word"].some(function (step) {
+        const row = $("export-step-" + step);
+        if (row.classList.contains("running")) {
+          setExportStep(step, "失败", "failed");
+          return true;
+        }
+        return false;
+      });
+    }
+
+    async function getExportInfo(fileType, fallbackPath) {
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/info");
+        return response.data || { filePath: fallbackPath };
       } catch (error) {
-        markRunningExportFailed();
-        setMessage(error.message || "导出送审材料失败。", "error");
+        return { filePath: fallbackPath, downloadUrl: "/api/projects/" + currentProjectId + "/exports/" + fileType + "/download" };
+      }
+    }
+
+    function renderMaterialResult(excelInfo, businessInfo, wordInfo) {
+      const result = $("export-material-result");
+      result.innerHTML =
+        "<div class=\"material-summary\">" +
+        "<b>材料所在路径</b>" +
+        "<p>已按功能点拆分表生成业务需求汇总表和需求说明书。</p>" +
+        "</div>" +
+        renderMaterialFile("功能点拆分表", "excel", excelInfo) +
+        renderMaterialFile("业务需求汇总表", "business", businessInfo) +
+        renderMaterialFile("需求说明书", "word", wordInfo);
+      result.classList.remove("hidden");
+    }
+
+    function renderMaterialFile(label, fileType, info) {
+      const filePath = info.filePath || "";
+      const downloadUrl = info.downloadUrl || ("/api/projects/" + currentProjectId + "/exports/" + fileType + "/download");
+      return "<div class=\"material-file\">" +
+        "<div><span>" + escapeHtml(label) + "</span><code>" + escapeHtml(filePath) + "</code></div>" +
+        "<div class=\"material-file-actions\">" +
+        (info.windows ? "<button type=\"button\" class=\"secondary\" onclick=\"openDirectory('" + escapeHtml(fileType) + "')\">打开目录</button>" : "") +
+        "<a class=\"button-link\" href=\"" + escapeHtml(downloadUrl) + "\">下载</a>" +
+        "</div>" +
+        "</div>";
+    }
+
+    async function showExportResult(label, fileType, fallbackPath) {
+      let info = {};
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/info");
+        info = response.data || {};
+      } catch (error) {
+        info = { filePath: fallbackPath, downloadUrl: "/api/projects/" + currentProjectId + "/exports/" + fileType + "/download" };
+      }
+      $("outputPanel").classList.remove("hidden");
+      const item = document.createElement("div");
+      item.className = "output-item";
+      const filePath = info.filePath || fallbackPath || "";
+      const downloadUrl = info.downloadUrl || ("/api/projects/" + currentProjectId + "/exports/" + fileType + "/download");
+      item.innerHTML =
+        "<div><b>" + escapeHtml(label) + "</b><code>" + escapeHtml(filePath) + "</code></div>" +
+        "<div class=\"output-actions\">" +
+        (info.windows ? "<button type=\"button\" class=\"secondary\" data-file-type=\"" + escapeHtml(fileType) + "\">打开目录</button>" : "") +
+        "<a class=\"button-link\" href=\"" + escapeHtml(downloadUrl) + "\">下载</a>" +
+        "</div>";
+      $("outputList").prepend(item);
+      const openButton = item.querySelector("button[data-file-type]");
+      if (openButton) {
+        openButton.addEventListener("click", function () {
+          openDirectory(fileType);
+        });
+      }
+    }
+
+    async function openDirectory(fileType) {
+      await withBusy(async function () {
+        const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/open-directory", { method: "POST" });
+        const data = response.data || {};
+        setMessage(data.message || "已尝试打开输出目录。", data.opened ? "success" : "error");
+      });
+    }
+
+    async function withBusy(fn) {
+      setBusy(true);
+      try {
+        return await fn();
+      } catch (error) {
+        setMessage(error.message || "操作失败。", "error");
         throw error;
       } finally {
-        $("export-dialog-close").disabled = false;
+        setBusy(false);
+      }
+    }
+
+    async function request(url, options) {
+      const response = await fetch(url, options || {});
+      const contentType = response.headers.get("content-type") || "";
+      const payload = contentType.indexOf("application/json") >= 0 ? await response.json() : await response.text();
+      if (!response.ok) {
+        const message = payload && payload.message ? payload.message : ("请求失败：" + response.status);
+        throw new Error(message);
+      }
+      if (payload && payload.success === false) {
+        throw new Error(payload.message || "请求失败。");
+      }
+      return payload;
+    }
+
+    function formatCfp(value) {
+      const number = Number(value || 0);
+      if (Math.abs(number - Math.round(number)) < 0.000001) {
+        return String(Math.round(number));
+      }
+      return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    window.addEventListener("DOMContentLoaded", function () {
+      const params = new URLSearchParams(location.search);
+      const projectId = params.get("projectId");
+      if (projectId) {
+        closeDialog();
+        currentProjectId = projectId;
+        $("projectBadge").textContent = projectId;
+        $("projectBadge").className = "badge";
+        loadReviewFromProjectId().catch(function () {
+          setMessage("当前项目尚未生成审核数据，请上传或继续执行处理流程。", "error");
+        });
       }
     });
-  }
 
-  function markRunningExportFailed() {
-    ["excel", "word", "check"].some(function (step) {
-      const row = $("export-step-" + step);
-      if (row.classList.contains("running")) {
-        setExportStep(step, "失败", "failed");
-        return true;
+    window.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        closeAiPromptDialog();
       }
-      return false;
     });
-  }
-
-  async function getExportInfo(fileType, fallbackPath) {
-    try {
-      const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/info");
-      return response.data || {filePath: fallbackPath};
-    } catch (error) {
-      return {filePath: fallbackPath, downloadUrl: "/api/projects/" + currentProjectId + "/exports/" + fileType + "/download"};
-    }
-  }
-
-  function renderMaterialResult(excelInfo, wordInfo, checkData) {
-    const result = $("export-material-result");
-    result.innerHTML =
-      "<div class=\"material-summary\">" +
-      "<b>材料所在路径</b>" +
-      "<p>" + (checkData.matched ? "Excel 与 Word 一致性检查通过。" : "Excel 与 Word 一致性检查未通过。") + "</p>" +
-      "</div>" +
-      renderMaterialFile("Excel", "excel", excelInfo) +
-      renderMaterialFile("Word", "word", wordInfo);
-    result.classList.remove("hidden");
-  }
-
-  function renderMaterialFile(label, fileType, info) {
-    const filePath = info.filePath || "";
-    const downloadUrl = info.downloadUrl || ("/api/projects/" + currentProjectId + "/exports/" + fileType + "/download");
-    return "<div class=\"material-file\">" +
-      "<div><span>" + escapeHtml(label) + "</span><code>" + escapeHtml(filePath) + "</code></div>" +
-      "<div class=\"material-file-actions\">" +
-      (info.windows ? "<button type=\"button\" class=\"secondary\" onclick=\"openDirectory('" + escapeHtml(fileType) + "')\">打开目录</button>" : "") +
-      "<a class=\"button-link\" href=\"" + escapeHtml(downloadUrl) + "\">下载</a>" +
-      "</div>" +
-      "</div>";
-  }
-
-  async function showExportResult(label, fileType, fallbackPath) {
-    let info = {};
-    try {
-      const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/info");
-      info = response.data || {};
-    } catch (error) {
-      info = {filePath: fallbackPath, downloadUrl: "/api/projects/" + currentProjectId + "/exports/" + fileType + "/download"};
-    }
-    $("outputPanel").classList.remove("hidden");
-    const item = document.createElement("div");
-    item.className = "output-item";
-    const filePath = info.filePath || fallbackPath || "";
-    const downloadUrl = info.downloadUrl || ("/api/projects/" + currentProjectId + "/exports/" + fileType + "/download");
-    item.innerHTML =
-      "<div><b>" + escapeHtml(label) + "</b><code>" + escapeHtml(filePath) + "</code></div>" +
-      "<div class=\"output-actions\">" +
-      (info.windows ? "<button type=\"button\" class=\"secondary\" data-file-type=\"" + escapeHtml(fileType) + "\">打开目录</button>" : "") +
-      "<a class=\"button-link\" href=\"" + escapeHtml(downloadUrl) + "\">下载</a>" +
-      "</div>";
-    $("outputList").prepend(item);
-    const openButton = item.querySelector("button[data-file-type]");
-    if (openButton) {
-      openButton.addEventListener("click", function () {
-        openDirectory(fileType);
-      });
-    }
-  }
-
-  async function openDirectory(fileType) {
-    await withBusy(async function () {
-      const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/open-directory", {method: "POST"});
-      const data = response.data || {};
-      setMessage(data.message || "已尝试打开输出目录。", data.opened ? "success" : "error");
-    });
-  }
-
-  async function withBusy(fn) {
-    setBusy(true);
-    try {
-      return await fn();
-    } catch (error) {
-      setMessage(error.message || "操作失败。", "error");
-      throw error;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function request(url, options) {
-    const response = await fetch(url, options || {});
-    const contentType = response.headers.get("content-type") || "";
-    const payload = contentType.indexOf("application/json") >= 0 ? await response.json() : await response.text();
-    if (!response.ok) {
-      const message = payload && payload.message ? payload.message : ("请求失败：" + response.status);
-      throw new Error(message);
-    }
-    if (payload && payload.success === false) {
-      throw new Error(payload.message || "请求失败。");
-    }
-    return payload;
-  }
-
-  function formatCfp(value) {
-    const number = Number(value || 0);
-    if (Math.abs(number - Math.round(number)) < 0.000001) {
-      return String(Math.round(number));
-    }
-    return number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-  }
-
-  function escapeHtml(value) {
-    return String(value == null ? "" : value)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-  }
-
-  window.addEventListener("DOMContentLoaded", function () {
-    const params = new URLSearchParams(location.search);
-    const projectId = params.get("projectId");
-    if (projectId) {
-      closeDialog();
-      currentProjectId = projectId;
-      $("projectBadge").textContent = projectId;
-      $("projectBadge").className = "badge";
-      loadReviewFromProjectId().catch(function () {
-        setMessage("当前项目尚未生成审核数据，请上传或继续执行处理流程。", "error");
-      });
-    }
-  });
-
-  window.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") {
-      closeAiPromptDialog();
-    }
-  });
-</script>
+  </script>
 </body>
+
 </html>

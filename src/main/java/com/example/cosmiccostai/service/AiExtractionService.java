@@ -37,6 +37,7 @@ public class AiExtractionService {
 
     private static final Logger log = LoggerFactory.getLogger(AiExtractionService.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final String USER_EDITED_PROMPT_FLAG = "ai-prompt-user-edited.flag";
 
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
@@ -66,19 +67,13 @@ public class AiExtractionService {
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
-        String documentText = readText(Paths.get(metadata.getDocumentTextPath()));
-        String requirementDetail = extractRequirementDetail(documentText);
-        if (!StringUtils.hasText(requirementDetail)) {
-            throw new BusinessException("Requirement detail section is empty");
-        }
-
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
-        Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
-        writeText(requirementDetailPath, requirementDetail);
+        String requirementDetail = resolveRequirementDetail(metadata, projectDir);
 
         String prompt = buildPrompt(requirementDetail);
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
+        clearUserEditedPromptFlag(projectDir);
         return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
     }
 
@@ -93,6 +88,7 @@ public class AiExtractionService {
         String requirementDetail = resolveRequirementDetail(metadata, projectDir);
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
+        writeText(projectDir.resolve(USER_EDITED_PROMPT_FLAG), "true");
         return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
     }
 
@@ -123,6 +119,7 @@ public class AiExtractionService {
         metadata.setCosmicResultsPath(null);
         metadata.setFunctionSplitRowsPath(null);
         metadata.setExcelOutputPath(null);
+        metadata.setBusinessRequirementOutputPath(null);
         metadata.setWordOutputPath(null);
         metadata.setStatus("EXTRACTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
@@ -145,11 +142,19 @@ public class AiExtractionService {
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         String prompt;
-        if (Files.exists(promptPath)) {
+        String requirementDetail = resolveRequirementDetail(metadata, projectDir);
+        if (Files.exists(promptPath) && Files.exists(projectDir.resolve(USER_EDITED_PROMPT_FLAG))) {
             prompt = readText(promptPath);
+        } else if (Files.exists(promptPath) && !"PARSED".equals(metadata.getStatus())) {
+            prompt = readText(promptPath);
+            String expectedPrompt = buildPrompt(requirementDetail);
+            if (!expectedPrompt.equals(prompt)) {
+                prompt = expectedPrompt;
+                writeText(promptPath, prompt);
+            }
         } else {
-            String requirementDetail = resolveRequirementDetail(metadata, projectDir);
             prompt = buildPrompt(requirementDetail);
+            writeText(promptPath, prompt);
         }
 
         AiPromptResponse response = new AiPromptResponse();
@@ -164,7 +169,10 @@ public class AiExtractionService {
         if (StringUtils.hasText(metadata.getRequirementDetailPath())) {
             Path requirementDetailPath = Paths.get(metadata.getRequirementDetailPath());
             if (Files.exists(requirementDetailPath)) {
-                return readText(requirementDetailPath);
+                String requirementDetail = readText(requirementDetailPath);
+                if (StringUtils.hasText(requirementDetail)) {
+                    return requirementDetail;
+                }
             }
         }
 
@@ -238,7 +246,8 @@ public class AiExtractionService {
                 || "建设目标".equals(normalized)
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
-                || "归属系统".equals(normalized);
+                || "归属系统".equals(normalized)
+                || isTopLevelSectionHeading(line);
     }
 
     private String normalizeSectionTitle(String line) {
@@ -252,6 +261,19 @@ public class AiExtractionService {
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
                 .replaceAll("[:：]+$", "");
         return value.trim();
+    }
+
+    private boolean isTopLevelSectionHeading(String line) {
+        if (!StringUtils.hasText(line)) {
+            return false;
+        }
+        String value = line.trim();
+        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")) {
+            return false;
+        }
+        return value.matches("^[一二三四五六七八九十]+[、.．]\\s*\\S.{0,60}$")
+                || value.matches("^第[一二三四五六七八九十\\d]+[章节条]\\s*\\S.{0,60}$")
+                || value.matches("^\\d+[、.．]\\s*\\D.{0,60}$");
     }
 
     private boolean containsAny(String text, String... keywords) {
@@ -583,6 +605,14 @@ public class AiExtractionService {
             Files.write(path, text.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new BusinessException("Write text file failed: " + path, ex);
+        }
+    }
+
+    private void clearUserEditedPromptFlag(Path projectDir) {
+        try {
+            Files.deleteIfExists(projectDir.resolve(USER_EDITED_PROMPT_FLAG));
+        } catch (IOException ex) {
+            throw new BusinessException("Clear user edited prompt flag failed: " + projectDir, ex);
         }
     }
 

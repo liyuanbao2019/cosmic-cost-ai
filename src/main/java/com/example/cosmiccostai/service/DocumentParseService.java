@@ -49,7 +49,16 @@ public class DocumentParseService {
             throw new BusinessException("Write parsed text failed: " + projectId, ex);
         }
 
+        String requirementDetail = extractRequirementDetailPreview(parsedDocument.getText());
+        Path requirementDetailPath = fileStorageService.resolveProjectDir(projectId).resolve("requirement-detail.txt");
+        try {
+            Files.write(requirementDetailPath, requirementDetail.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            throw new BusinessException("Write requirement detail failed: " + projectId, ex);
+        }
+
         metadata.setDocumentTextPath(textPath.toString());
+        metadata.setRequirementDetailPath(requirementDetailPath.toString());
         metadata.setStatus("PARSED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
@@ -62,8 +71,8 @@ public class DocumentParseService {
         response.setTableCount(parsedDocument.getTableCount());
         response.setTextLength(parsedDocument.getText().length());
         response.setStatus(metadata.getStatus());
-        response.setPreview(buildPreview(extractRequirementDetailPreview(parsedDocument.getText())));
-        RequirementDiagnosis diagnosis = diagnoseRequirementSection(parsedDocument.getText());
+        response.setPreview(buildPreview(requirementDetail));
+        RequirementDiagnosis diagnosis = diagnoseRequirementSection(requirementDetail);
         response.setRequirementRecognized(diagnosis.recognized);
         response.setRequirementWarning(diagnosis.warning);
         response.setRequirementSuggestion(diagnosis.suggestion);
@@ -188,22 +197,17 @@ public class DocumentParseService {
                 || "建设目标".equals(normalized)
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
-                || "归属系统".equals(normalized);
+                || "归属系统".equals(normalized)
+                || isTopLevelSectionHeading(line);
     }
 
-    private RequirementDiagnosis diagnoseRequirementSection(String text) {
-        if (!StringUtils.hasText(text)) {
+    private RequirementDiagnosis diagnoseRequirementSection(String requirementDetail) {
+        if (!StringUtils.hasText(requirementDetail)) {
             return new RequirementDiagnosis(false,
-                    "未解析到有效文档正文。",
-                    "请确认上传的是包含正文内容的 docx 文件，且需求内容不是纯图片。");
-        }
-        String requirementDetail = extractRequirementDetailPreview(text);
-        if (StringUtils.hasText(requirementDetail)) {
-            return new RequirementDiagnosis(true, "", "");
-        }
-        return new RequirementDiagnosis(false,
                 "未识别到有效的需求内容。",
                 "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。");
+        }
+        return new RequirementDiagnosis(true, "", "");
     }
 
     private boolean isRequirementSection(String line) {
@@ -225,6 +229,19 @@ public class DocumentParseService {
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
                 .replaceAll("[:：]+$", "")
                 .trim();
+    }
+
+    private boolean isTopLevelSectionHeading(String line) {
+        if (!StringUtils.hasText(line)) {
+            return false;
+        }
+        String value = line.trim();
+        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")) {
+            return false;
+        }
+        return value.matches("^[一二三四五六七八九十]+[、.．]\\s*\\S.{0,60}$")
+                || value.matches("^第[一二三四五六七八九十\\d]+[章节条]\\s*\\S.{0,60}$")
+                || value.matches("^\\d+[、.．]\\s*\\D.{0,60}$");
     }
 
     private static class ParsedDocument {

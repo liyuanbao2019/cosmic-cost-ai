@@ -4,6 +4,7 @@ public class ExcelExportResponse {
 
     private String projectId;
     private String excelOutputPath;
+    private String businessRequirementOutputPath;
     private int functionCount;
     private int movementRowCount;
     private double totalCfp;
@@ -23,6 +24,14 @@ public class ExcelExportResponse {
 
     public void setExcelOutputPath(String excelOutputPath) {
         this.excelOutputPath = excelOutputPath;
+    }
+
+    public String getBusinessRequirementOutputPath() {
+        return businessRequirementOutputPath;
+    }
+
+    public void setBusinessRequirementOutputPath(String businessRequirementOutputPath) {
+        this.businessRequirementOutputPath = businessRequirementOutputPath;
     }
 
     public int getFunctionCount() {
