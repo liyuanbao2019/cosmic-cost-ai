@@ -103,14 +103,29 @@
             <option value="26年家客运维">26年家客运维</option>
           </select>
         </div>
-        <div class="upload-field">
+        <div class="upload-field split-mode-field">
+          <label for="splitMode">
+            <span>拆分方式</span>
+          </label>
+          <select id="splitMode" onchange="onSplitModeChange()">
+            <option value="document">原始需求文档拆分</option>
+            <option value="excel">Excel 功能列表拆分</option>
+          </select>
+        </div>
+        <div id="documentUploadField" class="upload-field">
           <label for="fileInput">
             <span>需求文档 <em>（请上传需求文档（docx 或 pdf））</em></span>
           </label>
           <input id="fileInput" type="file" accept=".docx,.pdf">
         </div>
+        <div id="excelUploadField" class="upload-field hidden">
+          <label for="splitExcelInput">
+            <span>已拆分 Excel <em>（按附件3功能点拆分表导入）</em></span>
+          </label>
+          <input id="splitExcelInput" type="file" accept=".xlsx,.xls">
+        </div>
         <div class="actions">
-          <button id="runBtn" type="button" onclick="runAll()">开始拆分</button>
+          <button id="runBtn" type="button" onclick="startSplit()">开始拆分</button>
           <button type="button" class="secondary" onclick="startNewTask()">新建任务</button>
           <button type="button" class="ghost" onclick="resetPage()">重置</button>
         </div>
@@ -314,6 +329,7 @@
     let selectedRows = {};
     let reviewDensity = "comfortable";
     let cellEditorState = null;
+    let splitMode = "document";
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -374,8 +390,73 @@
       document.body.classList.toggle("busy", busy);
     }
 
-    function markActive(step) {
+    function onSplitModeChange() {
+      setSplitMode($("splitMode").value || "document", false, true);
+    }
+
+    function setSplitMode(mode, keepFiles, resetFlow) {
+      splitMode = mode === "excel" ? "excel" : "document";
+      if ($("splitMode")) {
+        $("splitMode").value = splitMode;
+      }
+      $("documentUploadField").classList.toggle("hidden", splitMode !== "document");
+      $("excelUploadField").classList.toggle("hidden", splitMode !== "excel");
+      if (!keepFiles) {
+        $("fileInput").value = "";
+        $("splitExcelInput").value = "";
+      }
+      if (resetFlow) {
+        resetFlowStateForMode();
+      }
+      applyFlowMode();
+    }
+
+    function flowStepsForCurrentMode() {
+      return splitMode === "excel" ? ["cosmic", "review"] : ["upload", "parse", "ai", "cosmic", "review"];
+    }
+
+    function resetFlowStateForMode() {
+      const visibleSteps = flowStepsForCurrentMode();
       ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+        const step = $("step-" + name);
+        if (step) {
+          step.className = "flow-step pending";
+        }
+      });
+      if (visibleSteps.length) {
+        $("step-" + visibleSteps[0]).className = "flow-step active";
+      }
+    }
+
+    function applyFlowMode() {
+      const visibleSteps = flowStepsForCurrentMode();
+      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+        const step = $("step-" + name);
+        if (!step) return;
+        const wrap = step.closest(".flow-step-wrap");
+        if (wrap) {
+          wrap.classList.toggle("hidden", visibleSteps.indexOf(name) < 0);
+        }
+        if (visibleSteps.indexOf(name) < 0) {
+          step.classList.remove("active", "done", "pending", "clickable");
+        }
+      });
+      const firstStep = visibleSteps[0];
+      const hasActiveOrDone = visibleSteps.some(function (name) {
+        const step = $("step-" + name);
+        return step && (step.classList.contains("active") || step.classList.contains("done"));
+      });
+      if (!hasActiveOrDone && firstStep) {
+        $("step-" + firstStep).className = "flow-step active";
+        visibleSteps.slice(1).forEach(function (name) {
+          $("step-" + name).className = "flow-step pending";
+        });
+      }
+      updateFlowProgress();
+    }
+
+    function markActive(step) {
+      flowStepsForCurrentMode().forEach(function (name) {
         const el = $("step-" + name);
         if (name === step) {
           el.classList.add("active");
@@ -389,6 +470,9 @@
 
     function markDone(step) {
       const el = $("step-" + step);
+      if (!el || flowStepsForCurrentMode().indexOf(step) < 0) {
+        return;
+      }
       el.classList.add("done");
       el.classList.remove("active");
       if (step === "parse" || step === "ai") {
@@ -523,7 +607,7 @@
     function updateFlowProgress() {
       const progressEl = document.querySelector(".flow-progress");
       if (!progressEl) return;
-      const steps = ["upload", "parse", "ai", "cosmic", "review"];
+      const steps = flowStepsForCurrentMode();
       const doneCount = steps.filter(function (name) {
         const el = $("step-" + name);
         return el && el.classList.contains("done");
@@ -533,7 +617,7 @@
         return el && el.classList.contains("active");
       });
       const progress = activeIndex >= 0 ? activeIndex : doneCount;
-      const percent = (progress / (steps.length - 1)) * 100;
+      const percent = steps.length <= 1 ? 0 : (progress / (steps.length - 1)) * 100;
       progressEl.style.width = percent + "%";
     }
 
@@ -543,7 +627,11 @@
       selectedRows = {};
       reviewDensity = "comfortable";
       cellEditorState = null;
+      setSplitMode("document", true, true);
       $("fileInput").value = "";
+      if ($("splitExcelInput")) {
+        $("splitExcelInput").value = "";
+      }
       $("projectName").value = "";
       if ($("reviewSearch")) {
         resetReviewFilters();
@@ -562,16 +650,17 @@
       $("outputPanel").classList.add("hidden");
       $("outputList").innerHTML = "";
       setMessage("");
-      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
-        const el = $("step-" + name);
-        if (name === "upload") {
-          el.className = "flow-step active";
-        } else {
-          el.className = "flow-step pending";
-        }
-      });
+      applyFlowMode();
       updateFlowProgress();
       history.replaceState(null, "", "/index.html");
+    }
+
+    async function startSplit() {
+      if (splitMode === "excel") {
+        await importSplitExcel();
+        return;
+      }
+      await runAll();
     }
 
     async function runAll() {
@@ -626,6 +715,56 @@
       });
     }
 
+    async function importSplitExcel() {
+      if (!$("projectName").value) {
+        showDialog("请选择项目名称", "请先选择项目名称，再导入已拆分 Excel。");
+        return;
+      }
+      const file = $("splitExcelInput").files[0];
+      if (!file) {
+        showDialog("请先上传已拆分 Excel", "请选择 xlsx 或 xls 格式的功能点拆分表。");
+        return;
+      }
+      try {
+        await withBusy(async function () {
+          markActive("cosmic");
+          const formData = new FormData();
+          formData.append("file", file);
+          formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
+          setMessage("正在导入已拆分 Excel...");
+          const imported = await request("/api/files/upload-split-excel", { method: "POST", body: formData });
+          currentProjectId = imported.data.projectId;
+          $("projectBadge").textContent = currentProjectId;
+          $("projectBadge").className = "badge";
+          history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
+
+          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。";
+          $("parsePanel").classList.add("hidden");
+          markDone("cosmic");
+          await loadReview();
+          markActive("review");
+          setMessage("已导入 Excel，请在下方审核功能点，保存后再导出送审材料。", "success");
+        });
+      } catch (error) {
+        markActive("cosmic");
+        showDialog("导入已拆分 Excel 失败", buildSplitExcelImportError(error));
+      }
+    }
+
+    function buildSplitExcelImportError(error) {
+      const message = error && error.message ? error.message : "导入失败，请检查 Excel 模板和数据内容。";
+      if (message.indexOf("404") >= 0 || message.indexOf("Not Found") >= 0) {
+        return "导入接口不可用，请确认后端服务已更新并重启。\n\n接口：/api/files/upload-split-excel";
+      }
+      if (message.indexOf("功能点拆分表") >= 0 || message.indexOf("工作表") >= 0 || message.indexOf("sheet") >= 0) {
+        return message + "\n\n处理建议：请确认上传的是附件3功能点拆分表，并且工作簿中存在“2、功能点拆分表”页；如果 sheet 名不同，请保留表头中的客户需求、一级模块、功能过程、数据移动、复用度等字段。";
+      }
+      if (message.indexOf("第 ") >= 0 || message.indexOf("行") >= 0 || message.indexOf("列") >= 0) {
+        return message + "\n\n处理建议：请按提示修正对应行列后重新导入。必填列包括 B一级模块、G功能过程、H子过程描述、I数据移动类型、J数据组、K数据属性。L列复用度为空时会按“新增”处理；如果填写，只能填新增、复用或利旧。";
+      }
+      return message;
+    }
+
     function showRequirementParseWarning(data) {
       if (!data || data.requirementRecognized) {
         return false;
@@ -655,6 +794,9 @@
     async function loadReview() {
       const response = await request("/api/projects/" + currentProjectId + "/review");
       const data = response.data || {};
+      if (data.status === "EXCEL_IMPORTED") {
+        setSplitMode("excel", true, false);
+      }
       splitRows = (data.splitRows || []).map(normalizeRow);
       if (splitRows.length > 0 && splitRows[0].projectName) {
         const select = $("projectName");
@@ -1442,6 +1584,7 @@
     }
 
     window.addEventListener("DOMContentLoaded", function () {
+      setSplitMode("document", true, true);
       const params = new URLSearchParams(location.search);
       const projectId = params.get("projectId");
       if (projectId) {

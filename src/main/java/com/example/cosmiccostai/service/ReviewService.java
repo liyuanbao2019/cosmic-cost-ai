@@ -46,6 +46,14 @@ public class ReviewService {
     }
 
     public ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows) {
+        return saveReview(projectId, rows, "REVIEWED");
+    }
+
+    public ReviewResponse importReview(String projectId, List<FunctionSplitRow> rows) {
+        return saveReview(projectId, rows, "EXCEL_IMPORTED");
+    }
+
+    private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status) {
         if (rows == null || rows.isEmpty()) {
             throw new BusinessException("Review split rows cannot be empty");
         }
@@ -61,7 +69,7 @@ public class ReviewService {
         writeJson(Paths.get(metadata.getCosmicResultsPath()), results);
 
         metadata.setFunctionSplitRowsPath(splitPath.toString());
-        metadata.setStatus("REVIEWED");
+        metadata.setStatus(status);
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
         return buildResponse(projectId, metadata.getStatus(), results, rows);

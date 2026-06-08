@@ -1,7 +1,9 @@
 package com.example.cosmiccostai.controller;
 
 import com.example.cosmiccostai.common.ApiResponse;
+import com.example.cosmiccostai.dto.ReviewResponse;
 import com.example.cosmiccostai.dto.UploadResponse;
+import com.example.cosmiccostai.service.ExcelReviewImportService;
 import com.example.cosmiccostai.service.FileStorageService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,9 +19,11 @@ import org.springframework.web.multipart.MultipartFile;
 public class FileController {
 
     private final FileStorageService fileStorageService;
+    private final ExcelReviewImportService excelReviewImportService;
 
-    public FileController(FileStorageService fileStorageService) {
+    public FileController(FileStorageService fileStorageService, ExcelReviewImportService excelReviewImportService) {
         this.fileStorageService = fileStorageService;
+        this.excelReviewImportService = excelReviewImportService;
     }
 
     @Operation(summary = "上传需求说明书", description = "支持 docx 和 pdf，保存原始文件并生成项目元数据。")
@@ -27,5 +31,12 @@ public class FileController {
     public ApiResponse<UploadResponse> upload(@RequestParam("file") MultipartFile file,
                                                @RequestParam(value = "projectName", required = false) String projectName) {
         return ApiResponse.ok(fileStorageService.upload(file, projectName));
+    }
+
+    @Operation(summary = "Import reviewed split Excel", description = "Import a pre-split Excel file and load it into the normal review workflow.")
+    @PostMapping("/upload-split-excel")
+    public ApiResponse<ReviewResponse> uploadSplitExcel(@RequestParam("file") MultipartFile file,
+                                                        @RequestParam(value = "projectName", required = false) String projectName) {
+        return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName));
     }
 }

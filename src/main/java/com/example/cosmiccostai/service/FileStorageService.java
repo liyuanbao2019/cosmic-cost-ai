@@ -83,6 +83,44 @@ public class FileStorageService {
         }
     }
 
+    public ProjectMetadata uploadSplitExcel(MultipartFile file, String projectName) {
+        validateSplitExcel(file);
+
+        String originalFileName = cleanOriginalFileName(file.getOriginalFilename());
+        String fileType = getExtension(originalFileName);
+        String projectId = generateProjectId();
+        String resolvedProjectName = resolveProjectName(projectName, originalFileName);
+
+        Path projectDir = resolveProjectDir(projectId);
+        Path filesDir = projectDir.resolve("files");
+        Path storedFile = filesDir.resolve("split-review." + fileType);
+
+        try {
+            Files.createDirectories(filesDir);
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, storedFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+            String now = LocalDateTime.now().format(DATE_TIME_FORMATTER);
+            ProjectMetadata metadata = new ProjectMetadata();
+            metadata.setId(projectId);
+            metadata.setName(resolvedProjectName);
+            metadata.setSourceFileName(originalFileName);
+            metadata.setStoredFilePath(storedFile.toString());
+            metadata.setFileSize(file.getSize());
+            metadata.setFileType(fileType);
+            metadata.setCosmicResultsPath(projectDir.resolve("cosmic-results.json").toString());
+            metadata.setStatus("EXCEL_UPLOADED");
+            metadata.setCreatedAt(now);
+            metadata.setUpdatedAt(now);
+
+            saveMetadata(metadata);
+            return metadata;
+        } catch (IOException ex) {
+            throw new BusinessException("Save uploaded Excel failed", ex);
+        }
+    }
+
     public ProjectMetadata loadMetadata(String projectId) {
         Path metadataPath = resolveProjectDir(projectId).resolve("metadata.json");
         if (!Files.exists(metadataPath)) {
@@ -123,6 +161,20 @@ public class FileStorageService {
         String fileType = getExtension(originalFileName);
         if (!"docx".equals(fileType)) {
             throw new BusinessException("Only docx requirement files are supported");
+        }
+    }
+
+    private void validateSplitExcel(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException("Uploaded Excel is empty");
+        }
+        String originalFileName = cleanOriginalFileName(file.getOriginalFilename());
+        if (!StringUtils.hasText(originalFileName)) {
+            throw new BusinessException("Uploaded Excel file name is required");
+        }
+        String fileType = getExtension(originalFileName);
+        if (!"xlsx".equals(fileType) && !"xls".equals(fileType)) {
+            throw new BusinessException("Only xlsx or xls split Excel files are supported");
         }
     }
 
