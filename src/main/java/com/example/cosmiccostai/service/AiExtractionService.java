@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,19 +48,22 @@ public class AiExtractionService {
     private final String model;
     private final long timeoutSeconds;
     private final int maxRetries;
+    private final String splitRulesPath;
 
     public AiExtractionService(FileStorageService fileStorageService,
                                @Value("${cosmic.ai.base-url:}") String baseUrl,
                                @Value("${cosmic.ai.api-key:}") String apiKey,
                                @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
                                @Value("${cosmic.ai.timeout-seconds:180}") long timeoutSeconds,
-                               @Value("${cosmic.ai.max-retries:2}") int maxRetries) {
+                               @Value("${cosmic.ai.max-retries:2}") int maxRetries,
+                               @Value("${cosmic.rules.split-rules-path:classpath:/static/split-check-rules.md}") String splitRulesPath) {
         this.fileStorageService = fileStorageService;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.model = model;
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
+        this.splitRulesPath = splitRulesPath;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -289,6 +294,7 @@ public class AiExtractionService {
     }
 
     private String buildPrompt(String requirementDetail) {
+        String splitRulesPrompt = buildSplitRulesPrompt();
         return "你是资深软件造价评估专家、COSMIC功能点分析师和软件需求分析专家。"
                 + System.lineSeparator()
                 + "请只根据下面的【需求细则】识别可用于COSMIC度量的真实功能用户需求。"
@@ -334,9 +340,86 @@ public class AiExtractionService {
                 + "4. 如果确实无法识别任何功能，输出空数组[]。"
                 + System.lineSeparator()
                 + System.lineSeparator()
+                + splitRulesPrompt
+                + System.lineSeparator()
+                + System.lineSeparator()
                 + "【需求细则】"
                 + System.lineSeparator()
                 + requirementDetail;
+    }
+
+    private String buildSplitRulesPrompt() {
+        String rules = readSplitRules();
+        if (!StringUtils.hasText(rules)) {
+            return "";
+        }
+        return "【内部拆分校验与可计量改写规则】"
+                + System.lineSeparator()
+                + "以下规则来自团队历史拆分经验。原始需求文档拆分时必须优先遵守。"
+                + System.lineSeparator()
+                + "注意：命中高风险关键词时，不要简单丢弃该功能；应改写为专家可认可的开发功能和明确数据移动。"
+                + System.lineSeparator()
+                + "改写目标：把抽象表述改成“谁输入了什么 / 系统读取了什么 / 系统写入或生成了什么 / 系统输出了什么”。"
+                + System.lineSeparator()
+                + "如果需求中出现校验、解析、过滤、刷新、日志、提示、调用、接口、配置、页面设计等表达，必须尽量转写为可计量的 E/R/W/X 数据移动表达。"
+                + System.lineSeparator()
+                + "不要直接输出“规则校验”“日志”“调用”“提示”“页面设计”等抽象功能名；需要生成具备业务对象、数据组、数据属性和处理结果的功能过程。"
+                + System.lineSeparator()
+                + "原始规则文本如下："
+                + System.lineSeparator()
+                + rules.trim()
+                + System.lineSeparator()
+                + "【内部规则结束】";
+    }
+
+    private String readSplitRules() {
+        if (!StringUtils.hasText(splitRulesPath)) {
+            return "";
+        }
+        if (splitRulesPath.startsWith("classpath:")) {
+            String resourcePath = splitRulesPath.substring("classpath:".length());
+            if (resourcePath.startsWith("/")) {
+                resourcePath = resourcePath.substring(1);
+            }
+            ClassPathResource resource = new ClassPathResource(resourcePath);
+            if (!resource.exists()) {
+                log.warn("Split rules classpath resource not found: {}", splitRulesPath);
+                return "";
+            }
+            try (InputStream inputStream = resource.getInputStream()) {
+                return readAll(inputStream);
+            } catch (IOException ex) {
+                log.warn("Read split rules classpath resource failed: {}", splitRulesPath, ex);
+                return "";
+            }
+        }
+        Path path = Paths.get(splitRulesPath);
+        if (!Files.exists(path)) {
+            Path projectPath = Paths.get("").toAbsolutePath().resolve(splitRulesPath);
+            if (Files.exists(projectPath)) {
+                path = projectPath;
+            }
+        }
+        if (!Files.exists(path)) {
+            log.warn("Split rules file not found: {}", splitRulesPath);
+            return "";
+        }
+        try {
+            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            log.warn("Read split rules file failed: {}", path, ex);
+            return "";
+        }
+    }
+
+    private String readAll(InputStream inputStream) throws IOException {
+        byte[] buffer = new byte[8192];
+        int read;
+        java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+        while ((read = inputStream.read(buffer)) >= 0) {
+            outputStream.write(buffer, 0, read);
+        }
+        return new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
     }
 
     private String callAi(String prompt) {

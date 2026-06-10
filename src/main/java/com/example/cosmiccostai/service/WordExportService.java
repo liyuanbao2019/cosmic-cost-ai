@@ -167,9 +167,6 @@ public class WordExportService {
     }
 
     private List<FunctionSplitRow> readReviewedRows(ProjectMetadata metadata) {
-        if (StringUtils.hasText(metadata.getExcelOutputPath()) && Files.exists(Paths.get(metadata.getExcelOutputPath()))) {
-            return readRowsFromExcel(Paths.get(metadata.getExcelOutputPath()));
-        }
         if (StringUtils.hasText(metadata.getFunctionSplitRowsPath()) && Files.exists(Paths.get(metadata.getFunctionSplitRowsPath()))) {
             try {
                 return objectMapper.readValue(Paths.get(metadata.getFunctionSplitRowsPath()).toFile(),

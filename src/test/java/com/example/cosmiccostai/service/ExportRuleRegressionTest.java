@@ -24,6 +24,7 @@ import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExportRuleRegressionTest {
@@ -50,16 +51,12 @@ class ExportRuleRegressionTest {
             if (sheet == null) {
                 sheet = workbook.getSheetAt(2);
             }
-            assertEquals("功能描述", sheet.getRow(2).getCell(13).getStringCellValue());
-            assertEquals("时序图", sheet.getRow(2).getCell(14).getStringCellValue());
-            assertEquals("UI->UI", cell(sheet, 5, 14));
-            assertEquals("UI->后台服务", cell(sheet, 6, 14));
-            assertEquals("后台服务->后台服务", cell(sheet, 7, 14));
-            assertEquals("后台服务->UI", cell(sheet, 8, 14));
-            assertEquals("后台服务->UI", cell(sheet, 9, 14));
-            assertTrue(cell(sheet, 5, 13).contains("录入公告信息"));
-            assertTrue(cell(sheet, 5, 13).contains("标题、内容、发布范围、生效时间"));
-            assertFalse(cell(sheet, 5, 13).equals("录入公告信息"));
+            assertNull(sheet.getRow(2).getCell(13));
+            assertNull(sheet.getRow(2).getCell(14));
+            assertNull(sheet.getRow(5).getCell(13));
+            assertNull(sheet.getRow(5).getCell(14));
+            assertTrue(sheet.isColumnHidden(13));
+            assertTrue(sheet.isColumnHidden(14));
         }
 
         String documentXml;

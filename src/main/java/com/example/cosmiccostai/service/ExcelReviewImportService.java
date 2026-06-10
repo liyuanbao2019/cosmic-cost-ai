@@ -32,7 +32,8 @@ public class ExcelReviewImportService {
     private final ReviewService reviewService;
     private final DataFormatter dataFormatter = new DataFormatter();
 
-    public ExcelReviewImportService(FileStorageService fileStorageService, ReviewService reviewService) {
+    public ExcelReviewImportService(FileStorageService fileStorageService,
+                                    ReviewService reviewService) {
         this.fileStorageService = fileStorageService;
         this.reviewService = reviewService;
     }

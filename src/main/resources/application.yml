@@ -37,3 +37,5 @@ cosmic:
     model: ${OPENAI_MODEL:deepseek-v4-pro}
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:180}
     max-retries: ${OPENAI_MAX_RETRIES:2}
+  rules:
+    split-rules-path: ${COSMIC_SPLIT_RULES_PATH:classpath:/static/split-check-rules.md}

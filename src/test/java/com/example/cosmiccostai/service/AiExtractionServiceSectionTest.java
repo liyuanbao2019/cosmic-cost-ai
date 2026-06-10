@@ -12,7 +12,7 @@ class AiExtractionServiceSectionTest {
     @Test
     void extractsNonStandardRequirementRuleSection() throws Exception {
         AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
-                "", "", "test-model", 1, 0);
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
         Method method = AiExtractionService.class.getDeclaredMethod("extractRequirementDetail", String.class);
         method.setAccessible(true);
 

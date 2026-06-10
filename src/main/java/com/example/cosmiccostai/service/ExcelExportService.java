@@ -47,6 +47,7 @@ public class ExcelExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int TEMPLATE_CLEAR_ROW_LIMIT = 500;
+    private static final int STANDARD_LAST_EXPORT_COLUMN = 12;
 
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
@@ -273,29 +274,46 @@ public class ExcelExportService {
                         + (rowIndex + 1) + "=\"" + zh("\u590d\u7528") + "\",1/3,IF(L"
                         + (rowIndex + 1) + "=\"" + zh("\u5229\u65e7") + "\",0)))";
                 setFormula(row, 12, formula);
-                setCell(row, 13, splitRow.getFunctionDescription());
-                setCell(row, 14, splitRow.getSequenceDiagram());
                 rowIndex++;
                 movementRows++;
             }
 
             int lastDataRow = rowIndex - 1;
-        writeExtendedHeaders(sheet);
-        applyDataBorders(sheet, 5, lastDataRow, 0, 14);
+        removeInternalExportColumns(sheet);
+        applyDataBorders(sheet, 5, lastDataRow, 0, STANDARD_LAST_EXPORT_COLUMN);
         mergeHierarchyColumns(sheet, rows, 5, lastDataRow);
         addReuseDegreeValidation(sheet, 5, rowIndex - 1);
         return movementRows;
     }
 
-    private void writeExtendedHeaders(Sheet sheet) {
-        Row titleRow = getOrCreateRow(sheet, 2);
-        Row helpRow = getOrCreateRow(sheet, 4);
-        setCell(titleRow, 13, zh("\u529f\u80fd\u63cf\u8ff0"));
-        setCell(titleRow, 14, zh("\u65f6\u5e8f\u56fe"));
-        setCell(helpRow, 13, zh("\u8be5\u529f\u80fd\u8fc7\u7a0b\u7684\u4e1a\u52a1\u76ee\u7684\u3001\u5904\u7406\u5bf9\u8c61\u548c\u8f93\u51fa\u7ed3\u679c\u3002"));
-        setCell(helpRow, 14, zh("\u683c\u5f0f\u4e3a\u201c\u53c2\u4e0e\u8005A->\u53c2\u4e0e\u8005B\u201d\uff0c\u591a\u4e2a\u6b65\u9aa4\u7528\u82f1\u6587\u5206\u53f7\u5206\u9694\u3002"));
-        sheet.setColumnWidth(13, 48 * 256);
-        sheet.setColumnWidth(14, 28 * 256);
+    private void removeInternalExportColumns(Sheet sheet) {
+        int lastColumn = STANDARD_LAST_EXPORT_COLUMN;
+        for (int rowIndex = 0; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row != null && row.getLastCellNum() > 0) {
+                lastColumn = Math.max(lastColumn, row.getLastCellNum() - 1);
+            }
+        }
+        if (lastColumn > 14) {
+            sheet.shiftColumns(15, lastColumn, -2);
+        }
+        for (int rowIndex = 0; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            if (row == null) {
+                continue;
+            }
+            removeCell(row, 13);
+            removeCell(row, 14);
+        }
+        sheet.setColumnHidden(13, true);
+        sheet.setColumnHidden(14, true);
+    }
+
+    private void removeCell(Row row, int columnIndex) {
+        Cell cell = row.getCell(columnIndex);
+        if (cell != null) {
+            row.removeCell(cell);
+        }
     }
 
     private void fillBusinessRequirementSheet(Workbook workbook, ProjectMetadata metadata, List<FunctionSplitRow> rows) {

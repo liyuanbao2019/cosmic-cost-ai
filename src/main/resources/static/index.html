@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260601-3">
+  <link rel="stylesheet" href="/app.css?v=20260610-validation-2">
 </head>
 
 <body>
@@ -231,6 +231,17 @@
         </div>
       </div>
       <pre id="preview" class="preview"></pre>
+      <div id="ruleValidationPanel" class="rewrite-progress hidden">
+        <div class="rewrite-progress-head">
+          <b id="ruleValidationTitle">规则校验结果</b>
+          <span id="ruleValidationStatus">等待校验</span>
+        </div>
+        <div class="rewrite-progress-track">
+          <div id="ruleValidationBar" class="rewrite-progress-bar"></div>
+        </div>
+        <div id="ruleValidationSummary" class="validation-summary"></div>
+        <div id="ruleValidationDetail" class="rewrite-progress-detail"></div>
+      </div>
     </section>
 
     <section id="reviewPanel" class="panel hidden">
@@ -246,8 +257,10 @@
       </div>
 
       <div class="actions sticky-actions">
+        <span class="action-label">功能区域：</span>
         <div class="primary-tools">
           <button type="button" class="secondary" onclick="saveReview()">保存</button>
+          <button type="button" class="secondary" onclick="validateReviewRules()">规则校验</button>
           <button type="button" onclick="addReviewRow()">新增一行</button>
           <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
           <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
@@ -277,15 +290,29 @@
       </div>
 
       <div class="review-filter-bar">
+        <span class="filter-label">筛选条件：</span>
         <input id="reviewSearch" type="search" placeholder="搜索模块、功能过程、描述、数据组" oninput="onReviewFilterChange()">
         <select id="filterLevel1" onchange="onReviewFilterChange()">
           <option value="">全部一级模块</option>
+        </select>
+        <select id="filterLevel2" onchange="onReviewFilterChange()">
+          <option value="">全部二级模块</option>
+        </select>
+        <select id="filterLevel3" onchange="onReviewFilterChange()">
+          <option value="">全部三级模块</option>
         </select>
         <select id="filterMovement" onchange="onReviewFilterChange()">
           <option value="">全部类型</option>
         </select>
         <select id="filterReuse" onchange="onReviewFilterChange()">
           <option value="">全部复用度</option>
+        </select>
+        <select id="filterValidation" onchange="onReviewFilterChange()">
+          <option value="">&#x5168;&#x90e8;&#x6821;&#x9a8c;&#x7ed3;&#x679c;</option>
+          <option value="ERROR">&#x53ea;&#x770b;&#x9519;&#x8bef;</option>
+          <option value="RISK">&#x53ea;&#x770b;&#x98ce;&#x9669;</option>
+          <option value="SUGGESTION">&#x53ea;&#x770b;&#x5efa;&#x8bae;</option>
+          <option value="OK">&#x53ea;&#x770b;&#x65e0;&#x95ee;&#x9898;</option>
         </select>
         <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
         <span class="filter-count">当前显示：<b id="filteredCount">0</b></span>
@@ -330,6 +357,8 @@
     let reviewDensity = "comfortable";
     let cellEditorState = null;
     let splitMode = "document";
+    let validationIssuesByRow = {};
+    let lastValidationResult = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -627,6 +656,8 @@
       selectedRows = {};
       reviewDensity = "comfortable";
       cellEditorState = null;
+      validationIssuesByRow = {};
+      lastValidationResult = null;
       setSplitMode("document", true, true);
       $("fileInput").value = "";
       if ($("splitExcelInput")) {
@@ -643,6 +674,9 @@
         $("densityBtn").textContent = "紧凑视图";
       }
       $("preview").textContent = "";
+      if ($("ruleValidationPanel")) {
+        $("ruleValidationPanel").classList.add("hidden");
+      }
       $("projectBadge").textContent = "未上传";
       $("projectBadge").className = "badge muted";
       $("parsePanel").classList.add("hidden");
@@ -731,24 +765,125 @@
           const formData = new FormData();
           formData.append("file", file);
           formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
-          setMessage("正在导入已拆分 Excel...");
+          setMessage("正在导入 Excel，并解析到审核界面...");
           const imported = await request("/api/files/upload-split-excel", { method: "POST", body: formData });
           currentProjectId = imported.data.projectId;
           $("projectBadge").textContent = currentProjectId;
           $("projectBadge").className = "badge";
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
-          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。";
-          $("parsePanel").classList.add("hidden");
+          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则校验”，按 COSMIC 拆分规则检查需要人工调整的项。";
+          $("parsePanel").classList.remove("hidden");
           markDone("cosmic");
           await loadReview();
           markActive("review");
-          setMessage("已导入 Excel，请在下方审核功能点，保存后再导出送审材料。", "success");
+          setMessage("已导入 Excel，请点击“规则校验”检查风险项，再人工审核导出。", "success");
         });
       } catch (error) {
         markActive("cosmic");
         showDialog("导入已拆分 Excel 失败", buildSplitExcelImportError(error));
       }
+    }
+
+    async function validateReviewRules() {
+      if (!currentProjectId || !splitRows.length) {
+        showDialog("\u65e0\u6cd5\u6821\u9a8c", "\u8bf7\u5148\u5bfc\u5165\u6216\u751f\u6210\u62c6\u5206\u7ed3\u679c\uff0c\u518d\u6267\u884c\u89c4\u5219\u6821\u9a8c\u3002");
+        return;
+      }
+      try {
+        splitRows = splitRows.map(normalizeRow);
+        const response = await request("/api/projects/" + currentProjectId + "/review/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(splitRows)
+        });
+        renderRuleValidation(response.data || {});
+      } catch (error) {
+        showDialog("\u89c4\u5219\u6821\u9a8c\u5931\u8d25", error.message || "\u89c4\u5219\u6821\u9a8c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002");
+      }
+    }
+
+    function renderRuleValidation(result) {
+      const box = $("ruleValidationPanel");
+      if (!box) {
+        return;
+      }
+      const issues = result.issues || [];
+      lastValidationResult = result;
+      validationIssuesByRow = buildValidationIssueMap(issues);
+      box.classList.remove("hidden");
+      const total = Math.max(1, result.totalRows || splitRows.length || 1);
+      const okRows = Math.max(0, total - issues.length);
+      const percent = Math.max(0, Math.min(100, Math.round(okRows * 100 / total)));
+      $("ruleValidationBar").style.width = percent + "%";
+      const title = issues.length ? "\u53d1\u73b0 " + issues.length + " \u4e2a\u95ee\u9898" : "\u672a\u53d1\u73b0\u89c4\u5219\u95ee\u9898";
+      $("ruleValidationStatus").textContent = title;
+      renderRuleValidationSummary(result);
+      let text = "\u6821\u9a8c\u884c\u6570\uff1a" + (result.totalRows || 0)
+        + "\uff0c\u9519\u8bef\uff1a" + (result.errorCount || 0)
+        + "\uff0c\u98ce\u9669\uff1a" + (result.riskCount || 0)
+        + "\uff0c\u5efa\u8bae\uff1a" + (result.suggestionCount || 0);
+      if (issues.length) {
+        text += "\n" + issues.slice(0, 30).map(function (issue) {
+          return "\u7b2c " + issue.rowIndex + " \u884c [" + severityText(issue.severity) + "] "
+            + (issue.field || "") + "\uff1a" + (issue.message || "")
+            + (issue.suggestion ? "\n  \u5efa\u8bae\uff1a" + issue.suggestion : "");
+        }).join("\n");
+        if (issues.length > 30) {
+          text += "\n\u8fd8\u6709 " + (issues.length - 30) + " \u4e2a\u95ee\u9898\u672a\u5c55\u793a\uff0c\u8bf7\u4f18\u5148\u5904\u7406\u9519\u8bef\u548c\u98ce\u9669\u9879\u3002";
+        }
+        setMessage("\u89c4\u5219\u6821\u9a8c\u5b8c\u6210\uff1a\u53d1\u73b0 " + issues.length + " \u4e2a\u95ee\u9898\uff0c\u8bf7\u6839\u636e\u7ed3\u679c\u4eba\u5de5\u8c03\u6574\u3002", result.errorCount ? "error" : "");
+      } else {
+        setMessage("\u89c4\u5219\u6821\u9a8c\u901a\u8fc7\uff0c\u672a\u53d1\u73b0\u660e\u663e\u95ee\u9898\u3002", "success");
+      }
+      $("ruleValidationDetail").textContent = text;
+      renderTable();
+    }
+
+    function renderRuleValidationSummary(result) {
+      const summary = $("ruleValidationSummary");
+      if (!summary) {
+        return;
+      }
+      summary.innerHTML = "";
+      [
+        { label: "\u6821\u9a8c\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
+        { label: "\u9519\u8bef", value: result.errorCount || 0, className: "error" },
+        { label: "\u98ce\u9669", value: result.riskCount || 0, className: "risk" },
+        { label: "\u5efa\u8bae", value: result.suggestionCount || 0, className: "suggestion" }
+      ].forEach(function (item) {
+        const card = document.createElement("div");
+        card.className = "validation-summary-card " + item.className;
+        const value = document.createElement("b");
+        value.textContent = item.value;
+        const label = document.createElement("span");
+        label.textContent = item.label;
+        card.appendChild(value);
+        card.appendChild(label);
+        summary.appendChild(card);
+      });
+    }
+
+    function buildValidationIssueMap(issues) {
+      const map = {};
+      (issues || []).forEach(function (issue) {
+        const index = Math.max(0, (issue.rowIndex || 1) - 1);
+        if (!map[index]) {
+          map[index] = [];
+        }
+        map[index].push(issue);
+      });
+      return map;
+    }
+
+    function severityText(severity) {
+      if (severity === "ERROR") {
+        return "\u9519\u8bef";
+      }
+      if (severity === "RISK") {
+        return "\u98ce\u9669";
+      }
+      return "\u5efa\u8bae";
     }
 
     function buildSplitExcelImportError(error) {
@@ -860,6 +995,7 @@
         const row = entry.row;
         const index = entry.index;
         const tr = document.createElement("tr");
+        applyValidationRowState(tr, index);
         addRowSelectCell(tr, index);
         addTextCell(tr, row, index, "level1Module");
         addTextCell(tr, row, index, "level2Module");
@@ -877,9 +1013,48 @@
         cfp.textContent = formatCfp(row.cfp);
         tr.appendChild(cfp);
         addActionCell(tr, index);
+        paintValidationRow(tr, index);
         body.appendChild(tr);
       });
       updateFilteredCount(visibleRows.length);
+    }
+
+    function applyValidationRowState(tr, index) {
+      const issues = validationIssuesByRow[index] || [];
+      if (!issues.length) {
+        return;
+      }
+      const severity = highestValidationSeverity(issues);
+      tr.classList.add("validation-row");
+      tr.classList.add("validation-" + severity.toLowerCase());
+      tr.title = issues.map(function (issue) {
+        return severityText(issue.severity) + " - " + (issue.field || "") + ": " + (issue.message || "");
+      }).join("\n");
+    }
+
+    function paintValidationRow(tr, index) {
+      const issues = validationIssuesByRow[index] || [];
+      if (!issues.length) {
+        return;
+      }
+      const severity = highestValidationSeverity(issues);
+      const palette = {
+        ERROR: { row: "#ffe4e6", control: "#fff1f2", border: "#ef4444" },
+        RISK: { row: "#fef3c7", control: "#fffbeb", border: "#f59e0b" },
+        SUGGESTION: { row: "#dbeafe", control: "#eff6ff", border: "#3b82f6" }
+      }[severity] || { row: "#f8fafc", control: "#ffffff", border: "#94a3b8" };
+
+      Array.from(tr.children).forEach(function (td, tdIndex) {
+        td.style.setProperty("background-color", palette.row, "important");
+        td.style.setProperty("border-bottom-color", palette.border, "important");
+        if (tdIndex === 0) {
+          td.style.setProperty("box-shadow", "inset 5px 0 0 " + palette.border, "important");
+        }
+      });
+      tr.querySelectorAll("textarea, select, .cell-preview").forEach(function (el) {
+        el.style.setProperty("background-color", palette.control, "important");
+        el.style.setProperty("border-color", palette.border, "important");
+      });
     }
 
     function addRowSelectCell(tr, index) {
@@ -951,8 +1126,11 @@
     function filteredRowEntries() {
       const search = textOr($("reviewSearch") ? $("reviewSearch").value : "", "").toLowerCase();
       const level1 = $("filterLevel1") ? $("filterLevel1").value : "";
+      const level2 = $("filterLevel2") ? $("filterLevel2").value : "";
+      const level3 = $("filterLevel3") ? $("filterLevel3").value : "";
       const movement = $("filterMovement") ? $("filterMovement").value : "";
       const reuse = $("filterReuse") ? $("filterReuse").value : "";
+      const validation = $("filterValidation") ? $("filterValidation").value : "";
       return splitRows
         .map(function (row, index) {
           return { row: row, index: index };
@@ -962,10 +1140,19 @@
           if (level1 && row.level1Module !== level1) {
             return false;
           }
+          if (level2 && row.level2Module !== level2) {
+            return false;
+          }
+          if (level3 && row.level3Module !== level3) {
+            return false;
+          }
           if (movement && row.movementType !== movement) {
             return false;
           }
           if (reuse && row.reuseDegree !== reuse) {
+            return false;
+          }
+          if (validation && !matchesValidationFilter(entry.index, validation)) {
             return false;
           }
           if (!search) {
@@ -987,8 +1174,46 @@
         });
     }
 
+    function matchesValidationFilter(index, validation) {
+      const issues = validationIssuesByRow[index] || [];
+      if (validation === "OK") {
+        return issues.length === 0;
+      }
+      if (!issues.length) {
+        return false;
+      }
+      return highestValidationSeverity(issues) === validation;
+    }
+
+    function highestValidationSeverity(issues) {
+      if ((issues || []).some(function (issue) { return issue.severity === "ERROR"; })) {
+        return "ERROR";
+      }
+      if ((issues || []).some(function (issue) { return issue.severity === "RISK"; })) {
+        return "RISK";
+      }
+      return "SUGGESTION";
+    }
+
     function updateReviewFilterOptions() {
-      syncSelectOptions("filterLevel1", uniqueValues(splitRows.map(function (row) { return row.level1Module; })), "全部一级模块");
+      const level1Selected = $("filterLevel1") ? $("filterLevel1").value : "";
+      const level2Selected = $("filterLevel2") ? $("filterLevel2").value : "";
+
+      const level1Values = uniqueValues(splitRows.map(function (row) { return row.level1Module; }));
+      syncSelectOptions("filterLevel1", level1Values, "全部一级模块");
+
+      const level2Rows = splitRows.filter(function (row) {
+        return !level1Selected || row.level1Module === level1Selected;
+      });
+      const level2Values = uniqueValues(level2Rows.map(function (row) { return row.level2Module; }));
+      syncSelectOptions("filterLevel2", level2Values, "全部二级模块");
+
+      const level3Rows = level2Rows.filter(function (row) {
+        return !level2Selected || row.level2Module === level2Selected;
+      });
+      const level3Values = uniqueValues(level3Rows.map(function (row) { return row.level3Module; }));
+      syncSelectOptions("filterLevel3", level3Values, "全部三级模块");
+
       syncSelectOptions("filterMovement", movementOptions, "全部类型");
       syncSelectOptions("filterReuse", reuseOptions, "全部复用度");
     }
@@ -1033,8 +1258,13 @@
     function resetReviewFilters() {
       $("reviewSearch").value = "";
       $("filterLevel1").value = "";
+      $("filterLevel2").value = "";
+      $("filterLevel3").value = "";
       $("filterMovement").value = "";
       $("filterReuse").value = "";
+      if ($("filterValidation")) {
+        $("filterValidation").value = "";
+      }
       renderTable();
     }
 
@@ -1080,6 +1310,7 @@
       const field = cellEditorState.field;
       splitRows[index][field] = $("cell-editor-text").value;
       splitRows[index] = normalizeRow(splitRows[index]);
+      markValidationStale(index);
       closeCellEditor();
       renderTable();
       updateStats();
@@ -1113,10 +1344,21 @@
       const field = target.dataset.field;
       splitRows[index][field] = target.value;
       splitRows[index] = normalizeRow(splitRows[index]);
+      markValidationStale(index);
       if (field === "reuseDegree") {
         renderTable();
       }
       updateStats();
+    }
+
+    function markValidationStale(index) {
+      if (validationIssuesByRow && validationIssuesByRow[index]) {
+        delete validationIssuesByRow[index];
+        const status = $("ruleValidationStatus");
+        if (status) {
+          status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u6821\u9a8c";
+        }
+      }
     }
 
     function blankReviewRow(baseRow) {
