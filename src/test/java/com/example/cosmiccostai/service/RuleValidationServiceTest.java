@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RuleValidationServiceTest {
@@ -23,6 +24,25 @@ class RuleValidationServiceTest {
         assertTrue(response.getIssueCount() >= 3);
         assertTrue(response.getErrorCount() >= 1);
         assertTrue(response.getRiskCount() >= 2);
+    }
+
+    @Test
+    void completeProcessKeywordHitIsExpressionConfirmationOnly() {
+        RuleValidationService service = new RuleValidationService();
+
+        FunctionSplitRow entry = row("process-b", "E", "request", "id", "\u65b0\u589e");
+        entry.setSubProcessDescription("\u63a5\u6536\u67e5\u8be2\u6761\u4ef6");
+        FunctionSplitRow read = row("process-b", "R", "source", "amount", "\u65b0\u589e");
+        read.setSubProcessDescription("\u8ba1\u7b97\u6c47\u603b\u6570\u636e");
+        FunctionSplitRow exit = row("process-b", "X", "result", "total", "\u65b0\u589e");
+        exit.setSubProcessDescription("\u8f93\u51fa\u6c47\u603b\u7ed3\u679c");
+
+        RuleValidationResponse response = service.validate(Arrays.asList(entry, read, exit));
+
+        assertEquals(0, response.getErrorCount());
+        assertEquals(0, response.getRiskCount());
+        assertEquals(1, response.getSuggestionCount());
+        assertEquals(1, response.getExpressionConfirmCount());
     }
 
     private FunctionSplitRow row(String process, String movement, String dataGroup, String dataAttributes, String reuse) {

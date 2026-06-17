@@ -236,7 +236,8 @@ public class DocumentParseService {
             return false;
         }
         String value = line.trim();
-        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")) {
+        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")
+                || value.matches("^\\d+[\\.．、].*")) {
             return false;
         }
         return value.matches("^[一二三四五六七八九十]+[、.．]\\s*\\S.{0,60}$")

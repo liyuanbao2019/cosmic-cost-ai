@@ -8,6 +8,7 @@ import com.example.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -18,10 +19,12 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class ReviewService {
@@ -29,10 +32,17 @@ public class ReviewService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final FileStorageService fileStorageService;
+    private final FunctionDescriptionAiService functionDescriptionAiService;
     private final ObjectMapper objectMapper;
 
     public ReviewService(FileStorageService fileStorageService) {
+        this(fileStorageService, new FunctionDescriptionAiService());
+    }
+
+    @Autowired
+    public ReviewService(FileStorageService fileStorageService, FunctionDescriptionAiService functionDescriptionAiService) {
         this.fileStorageService = fileStorageService;
+        this.functionDescriptionAiService = functionDescriptionAiService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -185,6 +195,7 @@ public class ReviewService {
             lastLevel3 = row.getLevel3Module();
             lastProcess = row.getFunctionProcess();
         }
+        applyGroupFunctionDescriptions(rows);
     }
 
     private String normalizeMovementType(String movementType) {
@@ -210,7 +221,128 @@ public class ReviewService {
         if (!StringUtils.hasText(value)) {
             return true;
         }
+        if ("__AI_FUNCTION_DESCRIPTION_PENDING__".equals(value)) {
+            return true;
+        }
         return value.equals(safe(row.getFunctionProcess())) || value.equals(safe(row.getSubProcessDescription()));
+    }
+
+    private void applyGroupFunctionDescriptions(List<FunctionSplitRow> rows) {
+        Map<String, List<FunctionSplitRow>> groups = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        for (FunctionSplitRow row : rows) {
+            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f"
+                    + safe(row.getLevel3Module()) + "\u001f" + safe(row.getFunctionProcess());
+            List<FunctionSplitRow> groupRows = groups.get(key);
+            if (groupRows == null) {
+                groupRows = new ArrayList<FunctionSplitRow>();
+                groups.put(key, groupRows);
+            }
+            groupRows.add(row);
+        }
+        Map<String, List<FunctionSplitRow>> pendingGroups = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        for (Map.Entry<String, List<FunctionSplitRow>> entry : groups.entrySet()) {
+            if (needsFunctionDescriptionRefresh(entry.getValue())) {
+                pendingGroups.put(entry.getKey(), entry.getValue());
+            }
+        }
+        Map<String, String> aiDescriptions = functionDescriptionAiService.generateDescriptions(pendingGroups);
+        for (Map.Entry<String, List<FunctionSplitRow>> entry : groups.entrySet()) {
+            List<FunctionSplitRow> groupRows = entry.getValue();
+            String groupDescription = aiDescriptions.get(entry.getKey());
+            if (!StringUtils.hasText(groupDescription)) {
+                groupDescription = buildGroupFunctionDescription(groupRows);
+            }
+            for (FunctionSplitRow row : groupRows) {
+                if (shouldRegenerateFunctionDescription(row) || isLegacyGeneratedFunctionDescription(row)) {
+                    row.setFunctionDescription(groupDescription);
+                }
+            }
+        }
+    }
+
+    private boolean needsFunctionDescriptionRefresh(List<FunctionSplitRow> rows) {
+        for (FunctionSplitRow row : rows) {
+            if (shouldRegenerateFunctionDescription(row) || isLegacyGeneratedFunctionDescription(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String buildGroupFunctionDescription(List<FunctionSplitRow> rows) {
+        FunctionSplitRow first = rows.get(0);
+        String process = safe(first.getFunctionProcess());
+        List<String> actions = new ArrayList<String>();
+        Set<String> dataGroups = new LinkedHashSet<String>();
+        Set<String> attributes = new LinkedHashSet<String>();
+        for (FunctionSplitRow row : rows) {
+            addUnique(actions, safe(row.getSubProcessDescription()));
+            addUnique(dataGroups, safe(row.getDataGroup()));
+            for (String attribute : splitAttributes(row.getDataAttributes())) {
+                addUnique(attributes, attribute);
+            }
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(zh("\u672c\u529f\u80fd\u7528\u4e8e\u5b8c\u6210")).append(process).append(zh("\uff0c"));
+        builder.append(zh("\u7cfb\u7edf\u6309\u7167")).append(joinChinese(actions, zh("\u3001"))).append(zh("\u7684\u5904\u7406\u6d41\u7a0b"));
+        if (!dataGroups.isEmpty()) {
+            builder.append(zh("\uff0c\u56f4\u7ed5")).append(joinChinese(new ArrayList<String>(dataGroups), zh("\u3001"))).append(zh("\u7b49\u6570\u636e\u7ec4"));
+        }
+        if (!attributes.isEmpty()) {
+            builder.append(zh("\uff0c\u5904\u7406")).append(joinChinese(limit(new ArrayList<String>(attributes), 12), zh("\u3001"))).append(zh("\u7b49\u4e1a\u52a1\u5c5e\u6027"));
+        }
+        builder.append(zh("\uff0c\u5f62\u6210\u8be5\u529f\u80fd\u7684\u8f93\u5165\u3001\u8bfb\u53d6\u3001\u5199\u5165\u6216\u8f93\u51fa\u7ed3\u679c\u3002"));
+        return builder.toString();
+    }
+
+    private boolean isLegacyGeneratedFunctionDescription(FunctionSplitRow row) {
+        String value = safe(row.getFunctionDescription());
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        if ("__AI_FUNCTION_DESCRIPTION_PENDING__".equals(value)) {
+            return true;
+        }
+        String subProcess = safe(row.getSubProcessDescription());
+        String attributes = safe(row.getDataAttributes());
+        return value.equals(buildFunctionDescription(null, subProcess, attributes))
+                || (value.contains(zh("\u5176\u4e2d\uff0c") + subProcess) && value.endsWith(zh("\uff0c\u6d89\u53ca") + attributes + zh("\u3002")))
+                || (value.startsWith(zh("\u672c\u529f\u80fd\u7528\u4e8e\u5b8c\u6210")) && value.contains(zh("\u652f\u6491\u8be5\u529f\u80fd\u7684\u8f93\u5165")));
+    }
+
+    private List<String> splitAttributes(String value) {
+        List<String> result = new ArrayList<String>();
+        String text = safe(value).replace('\uff0c', ',').replace('\u3001', ',').replace(';', ',').replace('\uff1b', ',');
+        for (String part : text.split(",")) {
+            addUnique(result, part.trim());
+        }
+        return result;
+    }
+
+    private List<String> limit(List<String> values, int max) {
+        if (values.size() <= max) {
+            return values;
+        }
+        return new ArrayList<String>(values.subList(0, max));
+    }
+
+    private void addUnique(List<String> values, String value) {
+        if (StringUtils.hasText(value) && !values.contains(value)) {
+            values.add(value);
+        }
+    }
+
+    private void addUnique(Set<String> values, String value) {
+        if (StringUtils.hasText(value)) {
+            values.add(value);
+        }
+    }
+
+    private String joinChinese(List<String> values, String delimiter) {
+        if (values == null || values.isEmpty()) {
+            return zh("\u4e1a\u52a1\u6570\u636e\u5904\u7406");
+        }
+        return String.join(delimiter, values);
     }
 
     private String defaultSequenceDiagram(String movementType, String subProcessDescription, String dataGroup, String dataAttributes) {

@@ -10,6 +10,8 @@ public class RuleValidationResponse {
     private int errorCount;
     private int riskCount;
     private int suggestionCount;
+    private int structureRiskCount;
+    private int expressionConfirmCount;
     private List<RuleValidationIssue> issues = new ArrayList<RuleValidationIssue>();
 
     public int getTotalRows() {
@@ -50,6 +52,22 @@ public class RuleValidationResponse {
 
     public void setSuggestionCount(int suggestionCount) {
         this.suggestionCount = suggestionCount;
+    }
+
+    public int getStructureRiskCount() {
+        return structureRiskCount;
+    }
+
+    public void setStructureRiskCount(int structureRiskCount) {
+        this.structureRiskCount = structureRiskCount;
+    }
+
+    public int getExpressionConfirmCount() {
+        return expressionConfirmCount;
+    }
+
+    public void setExpressionConfirmCount(int expressionConfirmCount) {
+        this.expressionConfirmCount = expressionConfirmCount;
     }
 
     public List<RuleValidationIssue> getIssues() {

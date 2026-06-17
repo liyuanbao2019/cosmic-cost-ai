@@ -3,6 +3,8 @@ package com.example.cosmiccostai.controller;
 import com.example.cosmiccostai.common.ApiResponse;
 import com.example.cosmiccostai.dto.AiPromptRequest;
 import com.example.cosmiccostai.dto.AiPromptResponse;
+import com.example.cosmiccostai.dto.AiReviewValidationRequest;
+import com.example.cosmiccostai.dto.AiReviewValidationResponse;
 import com.example.cosmiccostai.dto.CosmicAnalyzeResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
@@ -13,6 +15,7 @@ import com.example.cosmiccostai.dto.RuleValidationResponse;
 import com.example.cosmiccostai.dto.WordExportResponse;
 import com.example.cosmiccostai.model.FunctionSplitRow;
 import com.example.cosmiccostai.service.AiExtractionService;
+import com.example.cosmiccostai.service.AiReviewValidationService;
 import com.example.cosmiccostai.service.CosmicAnalysisService;
 import com.example.cosmiccostai.service.DocumentParseService;
 import com.example.cosmiccostai.service.ExcelExportService;
@@ -51,6 +54,7 @@ public class ProjectController {
     private final WordExportService wordExportService;
     private final ExportFileService exportFileService;
     private final RuleValidationService ruleValidationService;
+    private final AiReviewValidationService aiReviewValidationService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -59,7 +63,8 @@ public class ProjectController {
                              ExcelExportService excelExportService,
                              WordExportService wordExportService,
                              ExportFileService exportFileService,
-                             RuleValidationService ruleValidationService) {
+                             RuleValidationService ruleValidationService,
+                             AiReviewValidationService aiReviewValidationService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -68,6 +73,7 @@ public class ProjectController {
         this.wordExportService = wordExportService;
         this.exportFileService = exportFileService;
         this.ruleValidationService = ruleValidationService;
+        this.aiReviewValidationService = aiReviewValidationService;
     }
 
     @Operation(summary = "解析需求说明书", description = "解析已上传的 docx 文件，结果写入 document-text.txt。")
@@ -117,6 +123,13 @@ public class ProjectController {
     public ApiResponse<RuleValidationResponse> validateReview(@PathVariable String projectId,
                                                               @RequestBody List<FunctionSplitRow> rows) {
         return ApiResponse.ok(ruleValidationService.validate(rows));
+    }
+
+    @Operation(summary = "AI validate selected review risks", description = "Use AI to review selected high-risk rows after deterministic validation.")
+    @PostMapping("/{projectId}/review/ai-validate")
+    public ApiResponse<AiReviewValidationResponse> aiValidateReview(@PathVariable String projectId,
+                                                                    @RequestBody AiReviewValidationRequest request) {
+        return ApiResponse.ok(aiReviewValidationService.validate(request));
     }
 
     @Operation(summary = "Export Excel", description = "Fill COSMIC analysis results into sheet 2 of the fixed Excel template.")

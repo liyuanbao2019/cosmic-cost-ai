@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260610-validation-2">
+  <link rel="stylesheet" href="/app.css?v=20260611-ai-desc-sync-1">
 </head>
 
 <body>
@@ -131,7 +131,7 @@
         </div>
       </div>
 
-      <!-- <div id="message" class="message"></div> -->
+      <div id="message" class="message"></div>
     </section>
 
     <section class="panel">
@@ -206,6 +206,21 @@
             <span class="step-label">COSMIC</span>
           </div>
           <div class="flow-step-wrap">
+            <div id="step-precheck" class="flow-step" onclick="handleStepClick('precheck')">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M9 11l2 2 4-4" />
+                  <path d="M21 12a9 9 0 1 1-3-6.7" />
+                  <path d="M17 3h4v4" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+            </div>
+            <span class="step-label">&#x89c4;&#x5219;&#x521d;&#x5ba1;</span>
+          </div>
+          <div class="flow-step-wrap">
             <div id="step-review" class="flow-step" onclick="handleStepClick('review')">
               <div class="step-circle">
                 <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -231,17 +246,6 @@
         </div>
       </div>
       <pre id="preview" class="preview"></pre>
-      <div id="ruleValidationPanel" class="rewrite-progress hidden">
-        <div class="rewrite-progress-head">
-          <b id="ruleValidationTitle">规则校验结果</b>
-          <span id="ruleValidationStatus">等待校验</span>
-        </div>
-        <div class="rewrite-progress-track">
-          <div id="ruleValidationBar" class="rewrite-progress-bar"></div>
-        </div>
-        <div id="ruleValidationSummary" class="validation-summary"></div>
-        <div id="ruleValidationDetail" class="rewrite-progress-detail"></div>
-      </div>
     </section>
 
     <section id="reviewPanel" class="panel hidden">
@@ -256,11 +260,24 @@
         </div>
       </div>
 
+      <div id="ruleValidationPanel" class="rewrite-progress hidden">
+        <div class="rewrite-progress-head">
+          <b id="ruleValidationTitle">规则初审结果</b>
+          <span id="ruleValidationStatus">等待初审</span>
+        </div>
+        <div class="rewrite-progress-track">
+          <div id="ruleValidationBar" class="rewrite-progress-bar"></div>
+        </div>
+        <div id="ruleValidationSummary" class="validation-summary"></div>
+        <div id="ruleValidationDetail" class="rewrite-progress-detail"></div>
+      </div>
+
       <div class="actions sticky-actions">
         <span class="action-label">功能区域：</span>
         <div class="primary-tools">
           <button type="button" class="secondary" onclick="saveReview()">保存</button>
-          <button type="button" class="secondary" onclick="validateReviewRules()">规则校验</button>
+          <button type="button" class="rule-precheck-primary" onclick="validateReviewRules()">规则初审</button>
+          <button type="button" class="ai-review-secondary" onclick="aiValidateSelectedRisks()">AI&#x590d;&#x6838;</button>
           <button type="button" onclick="addReviewRow()">新增一行</button>
           <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
           <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
@@ -308,10 +325,10 @@
           <option value="">全部复用度</option>
         </select>
         <select id="filterValidation" onchange="onReviewFilterChange()">
-          <option value="">&#x5168;&#x90e8;&#x6821;&#x9a8c;&#x7ed3;&#x679c;</option>
+          <option value="">&#x5168;&#x90e8;&#x521d;&#x5ba1;&#x7ed3;&#x679c;</option>
           <option value="ERROR">&#x53ea;&#x770b;&#x9519;&#x8bef;</option>
-          <option value="RISK">&#x53ea;&#x770b;&#x98ce;&#x9669;</option>
-          <option value="SUGGESTION">&#x53ea;&#x770b;&#x5efa;&#x8bae;</option>
+          <option value="RISK">&#x53ea;&#x770b;&#x7ed3;&#x6784;&#x98ce;&#x9669;</option>
+          <option value="SUGGESTION">&#x53ea;&#x770b;&#x8868;&#x8fbe;&#x786e;&#x8ba4;</option>
           <option value="OK">&#x53ea;&#x770b;&#x65e0;&#x95ee;&#x9898;</option>
         </select>
         <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
@@ -335,6 +352,7 @@
               <th class="w-data">数据组</th>
               <th class="w-attr">数据属性</th>
               <th class="w-reuse">复用度</th>
+              <th class="w-risk-reason">&#x521d;&#x5ba1;&#x98ce;&#x9669;&#x539f;&#x56e0;</th>
               <th class="w-cfp">CFP</th>
               <th class="w-actions">操作</th>
             </tr>
@@ -359,6 +377,7 @@
     let splitMode = "document";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
+    let lastAiValidationResult = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -441,12 +460,12 @@
     }
 
     function flowStepsForCurrentMode() {
-      return splitMode === "excel" ? ["cosmic", "review"] : ["upload", "parse", "ai", "cosmic", "review"];
+      return splitMode === "excel" ? ["cosmic", "precheck", "review"] : ["upload", "parse", "ai", "cosmic", "precheck", "review"];
     }
 
     function resetFlowStateForMode() {
       const visibleSteps = flowStepsForCurrentMode();
-      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+      ["upload", "parse", "ai", "cosmic", "precheck", "review"].forEach(function (name) {
         const step = $("step-" + name);
         if (step) {
           step.className = "flow-step pending";
@@ -459,7 +478,7 @@
 
     function applyFlowMode() {
       const visibleSteps = flowStepsForCurrentMode();
-      ["upload", "parse", "ai", "cosmic", "review"].forEach(function (name) {
+      ["upload", "parse", "ai", "cosmic", "precheck", "review"].forEach(function (name) {
         const step = $("step-" + name);
         if (!step) return;
         const wrap = step.closest(".flow-step-wrap");
@@ -504,7 +523,7 @@
       }
       el.classList.add("done");
       el.classList.remove("active");
-      if (step === "parse" || step === "ai") {
+      if (step === "parse" || step === "ai" || step === "precheck") {
         el.classList.add("clickable");
       }
       updateFlowProgress();
@@ -523,6 +542,20 @@
         toggleParsePreview();
       } else if (stepName === "ai") {
         showAiPrompt();
+      } else if (stepName === "precheck") {
+        showRuleValidationPanel();
+      }
+    }
+
+    function showRuleValidationPanel() {
+      if (!lastValidationResult && currentProjectId && splitRows.length) {
+        validateReviewRules();
+        return;
+      }
+      const panel = $("ruleValidationPanel");
+      if (panel) {
+        panel.classList.remove("hidden");
+        panel.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
 
@@ -621,9 +654,9 @@
           markDone("cosmic");
 
           await loadReview();
-          markActive("review");
+          markActive("precheck");
           closeAiPromptDialog();
-          setMessage("已按修改后的提示词重新完成 AI 拆分，请审核下方功能点。", "success");
+          setMessage("已按修改后的提示词重新完成 AI 拆分，请先执行规则初审。", "success");
         } finally {
           if (btn) {
             btn.disabled = false;
@@ -646,8 +679,15 @@
         return el && el.classList.contains("active");
       });
       const progress = activeIndex >= 0 ? activeIndex : doneCount;
-      const percent = steps.length <= 1 ? 0 : (progress / (steps.length - 1)) * 100;
+      const percent = steps.length <= 1 ? 100 : Math.max(0, Math.min(100, (progress / (steps.length - 1)) * 100));
       progressEl.style.width = percent + "%";
+    }
+
+    function markCurrentFlowComplete() {
+      flowStepsForCurrentMode().forEach(function (name) {
+        markDone(name);
+      });
+      updateFlowProgress();
     }
 
     function resetPage() {
@@ -744,8 +784,12 @@
         markDone("cosmic");
 
         await loadReview();
+        markActive("precheck");
+        setMessage("COSMIC 数据已生成，正在自动执行规则初审...");
+        const validationResponse = await runRuleValidationRequest();
+        renderRuleValidation(validationResponse.data || {});
+        markDone("precheck");
         markActive("review");
-        setMessage("处理完成，请在下方审核功能点，保存后再导出。", "success");
       });
     }
 
@@ -772,12 +816,12 @@
           $("projectBadge").className = "badge";
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
-          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则校验”，按 COSMIC 拆分规则检查需要人工调整的项。";
+          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则初审”，按 COSMIC 拆分规则检查需要人工调整的项。";
           $("parsePanel").classList.remove("hidden");
           markDone("cosmic");
           await loadReview();
-          markActive("review");
-          setMessage("已导入 Excel，请点击“规则校验”检查风险项，再人工审核导出。", "success");
+          markActive("precheck");
+          setMessage("已导入 Excel，请点击“规则初审”检查风险项，再人工审核导出。", "success");
         });
       } catch (error) {
         markActive("cosmic");
@@ -787,20 +831,29 @@
 
     async function validateReviewRules() {
       if (!currentProjectId || !splitRows.length) {
-        showDialog("\u65e0\u6cd5\u6821\u9a8c", "\u8bf7\u5148\u5bfc\u5165\u6216\u751f\u6210\u62c6\u5206\u7ed3\u679c\uff0c\u518d\u6267\u884c\u89c4\u5219\u6821\u9a8c\u3002");
+        showDialog("\u65e0\u6cd5\u521d\u5ba1", "\u8bf7\u5148\u5bfc\u5165\u6216\u751f\u6210\u62c6\u5206\u7ed3\u679c\uff0c\u518d\u6267\u884c\u89c4\u5219\u521d\u5ba1\u3002");
         return;
       }
       try {
-        splitRows = splitRows.map(normalizeRow);
-        const response = await request("/api/projects/" + currentProjectId + "/review/validate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(splitRows)
-        });
+        markActive("precheck");
+        setMessage("\u6b63\u5728\u6267\u884c\u89c4\u5219\u521d\u5ba1...");
+        const response = await runRuleValidationRequest();
         renderRuleValidation(response.data || {});
+        markDone("precheck");
+        markActive("review");
       } catch (error) {
-        showDialog("\u89c4\u5219\u6821\u9a8c\u5931\u8d25", error.message || "\u89c4\u5219\u6821\u9a8c\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002");
+        markActive("precheck");
+        showDialog("\u89c4\u5219\u521d\u5ba1\u5931\u8d25", error.message || "\u89c4\u5219\u521d\u5ba1\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002");
       }
+    }
+
+    async function runRuleValidationRequest() {
+      splitRows = splitRows.map(normalizeRow);
+      return await request("/api/projects/" + currentProjectId + "/review/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(splitRows)
+      });
     }
 
     function renderRuleValidation(result) {
@@ -816,27 +869,32 @@
       const okRows = Math.max(0, total - issues.length);
       const percent = Math.max(0, Math.min(100, Math.round(okRows * 100 / total)));
       $("ruleValidationBar").style.width = percent + "%";
-      const title = issues.length ? "\u53d1\u73b0 " + issues.length + " \u4e2a\u95ee\u9898" : "\u672a\u53d1\u73b0\u89c4\u5219\u95ee\u9898";
+      const title = issues.length
+        ? "\u53d1\u73b0 " + issues.length + " \u4e2a\u521d\u5ba1\u63d0\u793a"
+        : "\u672a\u53d1\u73b0\u89c4\u5219\u95ee\u9898";
       $("ruleValidationStatus").textContent = title;
       renderRuleValidationSummary(result);
-      let text = "\u6821\u9a8c\u884c\u6570\uff1a" + (result.totalRows || 0)
+      let text = "\u521d\u5ba1\u884c\u6570\uff1a" + (result.totalRows || 0)
         + "\uff0c\u9519\u8bef\uff1a" + (result.errorCount || 0)
-        + "\uff0c\u98ce\u9669\uff1a" + (result.riskCount || 0)
-        + "\uff0c\u5efa\u8bae\uff1a" + (result.suggestionCount || 0);
+        + "\uff0c\u7ed3\u6784\u98ce\u9669\uff1a" + (result.structureRiskCount || result.riskCount || 0)
+        + "\uff0c\u8868\u8fbe\u786e\u8ba4\uff1a" + (result.expressionConfirmCount || result.suggestionCount || 0);
       if (issues.length) {
         text += "\n" + issues.slice(0, 30).map(function (issue) {
-          return "\u7b2c " + issue.rowIndex + " \u884c [" + severityText(issue.severity) + "] "
-            + (issue.field || "") + "\uff1a" + (issue.message || "")
-            + (issue.suggestion ? "\n  \u5efa\u8bae\uff1a" + issue.suggestion : "");
+          return "\u7b2c " + issue.rowIndex + " \u884c [" + issueDisplayType(issue) + "] "
+            + formatValidationIssue(issue, true);
         }).join("\n");
         if (issues.length > 30) {
           text += "\n\u8fd8\u6709 " + (issues.length - 30) + " \u4e2a\u95ee\u9898\u672a\u5c55\u793a\uff0c\u8bf7\u4f18\u5148\u5904\u7406\u9519\u8bef\u548c\u98ce\u9669\u9879\u3002";
         }
-        setMessage("\u89c4\u5219\u6821\u9a8c\u5b8c\u6210\uff1a\u53d1\u73b0 " + issues.length + " \u4e2a\u95ee\u9898\uff0c\u8bf7\u6839\u636e\u7ed3\u679c\u4eba\u5de5\u8c03\u6574\u3002", result.errorCount ? "error" : "");
+        const level = result.errorCount ? "error" : ((result.riskCount || 0) > 0 ? "" : "success");
+        setMessage("\u89c4\u5219\u521d\u5ba1\u5b8c\u6210\uff1a\u5fc5\u987b\u4fee\u6b63 " + (result.errorCount || 0)
+          + "\uff0c\u7ed3\u6784\u98ce\u9669 " + (result.structureRiskCount || result.riskCount || 0)
+          + "\uff0c\u8868\u8fbe\u786e\u8ba4 " + (result.expressionConfirmCount || result.suggestionCount || 0) + "\u3002", level);
       } else {
-        setMessage("\u89c4\u5219\u6821\u9a8c\u901a\u8fc7\uff0c\u672a\u53d1\u73b0\u660e\u663e\u95ee\u9898\u3002", "success");
+        setMessage("\u89c4\u5219\u521d\u5ba1\u901a\u8fc7\uff0c\u672a\u53d1\u73b0\u660e\u663e\u95ee\u9898\u3002", "success");
       }
       $("ruleValidationDetail").textContent = text;
+      renderAiValidationResult(null);
       renderTable();
     }
 
@@ -847,10 +905,10 @@
       }
       summary.innerHTML = "";
       [
-        { label: "\u6821\u9a8c\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
+        { label: "\u521d\u5ba1\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
         { label: "\u9519\u8bef", value: result.errorCount || 0, className: "error" },
-        { label: "\u98ce\u9669", value: result.riskCount || 0, className: "risk" },
-        { label: "\u5efa\u8bae", value: result.suggestionCount || 0, className: "suggestion" }
+        { label: "\u7ed3\u6784\u98ce\u9669", value: result.structureRiskCount || result.riskCount || 0, className: "risk" },
+        { label: "\u8868\u8fbe\u786e\u8ba4", value: result.expressionConfirmCount || result.suggestionCount || 0, className: "suggestion" }
       ].forEach(function (item) {
         const card = document.createElement("div");
         card.className = "validation-summary-card " + item.className;
@@ -862,6 +920,312 @@
         card.appendChild(label);
         summary.appendChild(card);
       });
+    }
+
+    async function aiValidateSelectedRisks() {
+      if (!currentProjectId || !splitRows.length) {
+        showDialog("\u65e0\u6cd5 AI \u590d\u6838", "\u8bf7\u5148\u5bfc\u5165\u6216\u751f\u6210\u62c6\u5206\u7ed3\u679c\u3002");
+        return;
+      }
+      try {
+      if (!lastValidationResult) {
+        setMessage("\u6b63\u5728\u5148\u6267\u884c\u89c4\u5219\u521d\u5ba1\uff0c\u521d\u5ba1\u540e\u5c06\u7ee7\u7eed AI \u590d\u6838...");
+        const validationResponse = await runRuleValidationRequest();
+        renderRuleValidation(validationResponse.data || {});
+        markDone("precheck");
+      }
+      const indexes = selectedRowIndexes().filter(function (index) {
+        return highestValidationSeverity(validationIssuesByRow[index] || []) === "RISK";
+      });
+      if (!indexes.length) {
+        showDialog("\u8bf7\u9009\u62e9\u98ce\u9669\u884c", "\u8bf7\u5728\u89c4\u5219\u521d\u5ba1\u540e\uff0c\u52fe\u9009\u9700\u8981 AI \u590d\u6838\u7684\u9ec4\u8272\u98ce\u9669\u884c\u3002");
+        return;
+      }
+      const payload = {
+        rows: indexes.map(function (index) {
+          return {
+            rowIndex: index + 1,
+            row: normalizeRow(splitRows[index]),
+            issues: validationIssuesByRow[index] || [],
+            contextRows: sameFunctionProcessContextRows(index)
+          };
+        })
+      };
+      await withBusy(async function () {
+        renderAiValidationLoading(indexes.length);
+        setMessage("\u6b63\u5728\u8c03\u7528 AI \u590d\u6838\u9009\u4e2d\u98ce\u9669\u884c...");
+        const response = await request("/api/projects/" + currentProjectId + "/review/ai-validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        renderAiValidationResult(response.data || {});
+        setMessage("AI \u590d\u6838\u5b8c\u6210\uff0c\u8bf7\u6839\u636e\u5efa\u8bae\u4eba\u5de5\u5224\u65ad\u662f\u5426\u4fee\u6539\u3002", "success");
+      });
+      } catch (error) {
+        setMessage(error.message || "AI \u590d\u6838\u5931\u8d25\u3002", "error");
+        showDialog("AI \u590d\u6838\u5931\u8d25", error.message || "AI \u590d\u6838\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002");
+      }
+    }
+
+    function renderAiValidationLoading(count) {
+      const box = $("ruleValidationPanel");
+      if (!box) {
+        return;
+      }
+      box.classList.remove("hidden");
+      const status = $("ruleValidationStatus");
+      if (status) {
+        status.textContent = "\u6b63\u5728 AI \u590d\u6838 " + count + " \u884c...";
+      }
+      let panel = $("aiValidationResult");
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "aiValidationResult";
+        panel.className = "ai-validation-result";
+        box.appendChild(panel);
+      }
+      panel.classList.remove("hidden");
+      panel.innerHTML = "<div class=\"ai-validation-loading\"><b>AI \u590d\u6838\u8fdb\u884c\u4e2d</b><span>\u5df2\u63d0\u4ea4 " + escapeHtml(count) + " \u884c\u98ce\u9669\u9879\uff0c\u8bf7\u7a0d\u5019...</span></div>";
+    }
+
+    function sameFunctionProcessContextRows(index) {
+      const current = normalizeRow(splitRows[index] || {});
+      const process = textOr(current.functionProcess, "");
+      return splitRows
+        .map(function (row, rowIndex) {
+          return { row: normalizeRow(row), rowIndex: rowIndex };
+        })
+        .filter(function (entry) {
+          return textOr(entry.row.functionProcess, "") === process;
+        })
+        .map(function (entry) {
+          return {
+            rowIndex: entry.rowIndex + 1,
+            row: entry.row,
+            issues: validationIssuesByRow[entry.rowIndex] || []
+          };
+        });
+    }
+
+    function renderAiValidationResult(result) {
+      lastAiValidationResult = result || null;
+      const box = $("ruleValidationPanel");
+      if (!box) {
+        return;
+      }
+      let panel = $("aiValidationResult");
+      if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "aiValidationResult";
+        panel.className = "ai-validation-result hidden";
+        box.appendChild(panel);
+      }
+      if (!result || !result.items || !result.items.length) {
+        panel.classList.add("hidden");
+        panel.innerHTML = "";
+        return;
+      }
+      panel.classList.remove("hidden");
+      panel.innerHTML = "";
+      const head = document.createElement("div");
+      head.className = "ai-validation-head";
+      head.innerHTML = "<b>AI \u590d\u6838\u7ed3\u679c</b><span>\u6a21\u578b\uff1a" + escapeHtml(result.model || "-")
+        + "\uff0c\u63d0\u4ea4\uff1a" + escapeHtml(result.requestedCount || result.items.length) + " \u884c</span>";
+      const applyAllBtn = document.createElement("button");
+      applyAllBtn.type = "button";
+      applyAllBtn.className = "ai-apply-all";
+      applyAllBtn.textContent = "\u5168\u90e8\u91c7\u7eb3";
+      applyAllBtn.disabled = !result.items.some(canApplyAiSuggestion);
+      applyAllBtn.onclick = applyAllAiValidationSuggestions;
+      head.appendChild(applyAllBtn);
+      panel.appendChild(head);
+      result.items.forEach(function (item) {
+        const card = document.createElement("div");
+        card.className = "ai-validation-card " + verdictClass(item.verdict);
+        const suggestionParts = [];
+        if (item.suggestedFunctionProcess) {
+          suggestionParts.push("\u529f\u80fd\u8fc7\u7a0b\uff1a" + item.suggestedFunctionProcess);
+        }
+        if (item.suggestedSubProcessDescription) {
+          suggestionParts.push("\u5b50\u8fc7\u7a0b\u63cf\u8ff0\uff1a" + item.suggestedSubProcessDescription);
+        }
+        if (item.suggestedDataGroup) {
+          suggestionParts.push("\u6570\u636e\u7ec4\uff1a" + item.suggestedDataGroup);
+        }
+        if (item.suggestedDataAttributes) {
+          suggestionParts.push("\u6570\u636e\u5c5e\u6027\uff1a" + item.suggestedDataAttributes);
+        }
+        const suggestionText = aiSuggestionText(item, suggestionParts);
+        card.innerHTML =
+          "<div class=\"ai-validation-card-title\"><b>\u7b2c " + escapeHtml(item.rowIndex || "-") + " \u884c</b>"
+          + "<span>" + escapeHtml(verdictText(item.verdict)) + "\uff0c\u7f6e\u4fe1\u5ea6 " + escapeHtml(formatConfidence(item.confidence)) + "</span></div>"
+          + "<div><strong>\u529f\u80fd\u8fc7\u7a0b\uff1a</strong>" + escapeHtml(item.functionProcess || "") + "</div>"
+          + "<div><strong>\u590d\u6838\u7406\u7531\uff1a</strong>" + escapeHtml(item.reason || "") + "</div>"
+          + "<div><strong>\u4fee\u6539\u5efa\u8bae\uff1a</strong>" + escapeHtml(suggestionText) + "</div>"
+          + (suggestionParts.length ? "<div><strong>\u5efa\u8bae\u8868\u8fbe\uff1a</strong>" + escapeHtml(suggestionParts.join("\n")) + "</div>" : "");
+        const actions = document.createElement("div");
+        actions.className = "ai-validation-actions";
+        const applyOneBtn = document.createElement("button");
+        applyOneBtn.type = "button";
+        applyOneBtn.className = "ghost";
+        applyOneBtn.textContent = "\u91c7\u7eb3\u672c\u6761";
+        applyOneBtn.disabled = !canApplyAiSuggestion(item);
+        applyOneBtn.onclick = async function () {
+          await applyOneAiValidationSuggestion(item);
+        };
+        actions.appendChild(applyOneBtn);
+        card.appendChild(actions);
+        panel.appendChild(card);
+      });
+    }
+
+    function aiSuggestionText(item, suggestionParts) {
+      const suggestion = textOr(item && item.suggestion, "");
+      if (suggestion) {
+        return suggestion;
+      }
+      if (item && item.verdict === "FALSE_POSITIVE") {
+        return "\u65e0\u9700\u4fee\u6539\uff1aAI \u5224\u65ad\u8be5\u884c\u4e3a\u53ef\u80fd\u8bef\u62a5\uff0c\u5f53\u524d\u8868\u8fbe\u57fa\u672c\u53ef\u8ba1\u91cf\u3002";
+      }
+      if (suggestionParts && suggestionParts.length) {
+        return "\u53ef\u91c7\u7eb3\u4e0b\u65b9\u5efa\u8bae\u8868\u8fbe\u3002";
+      }
+      if (item && item.verdict === "CONFIRMED_RISK") {
+        return "\u5df2\u786e\u8ba4\u98ce\u9669\uff0c\u4f46 AI \u672a\u8fd4\u56de\u53ef\u76f4\u63a5\u91c7\u7eb3\u7684\u5b57\u6bb5\u5efa\u8bae\uff0c\u8bf7\u6839\u636e\u590d\u6838\u7406\u7531\u624b\u5de5\u8c03\u6574\u3002";
+      }
+      return "\u8bf7\u7ed3\u5408\u590d\u6838\u7406\u7531\u4eba\u5de5\u5224\u65ad\u662f\u5426\u9700\u8981\u4fee\u6539\u3002";
+    }
+
+    function canApplyAiSuggestion(item) {
+      if (!item || item.verdict === "FALSE_POSITIVE") {
+        return false;
+      }
+      const index = Number(item.rowIndex || 0) - 1;
+      if (index < 0 || index >= splitRows.length) {
+        return false;
+      }
+      return !!(textOr(item.suggestedFunctionProcess, "")
+        || textOr(item.suggestedSubProcessDescription, "")
+        || textOr(item.suggestedDataGroup, "")
+        || textOr(item.suggestedDataAttributes, ""));
+    }
+
+    async function applyOneAiValidationSuggestion(item) {
+      await withBusy(async function () {
+        setMessage("\u6b63\u5728\u91c7\u7eb3 AI \u5efa\u8bae\u5e76\u4fdd\u5b58...");
+        const result = applyAiValidationSuggestion(item);
+        if (result.applied) {
+          await persistReviewAfterAiApply();
+        }
+        showDialog("\u91c7\u7eb3\u7ed3\u679c", result.message);
+      });
+    }
+
+    async function applyAllAiValidationSuggestions() {
+      const items = lastAiValidationResult && lastAiValidationResult.items ? lastAiValidationResult.items : [];
+      let applied = 0;
+      let skipped = 0;
+      items.forEach(function (item) {
+        const result = applyAiValidationSuggestion(item, true);
+        if (result.applied) {
+          applied++;
+        } else {
+          skipped++;
+        }
+      });
+      renderTable();
+      updateStats();
+      await withBusy(async function () {
+        if (applied) {
+          setMessage("\u6b63\u5728\u6279\u91cf\u91c7\u7eb3 AI \u5efa\u8bae\u5e76\u4fdd\u5b58...");
+          await persistReviewAfterAiApply();
+        }
+        const message = "\u5df2\u91c7\u7eb3 " + applied + " \u6761 AI \u5efa\u8bae\uff0c\u8df3\u8fc7 " + skipped + " \u6761\u65e0\u5efa\u8bae\u6216\u53ef\u80fd\u8bef\u62a5\u9879\u3002\u5df2\u81ea\u52a8\u4fdd\u5b58\uff0c\u8bf7\u91cd\u65b0\u6267\u884c\u89c4\u5219\u521d\u5ba1\u786e\u8ba4\u3002";
+        setMessage(message, applied ? "success" : "");
+        showDialog("\u5168\u90e8\u91c7\u7eb3\u5b8c\u6210", message);
+      });
+    }
+
+    function applyAiValidationSuggestion(item, silent) {
+      if (!canApplyAiSuggestion(item)) {
+        return {
+          applied: false,
+          message: "\u8be5 AI \u5efa\u8bae\u4e0d\u9002\u5408\u76f4\u63a5\u91c7\u7eb3\uff0c\u53ef\u80fd\u662f\u8bef\u62a5\u3001\u65e0\u5efa\u8bae\u5b57\u6bb5\u6216\u884c\u5df2\u4e0d\u5b58\u5728\u3002"
+        };
+      }
+      const index = Number(item.rowIndex || 0) - 1;
+      const row = Object.assign({}, splitRows[index] || {});
+      const changedFields = [];
+      [
+        ["suggestedFunctionProcess", "functionProcess", "\u529f\u80fd\u8fc7\u7a0b"],
+        ["suggestedSubProcessDescription", "subProcessDescription", "\u5b50\u8fc7\u7a0b\u63cf\u8ff0"],
+        ["suggestedDataGroup", "dataGroup", "\u6570\u636e\u7ec4"],
+        ["suggestedDataAttributes", "dataAttributes", "\u6570\u636e\u5c5e\u6027"]
+      ].forEach(function (mapping) {
+        const value = textOr(item[mapping[0]], "");
+        if (value && row[mapping[1]] !== value) {
+          row[mapping[1]] = value;
+          changedFields.push(mapping[2]);
+        }
+      });
+      if (!changedFields.length) {
+        return { applied: false, message: "\u8be5\u884c\u4e0e AI \u5efa\u8bae\u5df2\u4e00\u81f4\uff0c\u65e0\u9700\u91cd\u590d\u91c7\u7eb3\u3002" };
+      }
+      splitRows[index] = normalizeRow(row);
+      const descriptionChanged = markGroupFunctionDescriptionForAiRefresh(index);
+      if (descriptionChanged) {
+        changedFields.push("\u529f\u80fd\u63cf\u8ff0");
+      }
+      markValidationStale(index, true);
+      renderTable();
+      updateStats();
+      const message = "\u5df2\u91c7\u7eb3\u7b2c " + item.rowIndex + " \u884c\uff1a" + changedFields.join("\u3001") + "\u3002\u5df2\u81ea\u52a8\u4fdd\u5b58\uff0c\u8bf7\u91cd\u65b0\u6267\u884c\u89c4\u5219\u521d\u5ba1\u786e\u8ba4\u3002";
+      if (!silent) {
+        setMessage(message, "success");
+      }
+      return { applied: true, message: message };
+    }
+
+    async function persistReviewAfterAiApply() {
+      splitRows = splitRows.map(normalizeRow);
+      const response = await request("/api/projects/" + currentProjectId + "/review", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(splitRows)
+      });
+      splitRows = ((response.data && response.data.splitRows) || splitRows).map(normalizeRow);
+      $("statusText").textContent = (response.data && response.data.status) || "REVIEWED";
+      renderTable();
+      updateStats();
+    }
+
+    function verdictText(verdict) {
+      if (verdict === "CONFIRMED_RISK") {
+        return "\u786e\u8ba4\u98ce\u9669";
+      }
+      if (verdict === "FALSE_POSITIVE") {
+        return "\u53ef\u80fd\u8bef\u62a5";
+      }
+      return "\u9700\u4eba\u5de5\u590d\u6838";
+    }
+
+    function verdictClass(verdict) {
+      if (verdict === "CONFIRMED_RISK") {
+        return "confirmed";
+      }
+      if (verdict === "FALSE_POSITIVE") {
+        return "false-positive";
+      }
+      return "need-review";
+    }
+
+    function formatConfidence(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        return "-";
+      }
+      return Math.round(Math.max(0, Math.min(1, number)) * 100) + "%";
     }
 
     function buildValidationIssueMap(issues) {
@@ -881,9 +1245,25 @@
         return "\u9519\u8bef";
       }
       if (severity === "RISK") {
-        return "\u98ce\u9669";
+        return "\u7ed3\u6784\u98ce\u9669";
       }
-      return "\u5efa\u8bae";
+      return "\u8868\u8fbe\u786e\u8ba4";
+    }
+
+    function issueDisplayType(issue) {
+      if (issue && issue.field && issue.field !== severityText(issue.severity)) {
+        return issue.field;
+      }
+      return severityText(issue && issue.severity);
+    }
+
+    function formatValidationIssue(issue, multiline) {
+      const message = textOr(issue && issue.message, "");
+      const suggestion = textOr(issue && issue.suggestion, "");
+      if (!suggestion) {
+        return message;
+      }
+      return multiline ? message + "\n  \u5efa\u8bae\uff1a" + suggestion : message + "\uff1b\u5efa\u8bae\uff1a" + suggestion;
     }
 
     function buildSplitExcelImportError(error) {
@@ -918,7 +1298,15 @@
         return;
       }
       currentProjectId = id;
-      await withBusy(loadReview);
+      await withBusy(async function () {
+        await loadReview();
+        if (splitRows.length) {
+          const validationResponse = await runRuleValidationRequest();
+          renderRuleValidation(validationResponse.data || {});
+        }
+        markCurrentFlowComplete();
+        setMessage("\u5df2\u52a0\u8f7d\u9879\u76ee\u5ba1\u6838\u6570\u636e\uff0c\u53ef\u7ee7\u7eed\u7f16\u8f91\u3001\u89c4\u5219\u521d\u5ba1\u6216 AI \u590d\u6838\u3002", "success");
+      });
     }
 
     function startNewTask() {
@@ -971,7 +1359,7 @@
       if (!splitRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 14;
+        td.colSpan = 15;
         td.className = "empty";
         td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
         tr.appendChild(td);
@@ -982,7 +1370,7 @@
       if (!visibleRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 14;
+        td.colSpan = 15;
         td.className = "empty";
         td.textContent = "没有符合筛选条件的数据。";
         tr.appendChild(td);
@@ -1008,6 +1396,7 @@
         addTextCell(tr, row, index, "dataGroup");
         addTextCell(tr, row, index, "dataAttributes");
         addSelectCell(tr, row, index, "reuseDegree", reuseOptions);
+        addValidationReasonCell(tr, index);
         const cfp = document.createElement("td");
         cfp.className = "cfp-cell";
         cfp.textContent = formatCfp(row.cfp);
@@ -1028,7 +1417,7 @@
       tr.classList.add("validation-row");
       tr.classList.add("validation-" + severity.toLowerCase());
       tr.title = issues.map(function (issue) {
-        return severityText(issue.severity) + " - " + (issue.field || "") + ": " + (issue.message || "");
+        return "\u3010" + issueDisplayType(issue) + "\u3011" + formatValidationIssue(issue, false);
       }).join("\n");
     }
 
@@ -1105,6 +1494,24 @@
       tr.appendChild(td);
     }
 
+    function addValidationReasonCell(tr, index) {
+      const td = document.createElement("td");
+      td.className = "validation-reason-cell";
+      const issues = validationIssuesByRow[index] || [];
+      if (!issues.length) {
+        td.textContent = "-";
+        td.classList.add("muted-cell");
+        tr.appendChild(td);
+        return;
+      }
+      const text = issues.map(function (issue) {
+        return "\u3010" + issueDisplayType(issue) + "\u3011" + formatValidationIssue(issue, false);
+      }).join("\n");
+      td.textContent = text;
+      td.title = text;
+      tr.appendChild(td);
+    }
+
     function addSelectCell(tr, row, index, field, options) {
       const td = document.createElement("td");
       td.className = "field-" + field;
@@ -1167,11 +1574,18 @@
             row.subProcessDescription,
             row.sequenceDiagram,
             row.dataGroup,
-            row.dataAttributes
+            row.dataAttributes,
+            validationReasonText(entry.index)
           ].some(function (value) {
             return textOr(value, "").toLowerCase().indexOf(search) >= 0;
           });
         });
+    }
+
+    function validationReasonText(index) {
+      return (validationIssuesByRow[index] || []).map(function (issue) {
+        return [issueDisplayType(issue), issue.message, issue.suggestion].join(" ");
+      }).join("\n");
     }
 
     function matchesValidationFilter(index, validation) {
@@ -1351,12 +1765,14 @@
       updateStats();
     }
 
-    function markValidationStale(index) {
+    function markValidationStale(index, keepIssue) {
       if (validationIssuesByRow && validationIssuesByRow[index]) {
-        delete validationIssuesByRow[index];
+        if (!keepIssue) {
+          delete validationIssuesByRow[index];
+        }
         const status = $("ruleValidationStatus");
         if (status) {
-          status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u6821\u9a8c";
+          status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u521d\u5ba1";
         }
       }
     }
@@ -1567,6 +1983,82 @@
       const subProcess = textOr(subProcessDescription, "处理功能子过程");
       const attributes = textOr(dataAttributes, "相关数据属性");
       return subProcess + "，涉及" + attributes + "。";
+    }
+
+    function markGroupFunctionDescriptionForAiRefresh(index) {
+      const current = normalizeRow(splitRows[index] || {});
+      const groupIndexes = splitRows
+        .map(function (row, rowIndex) {
+          return { row: normalizeRow(row), rowIndex: rowIndex };
+        })
+        .filter(function (entry) {
+          return entry.row.level1Module === current.level1Module
+            && entry.row.level2Module === current.level2Module
+            && entry.row.level3Module === current.level3Module
+            && entry.row.functionProcess === current.functionProcess;
+        });
+      let changed = false;
+      groupIndexes.forEach(function (entry) {
+        const row = Object.assign({}, splitRows[entry.rowIndex] || {});
+        if (shouldRefreshGeneratedDescription(row) && row.functionDescription !== "__AI_FUNCTION_DESCRIPTION_PENDING__") {
+          row.functionDescription = "__AI_FUNCTION_DESCRIPTION_PENDING__";
+          splitRows[entry.rowIndex] = normalizeRow(row);
+          changed = true;
+        }
+      });
+      return changed;
+    }
+
+    function groupFunctionDescription(rows) {
+      const list = (rows || []).map(normalizeRow);
+      if (!list.length) {
+        return "";
+      }
+      const process = textOr(list[0].functionProcess, "功能过程");
+      const actions = uniqueTexts(list.map(function (row) { return row.subProcessDescription; }));
+      const dataGroups = uniqueTexts(list.map(function (row) { return row.dataGroup; }));
+      const attributes = uniqueTexts(list.flatMap(function (row) { return splitAttributeText(row.dataAttributes); })).slice(0, 12);
+      let text = "本功能用于完成" + process + "，系统按照" + (actions.length ? actions.join("、") : "业务数据处理") + "的处理流程";
+      if (dataGroups.length) {
+        text += "，围绕" + dataGroups.join("、") + "等数据组";
+      }
+      if (attributes.length) {
+        text += "，处理" + attributes.join("、") + "等业务属性";
+      }
+      return text + "，形成该功能的输入、读取、写入或输出结果。";
+    }
+
+    function shouldRefreshGeneratedDescription(row) {
+      const value = textOr(row && row.functionDescription, "");
+      if (!value) {
+        return true;
+      }
+      return value === textOr(row.functionProcess, "")
+        || value === "__AI_FUNCTION_DESCRIPTION_PENDING__"
+        || value === textOr(row.subProcessDescription, "")
+        || value === defaultFunctionDescription(row.subProcessDescription, row.dataAttributes)
+        || (value.indexOf("其中，" + textOr(row.subProcessDescription, "")) >= 0
+          && value.endsWith("，涉及" + textOr(row.dataAttributes, "") + "。"))
+        || (value.indexOf("本功能用于完成") === 0 && value.indexOf("支撑该功能的输入") >= 0);
+    }
+
+    function splitAttributeText(value) {
+      return textOr(value, "")
+        .replace(/[，、；;]/g, ",")
+        .split(",")
+        .map(function (part) { return part.trim(); })
+        .filter(Boolean);
+    }
+
+    function uniqueTexts(values) {
+      const result = [];
+      (values || []).forEach(function (value) {
+        const text = textOr(value, "");
+        if (text && result.indexOf(text) < 0) {
+          result.push(text);
+        }
+      });
+      return result;
     }
 
     function defaultSequenceDiagram(movementType, subProcessDescription, dataGroup, dataAttributes) {

@@ -413,7 +413,7 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 5;
-  padding: 10px 0 14px;
+  padding: 8px 0 12px;
   background: var(--panel);
   border-radius: var(--radius);
   margin: 0 -4px;
@@ -421,21 +421,47 @@ textarea {
   padding-right: 4px;
 }
 
+.review-panel .sticky-actions,
+#reviewPanel .sticky-actions {
+  display: grid;
+  grid-template-columns: auto minmax(420px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-panel .sticky-actions .action-label,
+#reviewPanel .sticky-actions .action-label {
+  display: none;
+}
+
 .primary-tools,
 .review-view-tools {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  min-width: 0;
+}
+
+.primary-tools {
+  justify-content: flex-start;
+  flex-wrap: nowrap;
 }
 
 .batch-tools {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--soft);
+}
+
+.review-view-tools {
+  justify-content: flex-end;
+  flex-wrap: nowrap;
 }
 
 .action-label,
@@ -460,7 +486,7 @@ textarea {
 
 .review-filter-bar {
   display: grid;
-  grid-template-columns: auto 220px 130px 130px 130px 95px 105px 115px auto 1fr;
+  grid-template-columns: auto minmax(220px, 1fr) repeat(3, minmax(112px, 130px)) minmax(84px, 95px) minmax(96px, 105px) minmax(132px, 150px) 82px;
   align-items: center;
   gap: 8px;
   margin: 0 0 12px;
@@ -474,25 +500,41 @@ textarea {
 .review-filter-bar select {
   height: 36px;
   font-size: 12px;
+  min-width: 0;
 }
 
 .filter-count {
-  color: var(--secondary);
-  font-size: 12px;
-  white-space: nowrap;
-  justify-self: end;
+  display: none;
 }
 
 .filter-count b {
   color: var(--primary);
 }
 
+.review-filter-bar button {
+  width: 82px;
+  white-space: nowrap;
+  word-break: keep-all;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
 .batch-tools select,
 .batch-tools input {
-  height: 32px;
-  min-width: 120px;
-  width: 150px;
+  height: 30px;
+  min-width: 96px;
+  width: 132px;
   padding: 4px 10px;
+  font-size: 12px;
+}
+
+.batch-tools #batchField {
+  width: 124px;
+}
+
+.batch-tools #batchValue,
+.batch-tools #batchSelectValue {
+  width: 142px;
 }
 
 button,
@@ -500,15 +542,15 @@ button,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 34px;
+  height: 32px;
   border: 0;
   border-radius: 6px;
-  padding: 0 14px;
+  padding: 0 11px;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
   color: #ffffff;
   font: inherit;
   font-weight: 500;
-  font-size: 13px;
+  font-size: 12px;
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -542,6 +584,55 @@ button.secondary:hover {
   box-shadow: 0 3px 10px rgba(71, 85, 105, 0.3);
 }
 
+button.rule-precheck-primary {
+  position: relative;
+  overflow: hidden;
+  min-width: 84px;
+  background: linear-gradient(135deg, #2563eb 0%, #0891b2 55%, #10b981 100%);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12), 0 8px 18px rgba(8, 145, 178, 0.28);
+}
+
+button.rule-precheck-primary::after {
+  content: "";
+  position: absolute;
+  inset: -40% auto -40% -55%;
+  width: 42%;
+  transform: rotate(18deg);
+  background: rgba(255, 255, 255, 0.35);
+  animation: reviewButtonSheen 2.8s ease-in-out infinite;
+}
+
+button.rule-precheck-primary:hover {
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.16), 0 10px 24px rgba(8, 145, 178, 0.36);
+}
+
+button.ai-review-secondary,
+button.ai-apply-all {
+  background: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.26);
+}
+
+button.ai-review-secondary {
+  min-width: 76px;
+}
+
+button.ai-review-secondary:hover,
+button.ai-apply-all:hover {
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.34);
+}
+
+@keyframes reviewButtonSheen {
+  0% {
+    left: -55%;
+  }
+  45% {
+    left: 120%;
+  }
+  100% {
+    left: 120%;
+  }
+}
+
 button.export {
   background: linear-gradient(135deg, #f59e0b 0%, var(--export) 100%);
   box-shadow: 0 2px 6px rgba(217, 119, 6, 0.3);
@@ -556,8 +647,8 @@ button.ghost {
   color: var(--secondary);
   border: 1.5px solid var(--line);
   box-shadow: none;
-  height: 32px;
-  padding: 0 12px;
+  height: 30px;
+  padding: 0 10px;
   font-size: 12px;
 }
 
@@ -708,6 +799,11 @@ button.mini {
 .w-reuse {
   width: 95px;
   min-width: 95px;
+}
+
+.w-risk-reason {
+  width: 240px;
+  min-width: 220px;
 }
 
 .w-cfp {
@@ -905,6 +1001,19 @@ td textarea {
   margin-left: 6px;
 }
 
+.validation-reason-cell {
+  max-width: 260px;
+  white-space: pre-line;
+  line-height: 1.55;
+  color: #92400e;
+  font-size: 12px;
+}
+
+.validation-reason-cell.muted-cell {
+  color: var(--muted);
+  text-align: center;
+}
+
 .empty {
   height: 120px;
   text-align: center;
@@ -1046,6 +1155,89 @@ td textarea {
   border-color: #bfdbfe;
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.ai-validation-result {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.ai-validation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.ai-validation-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-validation-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 10px 12px;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-line;
+}
+
+.ai-validation-card.confirmed {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.ai-validation-card.false-positive {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.ai-validation-card.need-review {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.ai-validation-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.ai-validation-card-title span {
+  color: var(--muted);
+}
+
+.ai-validation-loading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  padding: 10px 12px;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.ai-validation-loading span {
+  color: var(--secondary);
+}
+
+.ai-validation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 tbody tr.validation-error td,
@@ -1456,6 +1648,32 @@ tbody tr.validation-suggestion .cell-preview {
   }
 }
 
+@media (max-width: 1280px) {
+  #reviewPanel .sticky-actions {
+    grid-template-columns: auto minmax(360px, 1fr) auto;
+    gap: 6px;
+  }
+
+  #reviewPanel button,
+  #reviewPanel .button-link {
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  #reviewPanel button.ai-review-secondary {
+    min-width: 72px;
+  }
+
+  #reviewPanel .batch-tools #batchField {
+    width: 112px;
+  }
+
+  #reviewPanel .batch-tools #batchValue,
+  #reviewPanel .batch-tools #batchSelectValue {
+    width: 120px;
+  }
+}
+
 @media (max-width: 900px) {
   .upload-row {
     flex-direction: column;
@@ -1532,12 +1750,16 @@ tbody tr.validation-suggestion .cell-preview {
     gap: 8px;
   }
 
-  .sticky-actions,
+  #reviewPanel .sticky-actions,
   .primary-tools,
   .review-view-tools,
   .batch-tools {
     align-items: stretch;
     width: 100%;
+  }
+
+  #reviewPanel .sticky-actions {
+    display: flex;
   }
 
   .primary-tools,
@@ -1547,10 +1769,6 @@ tbody tr.validation-suggestion .cell-preview {
 
   .review-filter-bar {
     grid-template-columns: 1fr;
-  }
-
-  .filter-count {
-    white-space: normal;
   }
 
   .dialog-overlay {
