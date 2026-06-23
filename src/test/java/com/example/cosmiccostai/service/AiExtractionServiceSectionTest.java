@@ -31,4 +31,34 @@ class AiExtractionServiceSectionTest {
         assertTrue(extracted.contains("标准十级地址ID"));
         assertFalse(extracted.contains("性能要求"));
     }
+
+    @Test
+    void extractsOnlyFunctionDescriptionSubsectionFromNumberedRequirementChapter() throws Exception {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod("extractRequirementDetail", String.class);
+        method.setAccessible(true);
+
+        String text = "二.业务功能\n"
+                + "2.1 串实不符检测优化\n"
+                + "这是一段摘要，不应推送给AI。\n"
+                + "2.1.1 串实不符检测优化（新增）\n"
+                + "2.1.1.1 功能描述\n"
+                + "串实不符管理者视图数据查询：在 PC 客户端，通过输入查询条件，查询对应串实不符统计数据。\n"
+                + "串实不符明细数据检测：在 PC 客户端，点击检测按钮调用RMS接口核实串实结果。\n"
+                + "2.1.1.2 功能界面\n"
+                + "这里是界面说明，不应推送给AI。\n"
+                + "2.1.1.3 流程图\n"
+                + "三.调整因子情况说明\n"
+                + "规模变更调整因子";
+
+        String extracted = (String) method.invoke(service, text);
+
+        assertTrue(extracted.contains("串实不符管理者视图数据查询"));
+        assertTrue(extracted.contains("串实不符明细数据检测"));
+        assertFalse(extracted.contains("这是一段摘要"));
+        assertFalse(extracted.contains("功能界面"));
+        assertFalse(extracted.contains("流程图"));
+        assertFalse(extracted.contains("调整因子"));
+    }
 }

@@ -3,17 +3,10 @@ package com.example.cosmiccostai.service;
 import com.example.cosmiccostai.dto.RuleValidationIssue;
 import com.example.cosmiccostai.dto.RuleValidationResponse;
 import com.example.cosmiccostai.model.FunctionSplitRow;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -33,14 +26,15 @@ public class RuleValidationService {
             "\u96c6\u6210", "\u73b0\u573a", "\u5b9e\u65bd", "\u63a5\u53e3", "\u914d\u7f6e", "\u9875\u9762\u8bbe\u8ba1",
             "\u8c03\u7528", "\u65e5\u5fd7", "\u89e6\u53d1", "\u63d0\u793a");
 
-    private final String splitRulesPath;
+    private final SplitRuleConfigService splitRuleConfigService;
 
     public RuleValidationService() {
-        this("classpath:/static/split-check-rules.md");
+        this(null);
     }
 
-    public RuleValidationService(@Value("${cosmic.rules.split-rules-path:classpath:/static/split-check-rules.md}") String splitRulesPath) {
-        this.splitRulesPath = splitRulesPath;
+    @Autowired
+    public RuleValidationService(SplitRuleConfigService splitRuleConfigService) {
+        this.splitRuleConfigService = splitRuleConfigService;
     }
 
     public RuleValidationResponse validate(List<FunctionSplitRow> rows) {
@@ -115,16 +109,15 @@ public class RuleValidationService {
                 + safe(row.getSubProcessDescription()) + " " + safe(row.getDataGroup()) + " " + safe(row.getDataAttributes());
         for (String keyword : highRiskKeywords) {
             if (text.contains(keyword)) {
-                String severity = hasStructureRisk ? "RISK" : "SUGGESTION";
-                String field = hasStructureRisk ? "\u8868\u8fbe\u98ce\u9669" : "\u8868\u8fbe\u786e\u8ba4";
+                if (!hasStructureRisk) {
+                    break;
+                }
+                String severity = "RISK";
+                String field = "\u8868\u8fbe\u98ce\u9669";
                 String keywordReason = keywordReason(keyword);
-                String message = hasStructureRisk ? "\u8868\u8fbe\u4e2d\u51fa\u73b0\u201c" + keyword + "\u201d\uff1b" + keywordReason
-                        + "\uff1b\u4e14\u8be5\u529f\u80fd\u8fc7\u7a0b\u5b58\u5728 E/R/W/X \u7ed3\u6784\u98ce\u9669\uff0c\u9700\u4f18\u5148\u4fee\u6b63\u3002"
-                        : "\u8868\u8fbe\u4e2d\u51fa\u73b0\u201c" + keyword + "\u201d\uff1b" + keywordReason
-                        + "\uff1b\u8bf7\u786e\u8ba4\u5b83\u662f\u5426\u5df2\u843d\u5230\u5177\u4f53\u4e1a\u52a1\u5bf9\u8c61\u3001\u6570\u636e\u7ec4\u548c\u8f93\u51fa\u7ed3\u679c\u3002";
-                String suggestion = hasStructureRisk
-                        ? "\u5148\u8865\u9f50\u8be5\u529f\u80fd\u8fc7\u7a0b\u7684 E \u8f93\u5165\u548c W/X \u5199\u5165\u6216\u8f93\u51fa\uff1b\u518d" + keywordRewriteAdvice(keyword)
-                        : keywordRewriteAdvice(keyword);
+                String message = "\u8868\u8fbe\u4e2d\u51fa\u73b0\u201c" + keyword + "\u201d\uff1b" + keywordReason
+                        + "\uff1b\u4e14\u8be5\u529f\u80fd\u8fc7\u7a0b\u5b58\u5728 E/R/W/X \u7ed3\u6784\u98ce\u9669\uff0c\u9700\u4f18\u5148\u4fee\u6b63\u3002";
+                String suggestion = "\u5148\u8865\u9f50\u8be5\u529f\u80fd\u8fc7\u7a0b\u7684 E \u8f93\u5165\u548c W/X \u5199\u5165\u6216\u8f93\u51fa\uff1b\u518d" + keywordRewriteAdvice(keyword);
                 add(response, rowNumber, safe(row.getFunctionProcess()), field, severity, message, suggestion);
                 break;
             }
@@ -261,9 +254,7 @@ public class RuleValidationService {
     private void finish(RuleValidationResponse response) {
         int errors = 0;
         int risks = 0;
-        int suggestions = 0;
         int structureRisks = 0;
-        int expressionConfirms = 0;
         for (RuleValidationIssue issue : response.getIssues()) {
             if ("ERROR".equals(issue.getSeverity())) {
                 errors++;
@@ -272,19 +263,14 @@ public class RuleValidationService {
                 if ("\u529f\u80fd\u8fc7\u7a0b".equals(issue.getField()) || "\u6570\u636e\u79fb\u52a8\u7ed3\u6784".equals(issue.getField())) {
                     structureRisks++;
                 }
-            } else {
-                suggestions++;
-                if ("\u8868\u8fbe\u786e\u8ba4".equals(issue.getField())) {
-                    expressionConfirms++;
-                }
             }
         }
         response.setIssueCount(response.getIssues().size());
         response.setErrorCount(errors);
         response.setRiskCount(risks);
-        response.setSuggestionCount(suggestions);
+        response.setSuggestionCount(0);
         response.setStructureRiskCount(structureRisks);
-        response.setExpressionConfirmCount(expressionConfirms);
+        response.setExpressionConfirmCount(0);
     }
 
     private String safe(String value) {
@@ -327,49 +313,7 @@ public class RuleValidationService {
     }
 
     private String readSplitRules() {
-        if (!StringUtils.hasText(splitRulesPath)) {
-            return "";
-        }
-        if (splitRulesPath.startsWith("classpath:")) {
-            String resourcePath = splitRulesPath.substring("classpath:".length());
-            if (resourcePath.startsWith("/")) {
-                resourcePath = resourcePath.substring(1);
-            }
-            ClassPathResource resource = new ClassPathResource(resourcePath);
-            if (!resource.exists()) {
-                return "";
-            }
-            try (InputStream inputStream = resource.getInputStream()) {
-                return readAll(inputStream);
-            } catch (IOException ex) {
-                return "";
-            }
-        }
-        Path path = Paths.get(splitRulesPath);
-        if (!Files.exists(path)) {
-            Path projectPath = Paths.get("").toAbsolutePath().resolve(splitRulesPath);
-            if (Files.exists(projectPath)) {
-                path = projectPath;
-            }
-        }
-        if (!Files.exists(path)) {
-            return "";
-        }
-        try {
-            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            return "";
-        }
-    }
-
-    private String readAll(InputStream inputStream) throws IOException {
-        byte[] buffer = new byte[8192];
-        int read;
-        java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-        while ((read = inputStream.read(buffer)) >= 0) {
-            outputStream.write(buffer, 0, read);
-        }
-        return new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+        return splitRuleConfigService == null ? "" : splitRuleConfigService.getRules();
     }
 
     private static class RowRef {

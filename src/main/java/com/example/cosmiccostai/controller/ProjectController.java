@@ -10,6 +10,7 @@ import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
 import com.example.cosmiccostai.dto.ExportFileActionResponse;
 import com.example.cosmiccostai.dto.ParseResponse;
+import com.example.cosmiccostai.dto.ProjectListResponse;
 import com.example.cosmiccostai.dto.ReviewResponse;
 import com.example.cosmiccostai.dto.RuleValidationResponse;
 import com.example.cosmiccostai.dto.WordExportResponse;
@@ -20,6 +21,7 @@ import com.example.cosmiccostai.service.CosmicAnalysisService;
 import com.example.cosmiccostai.service.DocumentParseService;
 import com.example.cosmiccostai.service.ExcelExportService;
 import com.example.cosmiccostai.service.ExportFileService;
+import com.example.cosmiccostai.service.ProjectListService;
 import com.example.cosmiccostai.service.ReviewService;
 import com.example.cosmiccostai.service.RuleValidationService;
 import com.example.cosmiccostai.service.WordExportService;
@@ -30,6 +32,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -55,6 +58,7 @@ public class ProjectController {
     private final ExportFileService exportFileService;
     private final RuleValidationService ruleValidationService;
     private final AiReviewValidationService aiReviewValidationService;
+    private final ProjectListService projectListService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -64,7 +68,8 @@ public class ProjectController {
                              WordExportService wordExportService,
                              ExportFileService exportFileService,
                              RuleValidationService ruleValidationService,
-                             AiReviewValidationService aiReviewValidationService) {
+                             AiReviewValidationService aiReviewValidationService,
+                             ProjectListService projectListService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -74,6 +79,26 @@ public class ProjectController {
         this.exportFileService = exportFileService;
         this.ruleValidationService = ruleValidationService;
         this.aiReviewValidationService = aiReviewValidationService;
+        this.projectListService = projectListService;
+    }
+
+    @Operation(summary = "List projects", description = "List historical projects from local storage.")
+    @GetMapping
+    public ApiResponse<ProjectListResponse> listProjects() {
+        return ApiResponse.ok(projectListService.listProjects());
+    }
+
+    @Operation(summary = "Delete project", description = "Delete a local project and all files under its storage directory.")
+    @DeleteMapping("/{projectId}")
+    public ApiResponse<Void> deleteProject(@PathVariable String projectId) {
+        projectListService.deleteProject(projectId);
+        return ApiResponse.ok(null);
+    }
+
+    @Operation(summary = "Batch delete projects", description = "Delete multiple local projects and all files under their storage directories.")
+    @PostMapping("/batch-delete")
+    public ApiResponse<Integer> deleteProjects(@RequestBody List<String> projectIds) {
+        return ApiResponse.ok(projectListService.deleteProjects(projectIds));
     }
 
     @Operation(summary = "解析需求说明书", description = "解析已上传的 docx 文件，结果写入 document-text.txt。")

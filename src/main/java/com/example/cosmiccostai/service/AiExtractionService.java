@@ -10,15 +10,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import org.springframework.core.io.ClassPathResource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -48,24 +47,36 @@ public class AiExtractionService {
     private final String model;
     private final long timeoutSeconds;
     private final int maxRetries;
-    private final String splitRulesPath;
+    private final SplitRuleConfigService splitRuleConfigService;
 
+    @Autowired
     public AiExtractionService(FileStorageService fileStorageService,
                                @Value("${cosmic.ai.base-url:}") String baseUrl,
                                @Value("${cosmic.ai.api-key:}") String apiKey,
                                @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
                                @Value("${cosmic.ai.timeout-seconds:180}") long timeoutSeconds,
                                @Value("${cosmic.ai.max-retries:2}") int maxRetries,
-                               @Value("${cosmic.rules.split-rules-path:classpath:/static/split-check-rules.md}") String splitRulesPath) {
+                               SplitRuleConfigService splitRuleConfigService) {
         this.fileStorageService = fileStorageService;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.model = model;
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
-        this.splitRulesPath = splitRulesPath;
+        this.splitRuleConfigService = splitRuleConfigService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+    }
+
+    public AiExtractionService(FileStorageService fileStorageService,
+                               String baseUrl,
+                               String apiKey,
+                               String model,
+                               long timeoutSeconds,
+                               int maxRetries,
+                               String splitRulesPath) {
+        this(fileStorageService, baseUrl, apiKey, model, timeoutSeconds, maxRetries,
+                new SplitRuleConfigService("target/test-config/split-check-rules.md"));
     }
 
     public ExtractResponse extract(String projectId) {
@@ -176,7 +187,14 @@ public class AiExtractionService {
             if (Files.exists(requirementDetailPath)) {
                 String requirementDetail = readText(requirementDetailPath);
                 if (StringUtils.hasText(requirementDetail)) {
-                    return requirementDetail;
+                    String refined = refineRequirementDetail(requirementDetail);
+                    if (StringUtils.hasText(refined) && !refined.equals(requirementDetail.trim())) {
+                        writeText(requirementDetailPath, refined);
+                        metadata.setRequirementDetailPath(requirementDetailPath.toString());
+                        fileStorageService.saveMetadata(metadata);
+                        return refined;
+                    }
+                    return requirementDetail.trim();
                 }
             }
         }
@@ -223,7 +241,47 @@ public class AiExtractionService {
                 detail.append(line).append(System.lineSeparator());
             }
         }
-        return detail.toString().trim();
+        return refineRequirementDetail(detail.toString());
+    }
+
+    private String refineRequirementDetail(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (!StringUtils.hasText(trimmed)) {
+            return "";
+        }
+        String[] lines = trimmed.split("\\r?\\n");
+        StringBuilder functionDescription = new StringBuilder();
+        boolean collectingFunctionDescription = false;
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!collectingFunctionDescription) {
+                if ("功能描述".equals(normalizeSectionTitle(line))) {
+                    collectingFunctionDescription = true;
+                }
+                continue;
+            }
+            if (isSectionBoundary(line)) {
+                break;
+            }
+            if (StringUtils.hasText(line)) {
+                functionDescription.append(line).append(System.lineSeparator());
+            }
+        }
+        if (StringUtils.hasText(functionDescription.toString())) {
+            return functionDescription.toString().trim();
+        }
+
+        StringBuilder bounded = new StringBuilder();
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (bounded.length() > 0 && isSectionBoundary(line)) {
+                break;
+            }
+            if (StringUtils.hasText(line)) {
+                bounded.append(line).append(System.lineSeparator());
+            }
+        }
+        return bounded.toString().trim();
     }
 
     private boolean isRequirementSection(String line) {
@@ -252,6 +310,9 @@ public class AiExtractionService {
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
                 || "归属系统".equals(normalized)
+                || "功能界面".equals(normalized)
+                || "流程图".equals(normalized)
+                || "调整因子情况说明".equals(normalized)
                 || isTopLevelSectionHeading(line);
     }
 
@@ -261,6 +322,7 @@ public class AiExtractionService {
         }
         String value = line.trim()
                 .replaceAll("\\s+", "")
+                .replaceAll("^\\d+(?:[.．]\\d+)+[、.．,，]?+", "")
                 .replaceAll("^[一二三四五六七八九十]+[、.．,，]?+", "")
                 .replaceAll("^\\(?\\d+\\)?[、.．,，]?+", "")
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
@@ -374,53 +436,7 @@ public class AiExtractionService {
     }
 
     private String readSplitRules() {
-        if (!StringUtils.hasText(splitRulesPath)) {
-            return "";
-        }
-        if (splitRulesPath.startsWith("classpath:")) {
-            String resourcePath = splitRulesPath.substring("classpath:".length());
-            if (resourcePath.startsWith("/")) {
-                resourcePath = resourcePath.substring(1);
-            }
-            ClassPathResource resource = new ClassPathResource(resourcePath);
-            if (!resource.exists()) {
-                log.warn("Split rules classpath resource not found: {}", splitRulesPath);
-                return "";
-            }
-            try (InputStream inputStream = resource.getInputStream()) {
-                return readAll(inputStream);
-            } catch (IOException ex) {
-                log.warn("Read split rules classpath resource failed: {}", splitRulesPath, ex);
-                return "";
-            }
-        }
-        Path path = Paths.get(splitRulesPath);
-        if (!Files.exists(path)) {
-            Path projectPath = Paths.get("").toAbsolutePath().resolve(splitRulesPath);
-            if (Files.exists(projectPath)) {
-                path = projectPath;
-            }
-        }
-        if (!Files.exists(path)) {
-            log.warn("Split rules file not found: {}", splitRulesPath);
-            return "";
-        }
-        try {
-            return new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            log.warn("Read split rules file failed: {}", path, ex);
-            return "";
-        }
-    }
-
-    private String readAll(InputStream inputStream) throws IOException {
-        byte[] buffer = new byte[8192];
-        int read;
-        java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-        while ((read = inputStream.read(buffer)) >= 0) {
-            outputStream.write(buffer, 0, read);
-        }
-        return new String(outputStream.toByteArray(), StandardCharsets.UTF_8);
+        return splitRuleConfigService.getRules();
     }
 
     private String callAi(String prompt) {

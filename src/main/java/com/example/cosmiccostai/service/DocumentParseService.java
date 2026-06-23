@@ -24,7 +24,7 @@ import java.time.format.DateTimeFormatter;
 public class DocumentParseService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final int PREVIEW_MAX_LENGTH = 300;
+    private static final int PREVIEW_MAX_LENGTH = 12000;
 
     private final FileStorageService fileStorageService;
 
@@ -148,11 +148,13 @@ public class DocumentParseService {
         if (text == null) {
             return "";
         }
-        String compact = text.replaceAll("[\\r\\n]+", " ").trim();
-        if (compact.length() <= PREVIEW_MAX_LENGTH) {
-            return compact;
+        String preview = text.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .trim();
+        if (preview.length() <= PREVIEW_MAX_LENGTH) {
+            return preview;
         }
-        return compact.substring(0, PREVIEW_MAX_LENGTH);
+        return preview.substring(0, PREVIEW_MAX_LENGTH) + System.lineSeparator() + "...（内容较长，已截断）";
     }
 
     private String extractRequirementDetailPreview(String documentText) {
@@ -180,7 +182,47 @@ public class DocumentParseService {
             }
         }
 
-        return detail.toString().trim();
+        return refineRequirementDetail(detail.toString());
+    }
+
+    private String refineRequirementDetail(String text) {
+        String trimmed = text == null ? "" : text.trim();
+        if (!StringUtils.hasText(trimmed)) {
+            return "";
+        }
+        String[] lines = trimmed.split("\\r?\\n");
+        StringBuilder functionDescription = new StringBuilder();
+        boolean collectingFunctionDescription = false;
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!collectingFunctionDescription) {
+                if ("功能描述".equals(normalizeSectionTitle(line))) {
+                    collectingFunctionDescription = true;
+                }
+                continue;
+            }
+            if (isSectionBoundary(line)) {
+                break;
+            }
+            if (StringUtils.hasText(line)) {
+                functionDescription.append(line).append(System.lineSeparator());
+            }
+        }
+        if (StringUtils.hasText(functionDescription.toString())) {
+            return functionDescription.toString().trim();
+        }
+
+        StringBuilder bounded = new StringBuilder();
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (bounded.length() > 0 && isSectionBoundary(line)) {
+                break;
+            }
+            if (StringUtils.hasText(line)) {
+                bounded.append(line).append(System.lineSeparator());
+            }
+        }
+        return bounded.toString().trim();
     }
 
     private boolean isSectionBoundary(String line) {
@@ -198,6 +240,9 @@ public class DocumentParseService {
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
                 || "归属系统".equals(normalized)
+                || "功能界面".equals(normalized)
+                || "流程图".equals(normalized)
+                || "调整因子情况说明".equals(normalized)
                 || isTopLevelSectionHeading(line);
     }
 
@@ -224,6 +269,7 @@ public class DocumentParseService {
         }
         return line.trim()
                 .replaceAll("\\s+", "")
+                .replaceAll("^\\d+(?:[.．]\\d+)+[、.．,，]?+", "")
                 .replaceAll("^[一二三四五六七八九十]+[、.．,，]?+", "")
                 .replaceAll("^\\(?\\d+\\)?[、.．,，]?+", "")
                 .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")

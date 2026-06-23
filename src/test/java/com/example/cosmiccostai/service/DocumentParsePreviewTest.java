@@ -32,4 +32,15 @@ class DocumentParsePreviewTest {
         assertFalse(preview.contains("背景说明"));
         assertFalse(preview.contains("性能要求"));
     }
+
+    @Test
+    void previewPreservesRequirementDetailLineBreaks() throws Exception {
+        DocumentParseService service = new DocumentParseService(new FileStorageService("storage"));
+        Method method = DocumentParseService.class.getDeclaredMethod("buildPreview", String.class);
+        method.setAccessible(true);
+
+        String preview = (String) method.invoke(service, "line one\nline two\nline three");
+
+        assertTrue(preview.contains("line one\nline two\nline three"));
+    }
 }

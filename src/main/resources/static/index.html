@@ -67,6 +67,25 @@
     </div>
   </div>
 
+  <div id="rule-config-dialog-overlay" class="dialog-overlay hidden" onclick="closeRuleConfigDialogOnOverlay(event)">
+    <div class="dialog rule-config-dialog">
+      <div class="rule-config-header">
+        <div>
+          <h3 class="dialog-title">初审规则管理</h3>
+          <p>保存后会同时用于 AI 拆分提示词和手动规则初审。</p>
+        </div>
+        <div class="dialog-header-actions">
+          <button type="button" class="secondary" onclick="saveSplitRules()">保存规则</button>
+          <button type="button" class="ghost" onclick="closeRuleConfigDialog()">关闭</button>
+        </div>
+      </div>
+      <div class="rule-config-body">
+        <div class="rule-config-meta">规则文件：<b id="ruleConfigPath">-</b></div>
+        <textarea id="ruleConfigText" class="rule-config-text" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+
   <div id="cell-editor-overlay" class="dialog-overlay hidden" onclick="closeCellEditorOnOverlay(event)">
     <div class="dialog cell-editor-dialog">
       <div class="cell-editor-header">
@@ -86,7 +105,10 @@
       <div class="panel-header">
         <div class="panel-title-row">
           <h2>上传需求文档</h2>
-          <span id="projectBadge" class="badge muted">未上传</span>
+          <div class="panel-title-actions">
+            <button type="button" class="project-list-entry" onclick="location.href='/projects.html'">项目列表</button>
+            <span id="projectBadge" class="badge muted">未上传</span>
+          </div>
         </div>
       </div>
 
@@ -136,7 +158,10 @@
 
     <section class="panel">
       <div class="panel-header">
-        <h2>处理流程</h2>
+        <div class="panel-title-row">
+          <h2>处理流程</h2>
+          <button type="button" class="flow-rule-config-btn" onclick="openRuleConfigDialog()">初审规则管理</button>
+        </div>
       </div>
 
       <div class="flow-wrapper">
@@ -278,7 +303,8 @@
           <button type="button" class="secondary" onclick="saveReview()">保存</button>
           <button type="button" class="rule-precheck-primary" onclick="validateReviewRules()">规则初审</button>
           <button type="button" class="ai-review-secondary" onclick="aiValidateSelectedRisks()">AI&#x590d;&#x6838;</button>
-          <button type="button" onclick="addReviewRow()">新增一行</button>
+          <button type="button" onclick="insertReviewRow('above')">上方插入</button>
+          <button type="button" onclick="insertReviewRow('below')">下方插入</button>
           <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
           <button type="button" class="ghost danger" onclick="deleteSelectedRows()">删除选中</button>
         </div>
@@ -328,7 +354,6 @@
           <option value="">&#x5168;&#x90e8;&#x521d;&#x5ba1;&#x7ed3;&#x679c;</option>
           <option value="ERROR">&#x53ea;&#x770b;&#x9519;&#x8bef;</option>
           <option value="RISK">&#x53ea;&#x770b;&#x7ed3;&#x6784;&#x98ce;&#x9669;</option>
-          <option value="SUGGESTION">&#x53ea;&#x770b;&#x8868;&#x8fbe;&#x786e;&#x8ba4;</option>
           <option value="OK">&#x53ea;&#x770b;&#x65e0;&#x95ee;&#x9898;</option>
         </select>
         <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
@@ -352,7 +377,8 @@
               <th class="w-data">数据组</th>
               <th class="w-attr">数据属性</th>
               <th class="w-reuse">复用度</th>
-              <th class="w-risk-reason">&#x521d;&#x5ba1;&#x98ce;&#x9669;&#x539f;&#x56e0;</th>
+              <th class="w-risk-reason">风险原因</th>
+              <th class="w-risk-suggestion">修改建议</th>
               <th class="w-cfp">CFP</th>
               <th class="w-actions">操作</th>
             </tr>
@@ -622,6 +648,57 @@
       }
     }
 
+    async function openRuleConfigDialog() {
+      $("rule-config-dialog-overlay").classList.remove("hidden");
+      $("ruleConfigText").value = "正在加载初审规则...";
+      $("ruleConfigText").disabled = true;
+      $("ruleConfigPath").textContent = "-";
+      try {
+        const response = await request("/api/rules/split");
+        const data = response.data || {};
+        $("ruleConfigText").value = data.content || "";
+        $("ruleConfigPath").textContent = data.path || "-";
+        $("ruleConfigText").disabled = false;
+        $("ruleConfigText").focus();
+      } catch (error) {
+        $("ruleConfigText").value = "";
+        $("ruleConfigText").disabled = false;
+        showDialog("加载初审规则失败", error.message || "加载初审规则失败。");
+      }
+    }
+
+    function closeRuleConfigDialog() {
+      $("rule-config-dialog-overlay").classList.add("hidden");
+    }
+
+    function closeRuleConfigDialogOnOverlay(event) {
+      if (event.target === $("rule-config-dialog-overlay")) {
+        closeRuleConfigDialog();
+      }
+    }
+
+    async function saveSplitRules() {
+      const content = ($("ruleConfigText").value || "").trim();
+      if (!content) {
+        showDialog("规则内容为空", "请填写初审规则后再保存。");
+        return;
+      }
+      await withBusy(async function () {
+        setMessage("正在保存初审规则...");
+        const response = await request("/api/rules/split", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: content })
+        });
+        const data = response.data || {};
+        $("ruleConfigText").value = data.content || content;
+        $("ruleConfigPath").textContent = data.path || "-";
+        lastValidationResult = null;
+        validationIssuesByRow = {};
+        setMessage("初审规则已保存。后续 AI 拆分和规则初审都会使用新规则。", "success");
+      });
+    }
+
     async function resendAiPrompt() {
       if (!currentProjectId) {
         showDialog("暂无项目", "请先上传需求文档并完成文档解析。");
@@ -848,11 +925,10 @@
     }
 
     async function runRuleValidationRequest() {
-      splitRows = splitRows.map(normalizeRow);
       return await request("/api/projects/" + currentProjectId + "/review/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(splitRows)
+        body: JSON.stringify(splitRows.map(rowForSubmit))
       });
     }
 
@@ -874,26 +950,16 @@
         : "\u672a\u53d1\u73b0\u89c4\u5219\u95ee\u9898";
       $("ruleValidationStatus").textContent = title;
       renderRuleValidationSummary(result);
-      let text = "\u521d\u5ba1\u884c\u6570\uff1a" + (result.totalRows || 0)
-        + "\uff0c\u9519\u8bef\uff1a" + (result.errorCount || 0)
-        + "\uff0c\u7ed3\u6784\u98ce\u9669\uff1a" + (result.structureRiskCount || result.riskCount || 0)
-        + "\uff0c\u8868\u8fbe\u786e\u8ba4\uff1a" + (result.expressionConfirmCount || result.suggestionCount || 0);
       if (issues.length) {
-        text += "\n" + issues.slice(0, 30).map(function (issue) {
-          return "\u7b2c " + issue.rowIndex + " \u884c [" + issueDisplayType(issue) + "] "
-            + formatValidationIssue(issue, true);
-        }).join("\n");
-        if (issues.length > 30) {
-          text += "\n\u8fd8\u6709 " + (issues.length - 30) + " \u4e2a\u95ee\u9898\u672a\u5c55\u793a\uff0c\u8bf7\u4f18\u5148\u5904\u7406\u9519\u8bef\u548c\u98ce\u9669\u9879\u3002";
-        }
         const level = result.errorCount ? "error" : ((result.riskCount || 0) > 0 ? "" : "success");
         setMessage("\u89c4\u5219\u521d\u5ba1\u5b8c\u6210\uff1a\u5fc5\u987b\u4fee\u6b63 " + (result.errorCount || 0)
-          + "\uff0c\u7ed3\u6784\u98ce\u9669 " + (result.structureRiskCount || result.riskCount || 0)
-          + "\uff0c\u8868\u8fbe\u786e\u8ba4 " + (result.expressionConfirmCount || result.suggestionCount || 0) + "\u3002", level);
+          + "\uff0c\u7ed3\u6784\u98ce\u9669 " + (result.structureRiskCount || result.riskCount || 0) + "\u3002", level);
       } else {
         setMessage("\u89c4\u5219\u521d\u5ba1\u901a\u8fc7\uff0c\u672a\u53d1\u73b0\u660e\u663e\u95ee\u9898\u3002", "success");
       }
-      $("ruleValidationDetail").textContent = text;
+      $("ruleValidationDetail").textContent = issues.length
+        ? "明细已同步到下方表格的“风险原因”和“修改建议”列，可通过初审结果筛选快速定位。"
+        : "未发现明显规则问题，可继续人工审核或导出送审材料。";
       renderAiValidationResult(null);
       renderTable();
     }
@@ -907,8 +973,7 @@
       [
         { label: "\u521d\u5ba1\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
         { label: "\u9519\u8bef", value: result.errorCount || 0, className: "error" },
-        { label: "\u7ed3\u6784\u98ce\u9669", value: result.structureRiskCount || result.riskCount || 0, className: "risk" },
-        { label: "\u8868\u8fbe\u786e\u8ba4", value: result.expressionConfirmCount || result.suggestionCount || 0, className: "suggestion" }
+        { label: "\u7ed3\u6784\u98ce\u9669", value: result.structureRiskCount || result.riskCount || 0, className: "risk" }
       ].forEach(function (item) {
         const card = document.createElement("div");
         card.className = "validation-summary-card " + item.className;
@@ -1188,13 +1253,12 @@
     }
 
     async function persistReviewAfterAiApply() {
-      splitRows = splitRows.map(normalizeRow);
       const response = await request("/api/projects/" + currentProjectId + "/review", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(splitRows)
+        body: JSON.stringify(splitRows.map(rowForSubmit))
       });
-      splitRows = ((response.data && response.data.splitRows) || splitRows).map(normalizeRow);
+      splitRows = (response.data && response.data.splitRows) || splitRows;
       $("statusText").textContent = (response.data && response.data.status) || "REVIEWED";
       renderTable();
       updateStats();
@@ -1231,6 +1295,9 @@
     function buildValidationIssueMap(issues) {
       const map = {};
       (issues || []).forEach(function (issue) {
+        if (!issue || (issue.severity !== "ERROR" && issue.severity !== "RISK")) {
+          return;
+        }
         const index = Math.max(0, (issue.rowIndex || 1) - 1);
         if (!map[index]) {
           map[index] = [];
@@ -1247,7 +1314,7 @@
       if (severity === "RISK") {
         return "\u7ed3\u6784\u98ce\u9669";
       }
-      return "\u8868\u8fbe\u786e\u8ba4";
+      return "\u521d\u5ba1\u63d0\u793a";
     }
 
     function issueDisplayType(issue) {
@@ -1359,7 +1426,7 @@
       if (!splitRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 15;
+        td.colSpan = 16;
         td.className = "empty";
         td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
         tr.appendChild(td);
@@ -1370,7 +1437,7 @@
       if (!visibleRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 15;
+        td.colSpan = 16;
         td.className = "empty";
         td.textContent = "没有符合筛选条件的数据。";
         tr.appendChild(td);
@@ -1397,6 +1464,7 @@
         addTextCell(tr, row, index, "dataAttributes");
         addSelectCell(tr, row, index, "reuseDegree", reuseOptions);
         addValidationReasonCell(tr, index);
+        addValidationSuggestionCell(tr, index);
         const cfp = document.createElement("td");
         cfp.className = "cfp-cell";
         cfp.textContent = formatCfp(row.cfp);
@@ -1414,6 +1482,9 @@
         return;
       }
       const severity = highestValidationSeverity(issues);
+      if (!severity) {
+        return;
+      }
       tr.classList.add("validation-row");
       tr.classList.add("validation-" + severity.toLowerCase());
       tr.title = issues.map(function (issue) {
@@ -1427,10 +1498,12 @@
         return;
       }
       const severity = highestValidationSeverity(issues);
+      if (!severity) {
+        return;
+      }
       const palette = {
         ERROR: { row: "#ffe4e6", control: "#fff1f2", border: "#ef4444" },
-        RISK: { row: "#fef3c7", control: "#fffbeb", border: "#f59e0b" },
-        SUGGESTION: { row: "#dbeafe", control: "#eff6ff", border: "#3b82f6" }
+        RISK: { row: "#fef3c7", control: "#fffbeb", border: "#f59e0b" }
       }[severity] || { row: "#f8fafc", control: "#ffffff", border: "#94a3b8" };
 
       Array.from(tr.children).forEach(function (td, tdIndex) {
@@ -1505,7 +1578,25 @@
         return;
       }
       const text = issues.map(function (issue) {
-        return "\u3010" + issueDisplayType(issue) + "\u3011" + formatValidationIssue(issue, false);
+        return "\u3010" + issueDisplayType(issue) + "\u3011" + textOr(issue.message, "");
+      }).join("\n");
+      td.textContent = text;
+      td.title = text;
+      tr.appendChild(td);
+    }
+
+    function addValidationSuggestionCell(tr, index) {
+      const td = document.createElement("td");
+      td.className = "validation-suggestion-cell";
+      const issues = validationIssuesByRow[index] || [];
+      if (!issues.length) {
+        td.textContent = "-";
+        td.classList.add("muted-cell");
+        tr.appendChild(td);
+        return;
+      }
+      const text = issues.map(function (issue) {
+        return "\u3010" + issueDisplayType(issue) + "\u3011" + (textOr(issue.suggestion, "") || "请结合该行字段补充为明确、可计量的数据移动表达。");
       }).join("\n");
       td.textContent = text;
       td.title = text;
@@ -1606,7 +1697,7 @@
       if ((issues || []).some(function (issue) { return issue.severity === "RISK"; })) {
         return "RISK";
       }
-      return "SUGGESTION";
+      return "";
     }
 
     function updateReviewFilterOptions() {
@@ -1723,7 +1814,7 @@
       const index = cellEditorState.index;
       const field = cellEditorState.field;
       splitRows[index][field] = $("cell-editor-text").value;
-      splitRows[index] = normalizeRow(splitRows[index]);
+      splitRows[index] = normalizeEditedRow(splitRows[index]);
       markValidationStale(index);
       closeCellEditor();
       renderTable();
@@ -1757,7 +1848,7 @@
       const index = Number(target.dataset.index);
       const field = target.dataset.field;
       splitRows[index][field] = target.value;
-      splitRows[index] = normalizeRow(splitRows[index]);
+      splitRows[index] = normalizeEditedRow(splitRows[index]);
       markValidationStale(index);
       if (field === "reuseDegree") {
         renderTable();
@@ -1775,6 +1866,21 @@
           status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u521d\u5ba1";
         }
       }
+    }
+
+    function markAllValidationStale() {
+      validationIssuesByRow = {};
+      lastValidationResult = null;
+      lastAiValidationResult = null;
+      const status = $("ruleValidationStatus");
+      if (status) {
+        status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u521d\u5ba1";
+      }
+      const detail = $("ruleValidationDetail");
+      if (detail) {
+        detail.textContent = "表格行已调整，请重新执行规则初审。";
+      }
+      renderAiValidationResult(null);
     }
 
     function blankReviewRow(baseRow) {
@@ -1798,15 +1904,43 @@
       });
     }
 
+    function emptyInsertedReviewRow(referenceRow) {
+      const reference = referenceRow || {};
+      return markInsertedBlankRow(normalizeInsertedBlankRow({
+        projectName: reference.projectName || $("projectName").value || "",
+        level1Module: "",
+        level2Module: "",
+        level3Module: "",
+        functionalUser: "",
+        triggerEvent: "",
+        functionProcess: "",
+        functionDescription: "",
+        subProcessDescription: "",
+        sequenceDiagram: "",
+        movementType: "E",
+        dataGroup: "",
+        dataAttributes: "",
+        reuseDegree: "新增",
+        cfp: 1
+      }));
+    }
+
     function cloneRow(row) {
       return normalizeRow(JSON.parse(JSON.stringify(row || {})));
     }
 
-    function addReviewRow() {
-      const base = splitRows.length ? splitRows[splitRows.length - 1] : {};
-      splitRows.push(blankReviewRow(base));
+    function insertReviewRow(position) {
+      const indexes = selectedRowIndexes();
+      if (indexes.length !== 1) {
+        showDialog("请选择一行", "请先勾选一行作为插入位置，再选择“上方插入”或“下方插入”。");
+        return;
+      }
+      const selectedIndex = indexes[0];
+      const insertIndex = position === "above" ? selectedIndex : selectedIndex + 1;
+      splitRows.splice(insertIndex, 0, emptyInsertedReviewRow(splitRows[selectedIndex]));
       selectedRows = {};
-      selectedRows[splitRows.length - 1] = true;
+      selectedRows[insertIndex] = true;
+      markAllValidationStale();
       renderTable();
       updateStats();
     }
@@ -1948,7 +2082,7 @@
       const value = $("batchSelectValue").classList.contains("hidden") ? $("batchValue").value : $("batchSelectValue").value;
       indexes.forEach(function (index) {
         splitRows[index][field] = value;
-        splitRows[index] = normalizeRow(splitRows[index]);
+        splitRows[index] = normalizeEditedRow(splitRows[index]);
       });
       renderTable();
       updateStats();
@@ -1972,6 +2106,51 @@
         next.projectName = $("projectName").value;
       }
       return next;
+    }
+
+    function normalizeEditedRow(row) {
+      if (isInsertedBlankRow(row)) {
+        return markInsertedBlankRow(normalizeInsertedBlankRow(row));
+      }
+      return normalizeRow(row);
+    }
+
+    function normalizeInsertedBlankRow(row) {
+      const next = Object.assign({}, row || {});
+      next.projectName = textOr(next.projectName, $("projectName").value || "");
+      next.level1Module = textOr(next.level1Module, "");
+      next.level2Module = textOr(next.level2Module, "");
+      next.level3Module = textOr(next.level3Module, "");
+      next.functionalUser = textOr(next.functionalUser, "");
+      next.triggerEvent = textOr(next.triggerEvent, "");
+      next.functionProcess = textOr(next.functionProcess, "");
+      next.functionDescription = textOr(next.functionDescription, "");
+      next.subProcessDescription = textOr(next.subProcessDescription, "");
+      next.sequenceDiagram = sequenceDiagramOptions.indexOf(next.sequenceDiagram) >= 0 ? next.sequenceDiagram : "";
+      next.movementType = movementOptions.indexOf(next.movementType) >= 0 ? next.movementType : "E";
+      next.dataGroup = textOr(next.dataGroup, "");
+      next.dataAttributes = textOr(next.dataAttributes, "");
+      next.reuseDegree = reuseOptions.indexOf(next.reuseDegree) >= 0 ? next.reuseDegree : "新增";
+      next.cfp = cfpByReuse(next.reuseDegree);
+      return next;
+    }
+
+    function markInsertedBlankRow(row) {
+      Object.defineProperty(row, "__insertedBlank", {
+        value: true,
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
+      return row;
+    }
+
+    function isInsertedBlankRow(row) {
+      return !!(row && row.__insertedBlank);
+    }
+
+    function rowForSubmit(row) {
+      return Object.assign({}, row || {});
     }
 
     function textOr(value, fallback) {
@@ -2100,10 +2279,12 @@
     }
 
     function updateStats() {
-      splitRows = splitRows.map(normalizeRow);
       const processes = {};
       splitRows.forEach(function (row) {
-        processes[row.functionProcess] = true;
+        const process = textOr(row.functionProcess, "");
+        if (process) {
+          processes[process] = true;
+        }
       });
       const total = splitRows.reduce(function (sum, row) {
         return sum + Number(row.cfp || 0);
@@ -2114,12 +2295,11 @@
 
     async function saveReview() {
       await withBusy(async function () {
-        splitRows = splitRows.map(normalizeRow);
         setMessage("正在保存审核修改...");
         const response = await request("/api/projects/" + currentProjectId + "/review", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(splitRows)
+          body: JSON.stringify(splitRows.map(rowForSubmit))
         });
         splitRows = (response.data.splitRows || []).map(normalizeRow);
         renderTable();
@@ -2156,12 +2336,11 @@
       $("export-dialog-close").disabled = true;
       await withBusy(async function () {
         try {
-          splitRows = splitRows.map(normalizeRow);
           setMessage("正在保存审核修改...");
           await request("/api/projects/" + currentProjectId + "/review", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(splitRows)
+            body: JSON.stringify(splitRows.map(rowForSubmit))
           });
 
           setExportStep("excel", "进行中", "running");

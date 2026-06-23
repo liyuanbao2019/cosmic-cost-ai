@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>项目列表 - COSMIC 软件造价 AI 工作台</title>
+  <link rel="stylesheet" href="/app.css?v=20260617-project-list-3">
+</head>
+
+<body>
+  <header class="topbar">
+    <h1>COSMIC 软件造价 AI 工作台</h1>
+  </header>
+
+  <main>
+    <section class="panel project-list-panel">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <div>
+            <h2>项目列表</h2>
+            <p class="project-list-subtitle">查看历史项目、风险概况和导出状态，继续进入审核编辑。</p>
+          </div>
+          <div class="project-list-actions">
+            <button type="button" class="ghost" onclick="location.href='/index.html'">返回工作台</button>
+            <button type="button" onclick="loadProjects()">刷新</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="project-list-filters">
+        <input id="projectSearch" type="search" placeholder="搜索项目名称、文件名、项目ID" oninput="resetProjectPage()">
+        <select id="sourceFilter" onchange="resetProjectPage()">
+          <option value="">全部来源</option>
+          <option value="DOCUMENT">原始需求文档</option>
+          <option value="EXCEL">Excel 功能列表</option>
+        </select>
+        <select id="statusFilter" onchange="resetProjectPage()">
+          <option value="">全部状态</option>
+        </select>
+        <select id="riskFilter" onchange="resetProjectPage()">
+          <option value="">全部风险</option>
+          <option value="ERROR">有错误</option>
+          <option value="RISK">有结构风险</option>
+          <option value="OK">无初审提示</option>
+        </select>
+        <select id="exportFilter" onchange="resetProjectPage()">
+          <option value="">全部导出状态</option>
+          <option value="全部已导出">全部已导出</option>
+          <option value="部分已导出">部分已导出</option>
+          <option value="未导出">未导出</option>
+        </select>
+      </div>
+
+      <div id="projectListMessage" class="message hidden"></div>
+
+      <div class="project-batch-bar">
+        <div class="project-selected-info">已选 <b id="selectedProjectCount">0</b> 个项目</div>
+        <button type="button" class="ghost danger" onclick="deleteSelectedProjects()">批量删除</button>
+        <button type="button" class="ghost" onclick="clearSelectedProjects()">清空选择</button>
+      </div>
+
+      <div class="project-list-summary">
+        <div><b id="projectTotal">0</b><span>项目总数</span></div>
+        <div><b id="projectVisible">0</b><span>当前显示</span></div>
+        <div><b id="projectWithRisks">0</b><span>有初审提示</span></div>
+        <div><b id="projectExported">0</b><span>已完整导出</span></div>
+      </div>
+
+      <div class="project-table-wrap">
+        <table class="project-table">
+          <thead>
+            <tr>
+              <th class="project-check-cell">
+                <input id="selectPageProjects" type="checkbox" onchange="togglePageProjects(this.checked)" aria-label="选择当前页项目">
+              </th>
+              <th>项目名称</th>
+              <th>来源</th>
+              <th>状态</th>
+              <th>功能过程</th>
+              <th>初审提示</th>
+              <th>导出状态</th>
+              <th>创建时间</th>
+              <th>最近修改</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="projectTableBody">
+            <tr>
+              <td class="empty" colspan="10">正在加载项目...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="project-pagination">
+        <div class="project-page-size">
+          <span>每页</span>
+          <select id="pageSizeSelect" onchange="changePageSize()">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+          <span>条</span>
+        </div>
+        <div class="project-page-info" id="pageInfo">第 1 / 1 页</div>
+        <div class="project-page-actions">
+          <button type="button" class="secondary" onclick="goProjectPage(-1)">上一页</button>
+          <button type="button" class="secondary" onclick="goProjectPage(1)">下一页</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    let allProjects = [];
+    let currentPage = 1;
+    let pageSize = 20;
+    let selectedProjectIds = {};
+
+    document.addEventListener("DOMContentLoaded", loadProjects);
+
+    async function loadProjects() {
+      setProjectMessage("正在加载项目列表...");
+      try {
+        const response = await request("/api/projects");
+        allProjects = ((response.data && response.data.projects) || []).map(normalizeProject);
+        pruneSelectedProjects();
+        fillStatusFilter(allProjects);
+        currentPage = 1;
+        renderProjects();
+        setProjectMessage("", true);
+      } catch (error) {
+        setProjectMessage(error.message || "项目列表加载失败。", false, true);
+      }
+    }
+
+    function renderProjects() {
+      const visible = filteredProjects();
+      const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+      if (currentPage > totalPages) {
+        currentPage = totalPages;
+      }
+      if (currentPage < 1) {
+        currentPage = 1;
+      }
+      const pageItems = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+      const tbody = $("projectTableBody");
+      tbody.innerHTML = "";
+      $("projectTotal").textContent = allProjects.length;
+      $("projectVisible").textContent = visible.length;
+      $("projectWithRisks").textContent = allProjects.filter(function (item) { return item.issueCount > 0; }).length;
+      $("projectExported").textContent = allProjects.filter(function (item) { return item.exportStatus === "全部已导出"; }).length;
+      $("pageInfo").textContent = "第 " + currentPage + " / " + totalPages + " 页，共 " + visible.length + " 条";
+      updateSelectionState(pageItems);
+      if (!visible.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.className = "empty";
+        td.colSpan = 10;
+        td.textContent = "没有符合筛选条件的项目。";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+      pageItems.forEach(function (project) {
+        const tr = document.createElement("tr");
+        tr.innerHTML =
+          "<td class=\"project-check-cell\"><input type=\"checkbox\" " + (selectedProjectIds[project.projectId] ? "checked" : "") + " onchange=\"toggleProjectSelection('" + escapeJs(project.projectId) + "', this.checked)\" aria-label=\"选择项目\"></td>"
+          + "<td><b>" + escapeHtml(project.projectName || project.projectId) + "</b><span class=\"project-id\">" + escapeHtml(project.projectId) + "</span><span class=\"project-file\">" + escapeHtml(project.sourceFileName || "-") + "</span></td>"
+          + "<td>" + sourceBadge(project.sourceType) + "</td>"
+          + "<td><span class=\"status-pill\">" + escapeHtml(project.status || "-") + "</span></td>"
+          + "<td><b>" + escapeHtml(project.functionCount || 0) + "</b></td>"
+          + "<td>" + riskSummary(project) + "</td>"
+          + "<td>" + exportSummary(project) + "</td>"
+          + "<td>" + escapeHtml(project.createdAt || "-") + "</td>"
+          + "<td>" + escapeHtml(project.updatedAt || "-") + "</td>"
+          + "<td><div class=\"project-row-actions\"><button type=\"button\" class=\"secondary\" onclick=\"openProject('" + escapeJs(project.projectId) + "')\">进入</button>"
+          + "<button type=\"button\" class=\"ghost danger\" onclick=\"deleteProject('" + escapeJs(project.projectId) + "', '" + escapeJs(project.projectName || project.projectId) + "')\">删除</button></div></td>";
+        tbody.appendChild(tr);
+      });
+    }
+
+    function currentPageItems() {
+      const visible = filteredProjects();
+      const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
+      currentPage = Math.min(totalPages, Math.max(1, currentPage));
+      return visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    }
+
+    function filteredProjects() {
+      const search = text($("projectSearch").value).toLowerCase();
+      const source = $("sourceFilter").value;
+      const status = $("statusFilter").value;
+      const risk = $("riskFilter").value;
+      const exportStatus = $("exportFilter").value;
+      return allProjects.filter(function (item) {
+        if (source && item.sourceType !== source) {
+          return false;
+        }
+        if (status && item.status !== status) {
+          return false;
+        }
+        if (exportStatus && item.exportStatus !== exportStatus) {
+          return false;
+        }
+        if (risk === "ERROR" && item.errorCount <= 0) {
+          return false;
+        }
+        if (risk === "RISK" && item.riskCount <= 0) {
+          return false;
+        }
+        if (risk === "OK" && item.issueCount > 0) {
+          return false;
+        }
+        if (!search) {
+          return true;
+        }
+        return [item.projectId, item.projectName, item.sourceFileName, item.status].some(function (value) {
+          return text(value).toLowerCase().indexOf(search) >= 0;
+        });
+      });
+    }
+
+    function resetProjectPage() {
+      currentPage = 1;
+      renderProjects();
+    }
+
+    function changePageSize() {
+      pageSize = parseInt($("pageSizeSelect").value, 10) || 20;
+      currentPage = 1;
+      renderProjects();
+    }
+
+    function goProjectPage(delta) {
+      const totalPages = Math.max(1, Math.ceil(filteredProjects().length / pageSize));
+      currentPage = Math.min(totalPages, Math.max(1, currentPage + delta));
+      renderProjects();
+    }
+
+    function fillStatusFilter(projects) {
+      const select = $("statusFilter");
+      const current = select.value;
+      const statuses = [];
+      projects.forEach(function (item) {
+        if (item.status && statuses.indexOf(item.status) < 0) {
+          statuses.push(item.status);
+        }
+      });
+      statuses.sort();
+      select.innerHTML = "<option value=\"\">全部状态</option>";
+      statuses.forEach(function (status) {
+        const option = document.createElement("option");
+        option.value = status;
+        option.textContent = status;
+        select.appendChild(option);
+      });
+      select.value = statuses.indexOf(current) >= 0 ? current : "";
+    }
+
+    function normalizeProject(project) {
+      return Object.assign({
+        projectId: "",
+        projectName: "",
+        sourceFileName: "",
+        sourceType: "",
+        status: "",
+        functionCount: 0,
+        issueCount: 0,
+        errorCount: 0,
+        riskCount: 0,
+        suggestionCount: 0,
+        exportStatus: "未导出"
+      }, project || {});
+    }
+
+    function sourceBadge(sourceType) {
+      const textValue = sourceType === "EXCEL" ? "Excel 功能列表" : "原始需求文档";
+      const className = sourceType === "EXCEL" ? "source-excel" : "source-doc";
+      return "<span class=\"source-badge " + className + "\">" + textValue + "</span>";
+    }
+
+    function riskSummary(project) {
+      if (!project.issueCount) {
+        return "<span class=\"risk-ok\">无提示</span>";
+      }
+      return "<span class=\"risk-badge error\">错 " + escapeHtml(project.errorCount || 0) + "</span>"
+        + "<span class=\"risk-badge risk\">险 " + escapeHtml(project.riskCount || 0) + "</span>";
+    }
+
+    function exportSummary(project) {
+      const done = project.exportStatus === "全部已导出";
+      return "<span class=\"export-pill " + (done ? "done" : "") + "\">" + escapeHtml(project.exportStatus || "未导出") + "</span>";
+    }
+
+    function openProject(projectId) {
+      location.href = "/index.html?projectId=" + encodeURIComponent(projectId);
+    }
+
+    function toggleProjectSelection(projectId, checked) {
+      if (!projectId) {
+        return;
+      }
+      if (checked) {
+        selectedProjectIds[projectId] = true;
+      } else {
+        delete selectedProjectIds[projectId];
+      }
+      updateSelectionState(currentPageItems());
+    }
+
+    function togglePageProjects(checked) {
+      currentPageItems().forEach(function (project) {
+        if (checked) {
+          selectedProjectIds[project.projectId] = true;
+        } else {
+          delete selectedProjectIds[project.projectId];
+        }
+      });
+      renderProjects();
+    }
+
+    function clearSelectedProjects() {
+      selectedProjectIds = {};
+      renderProjects();
+    }
+
+    function selectedProjectIdList() {
+      return Object.keys(selectedProjectIds).filter(function (projectId) {
+        return !!selectedProjectIds[projectId];
+      });
+    }
+
+    function pruneSelectedProjects() {
+      const existing = {};
+      allProjects.forEach(function (project) {
+        existing[project.projectId] = true;
+      });
+      selectedProjectIdList().forEach(function (projectId) {
+        if (!existing[projectId]) {
+          delete selectedProjectIds[projectId];
+        }
+      });
+    }
+
+    function updateSelectionState(pageItems) {
+      const selectedCount = selectedProjectIdList().length;
+      $("selectedProjectCount").textContent = selectedCount;
+      const selector = $("selectPageProjects");
+      if (!selector) {
+        return;
+      }
+      const selectable = pageItems || [];
+      const checkedCount = selectable.filter(function (project) { return !!selectedProjectIds[project.projectId]; }).length;
+      selector.checked = selectable.length > 0 && checkedCount === selectable.length;
+      selector.indeterminate = checkedCount > 0 && checkedCount < selectable.length;
+    }
+
+    async function deleteProject(projectId, projectName) {
+      if (!projectId) {
+        return;
+      }
+      const confirmed = window.confirm("确认删除项目“" + projectName + "”？\n\n删除后该项目上传文件、拆分结果和导出材料都会从本地存储中移除。");
+      if (!confirmed) {
+        return;
+      }
+      setProjectMessage("正在删除项目...");
+      try {
+        await request("/api/projects/" + encodeURIComponent(projectId), { method: "DELETE" });
+        allProjects = allProjects.filter(function (item) { return item.projectId !== projectId; });
+        delete selectedProjectIds[projectId];
+        renderProjects();
+        setProjectMessage("项目已删除。");
+      } catch (error) {
+        setProjectMessage(error.message || "删除项目失败。", false, true);
+      }
+    }
+
+    async function deleteSelectedProjects() {
+      const ids = selectedProjectIdList();
+      if (!ids.length) {
+        setProjectMessage("请先勾选要删除的项目。", false, true);
+        return;
+      }
+      const confirmed = window.confirm("确认批量删除 " + ids.length + " 个项目？\n\n删除后这些项目的上传文件、拆分结果和导出材料都会从本地存储中移除。");
+      if (!confirmed) {
+        return;
+      }
+      setProjectMessage("正在批量删除项目...");
+      try {
+        const response = await request("/api/projects/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ids)
+        });
+        const deletedCount = response.data || ids.length;
+        allProjects = allProjects.filter(function (item) { return ids.indexOf(item.projectId) < 0; });
+        selectedProjectIds = {};
+        renderProjects();
+        setProjectMessage("已删除 " + deletedCount + " 个项目。");
+      } catch (error) {
+        setProjectMessage(error.message || "批量删除项目失败。", false, true);
+      }
+    }
+
+    async function request(url, options) {
+      const response = await fetch(url, options || {});
+      const payload = await response.json().catch(function () { return null; });
+      if (!response.ok || !payload || payload.success === false) {
+        throw new Error((payload && payload.message) || ("请求失败：" + response.status));
+      }
+      return payload;
+    }
+
+    function setProjectMessage(message, hidden, error) {
+      const box = $("projectListMessage");
+      box.textContent = message || "";
+      box.classList.toggle("hidden", !!hidden || !message);
+      box.classList.toggle("error", !!error);
+    }
+
+    function text(value) {
+      return value == null ? "" : String(value).trim();
+    }
+
+    function escapeHtml(value) {
+      return text(value).replace(/[&<>"']/g, function (char) {
+        return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[char];
+      });
+    }
+
+    function escapeJs(value) {
+      return text(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+    }
+
+    function $(id) {
+      return document.getElementById(id);
+    }
+  </script>
+</body>
+
+</html>

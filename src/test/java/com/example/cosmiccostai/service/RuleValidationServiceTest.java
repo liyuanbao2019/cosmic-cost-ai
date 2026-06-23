@@ -27,7 +27,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void completeProcessKeywordHitIsExpressionConfirmationOnly() {
+    void completeProcessKeywordHitDoesNotCreateIssueWhenStructureIsComplete() {
         RuleValidationService service = new RuleValidationService();
 
         FunctionSplitRow entry = row("process-b", "E", "request", "id", "\u65b0\u589e");
@@ -41,8 +41,9 @@ class RuleValidationServiceTest {
 
         assertEquals(0, response.getErrorCount());
         assertEquals(0, response.getRiskCount());
-        assertEquals(1, response.getSuggestionCount());
-        assertEquals(1, response.getExpressionConfirmCount());
+        assertEquals(0, response.getSuggestionCount());
+        assertEquals(0, response.getExpressionConfirmCount());
+        assertEquals(0, response.getIssueCount());
     }
 
     private FunctionSplitRow row(String process, String movement, String dataGroup, String dataAttributes, String reuse) {
