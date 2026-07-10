@@ -8,6 +8,7 @@ public class ParseResponse {
     private int paragraphCount;
     private int tableCount;
     private int textLength;
+    private int requirementDetailLength;
     private String status;
     private String preview;
     private boolean requirementRecognized;
@@ -60,6 +61,14 @@ public class ParseResponse {
 
     public void setTextLength(int textLength) {
         this.textLength = textLength;
+    }
+
+    public int getRequirementDetailLength() {
+        return requirementDetailLength;
+    }
+
+    public void setRequirementDetailLength(int requirementDetailLength) {
+        this.requirementDetailLength = requirementDetailLength;
     }
 
     public String getStatus() {

@@ -6,6 +6,8 @@ import com.example.cosmiccostai.dto.AiPromptResponse;
 import com.example.cosmiccostai.dto.AiReviewValidationRequest;
 import com.example.cosmiccostai.dto.AiReviewValidationResponse;
 import com.example.cosmiccostai.dto.CosmicAnalyzeResponse;
+import com.example.cosmiccostai.dto.DeepSplitJobResponse;
+import com.example.cosmiccostai.dto.DeepSplitRequest;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
 import com.example.cosmiccostai.dto.ExportFileActionResponse;
@@ -13,16 +15,23 @@ import com.example.cosmiccostai.dto.ParseResponse;
 import com.example.cosmiccostai.dto.ProjectListResponse;
 import com.example.cosmiccostai.dto.ReviewResponse;
 import com.example.cosmiccostai.dto.RuleValidationResponse;
+import com.example.cosmiccostai.dto.RequirementCoverageApplyRequest;
+import com.example.cosmiccostai.dto.RequirementCoverageResponse;
+import com.example.cosmiccostai.dto.RequirementInputRequest;
 import com.example.cosmiccostai.dto.WordExportResponse;
 import com.example.cosmiccostai.model.FunctionSplitRow;
 import com.example.cosmiccostai.service.AiExtractionService;
 import com.example.cosmiccostai.service.AiReviewValidationService;
 import com.example.cosmiccostai.service.CosmicAnalysisService;
 import com.example.cosmiccostai.service.DocumentParseService;
+import com.example.cosmiccostai.service.DeepSplitAiService;
 import com.example.cosmiccostai.service.ExcelExportService;
 import com.example.cosmiccostai.service.ExportFileService;
+import com.example.cosmiccostai.service.MaterialArchiveService;
 import com.example.cosmiccostai.service.ProjectListService;
 import com.example.cosmiccostai.service.ReviewService;
+import com.example.cosmiccostai.service.RequirementCoverageService;
+import com.example.cosmiccostai.service.RequirementInputService;
 import com.example.cosmiccostai.service.RuleValidationService;
 import com.example.cosmiccostai.service.WordExportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -56,9 +65,13 @@ public class ProjectController {
     private final ExcelExportService excelExportService;
     private final WordExportService wordExportService;
     private final ExportFileService exportFileService;
+    private final MaterialArchiveService materialArchiveService;
     private final RuleValidationService ruleValidationService;
     private final AiReviewValidationService aiReviewValidationService;
+    private final DeepSplitAiService deepSplitAiService;
     private final ProjectListService projectListService;
+    private final RequirementCoverageService requirementCoverageService;
+    private final RequirementInputService requirementInputService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -67,9 +80,13 @@ public class ProjectController {
                              ExcelExportService excelExportService,
                              WordExportService wordExportService,
                              ExportFileService exportFileService,
+                             MaterialArchiveService materialArchiveService,
                              RuleValidationService ruleValidationService,
                              AiReviewValidationService aiReviewValidationService,
-                             ProjectListService projectListService) {
+                             DeepSplitAiService deepSplitAiService,
+                             ProjectListService projectListService,
+                             RequirementCoverageService requirementCoverageService,
+                             RequirementInputService requirementInputService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -77,9 +94,13 @@ public class ProjectController {
         this.excelExportService = excelExportService;
         this.wordExportService = wordExportService;
         this.exportFileService = exportFileService;
+        this.materialArchiveService = materialArchiveService;
         this.ruleValidationService = ruleValidationService;
         this.aiReviewValidationService = aiReviewValidationService;
+        this.deepSplitAiService = deepSplitAiService;
         this.projectListService = projectListService;
+        this.requirementCoverageService = requirementCoverageService;
+        this.requirementInputService = requirementInputService;
     }
 
     @Operation(summary = "List projects", description = "List historical projects from local storage.")
@@ -105,6 +126,28 @@ public class ProjectController {
     @PostMapping("/{projectId}/parse")
     public ApiResponse<ParseResponse> parse(@PathVariable String projectId) {
         return ApiResponse.ok(documentParseService.parseProject(projectId));
+    }
+
+    @Operation(summary = "Get requirement coverage", description = "Compare business function modules in the original parsed Word text with the actual AI input.")
+    @GetMapping("/{projectId}/requirement-coverage")
+    public ApiResponse<RequirementCoverageResponse> requirementCoverage(@PathVariable String projectId) {
+        return ApiResponse.ok(requirementCoverageService.getCoverage(projectId));
+    }
+
+    @Operation(summary = "Include missing requirement modules", description = "Append selected original business modules to the AI input before extraction.")
+    @PostMapping("/{projectId}/requirement-coverage/include")
+    public ApiResponse<RequirementCoverageResponse> includeRequirementCoverage(@PathVariable String projectId,
+                                                                                @RequestBody RequirementCoverageApplyRequest request) {
+        return ApiResponse.ok(requirementCoverageService.includeModules(projectId,
+                request == null ? null : request.getModuleNumbers()));
+    }
+
+    @Operation(summary = "Save edited AI requirement input", description = "Persist a user-corrected requirement input and use it for subsequent AI extraction.")
+    @PutMapping("/{projectId}/requirement-input")
+    public ApiResponse<RequirementCoverageResponse> saveRequirementInput(@PathVariable String projectId,
+                                                                           @RequestBody RequirementInputRequest request) {
+        requirementInputService.saveManualInput(projectId, request == null ? "" : request.getContent());
+        return ApiResponse.ok(requirementCoverageService.getCoverage(projectId));
     }
 
     @Operation(summary = "AI 结构化提取", description = "只将 document-text.txt 中的“需求细则”章节发送给 AI，输出 module/function/description。")
@@ -157,6 +200,27 @@ public class ProjectController {
         return ApiResponse.ok(aiReviewValidationService.validate(request));
     }
 
+    @Operation(summary = "Start AI deep split review", description = "Start an asynchronous, chunked full-table review with requirement evidence retrieval.")
+    @PostMapping("/{projectId}/review/deep-split")
+    public ApiResponse<DeepSplitJobResponse> startDeepSplit(@PathVariable String projectId,
+                                                            @RequestBody DeepSplitRequest request) {
+        return ApiResponse.ok(deepSplitAiService.start(projectId, request));
+    }
+
+    @Operation(summary = "Get AI deep split progress", description = "Return persisted progress and accumulated suggestions for a deep split job.")
+    @GetMapping("/{projectId}/review/deep-split/{jobId}")
+    public ApiResponse<DeepSplitJobResponse> getDeepSplit(@PathVariable String projectId,
+                                                          @PathVariable String jobId) {
+        return ApiResponse.ok(deepSplitAiService.get(projectId, jobId));
+    }
+
+    @Operation(summary = "Retry failed AI deep split chunks", description = "Retry only failed chunks while retaining completed chunk results.")
+    @PostMapping("/{projectId}/review/deep-split/{jobId}/retry")
+    public ApiResponse<DeepSplitJobResponse> retryDeepSplit(@PathVariable String projectId,
+                                                            @PathVariable String jobId) {
+        return ApiResponse.ok(deepSplitAiService.retryFailed(projectId, jobId));
+    }
+
     @Operation(summary = "Export Excel", description = "Fill COSMIC analysis results into sheet 2 of the fixed Excel template.")
     @PostMapping("/{projectId}/export/excel")
     public ApiResponse<ExcelExportResponse> exportExcel(@PathVariable String projectId) {
@@ -167,6 +231,12 @@ public class ProjectController {
     @PostMapping("/{projectId}/export/word")
     public ApiResponse<WordExportResponse> exportWord(@PathVariable String projectId) {
         return ApiResponse.ok(wordExportService.export(projectId));
+    }
+
+    @Operation(summary = "Export review material archive", description = "Create a ZIP containing attachment 1, attachment 2, and attachment 3 after all three files have been exported.")
+    @PostMapping("/{projectId}/export/archive")
+    public ApiResponse<ExportFileActionResponse> exportArchive(@PathVariable String projectId) {
+        return ApiResponse.ok(materialArchiveService.export(projectId));
     }
 
     @Operation(summary = "Get export file info", description = "Return export file path, download URL, and local open capability.")
@@ -206,6 +276,9 @@ public class ProjectController {
         }
         if ("business".equalsIgnoreCase(fileType)) {
             return "download.xlsx";
+        }
+        if ("archive".equalsIgnoreCase(fileType)) {
+            return "download.zip";
         }
         return "download";
     }

@@ -75,6 +75,8 @@ public class ExportFileService {
             path = metadata.getBusinessRequirementOutputPath();
         } else if ("word".equalsIgnoreCase(fileType)) {
             path = metadata.getWordOutputPath();
+        } else if ("archive".equalsIgnoreCase(fileType)) {
+            path = metadata.getMaterialArchiveOutputPath();
         } else {
             throw new BusinessException("Unsupported export file type: " + fileType);
         }

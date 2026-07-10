@@ -100,6 +100,7 @@ public class WordExportService {
         }
 
         metadata.setWordOutputPath(actualOutputPath.toString());
+        metadata.setMaterialArchiveOutputPath(null);
         metadata.setStatus("WORD_EXPORTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);

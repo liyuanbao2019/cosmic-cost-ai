@@ -14,6 +14,7 @@ public class ProjectMetadata {
     private String excelOutputPath;
     private String businessRequirementOutputPath;
     private String wordOutputPath;
+    private String materialArchiveOutputPath;
     private long fileSize;
     private String fileType;
     private String status;
@@ -114,6 +115,14 @@ public class ProjectMetadata {
 
     public void setWordOutputPath(String wordOutputPath) {
         this.wordOutputPath = wordOutputPath;
+    }
+
+    public String getMaterialArchiveOutputPath() {
+        return materialArchiveOutputPath;
+    }
+
+    public void setMaterialArchiveOutputPath(String materialArchiveOutputPath) {
+        this.materialArchiveOutputPath = materialArchiveOutputPath;
     }
 
     public long getFileSize() {

@@ -11,11 +11,13 @@ import org.apache.poi.poifs.filesystem.FileMagic;
 import org.apache.poi.poifs.filesystem.OfficeXmlFileException;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
+import org.apache.poi.xwpf.usermodel.IBodyElement;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -31,12 +33,17 @@ import java.time.format.DateTimeFormatter;
 public class DocumentParseService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final int PREVIEW_MAX_LENGTH = 12000;
-
     private final FileStorageService fileStorageService;
+    private final RequirementInputService requirementInputService;
 
-    public DocumentParseService(FileStorageService fileStorageService) {
+    @Autowired
+    public DocumentParseService(FileStorageService fileStorageService, RequirementInputService requirementInputService) {
         this.fileStorageService = fileStorageService;
+        this.requirementInputService = requirementInputService;
+    }
+
+    DocumentParseService(FileStorageService fileStorageService) {
+        this(fileStorageService, new RequirementInputService(fileStorageService));
     }
 
     public ParseResponse parseProject(String projectId) {
@@ -57,6 +64,7 @@ public class DocumentParseService {
         }
 
         String requirementDetail = extractRequirementDetailPreview(parsedDocument.getText());
+        requirementInputService.clearCustomization(projectId);
         Path requirementDetailPath = fileStorageService.resolveProjectDir(projectId).resolve("requirement-detail.txt");
         try {
             Files.write(requirementDetailPath, requirementDetail.getBytes(StandardCharsets.UTF_8));
@@ -77,6 +85,7 @@ public class DocumentParseService {
         response.setParagraphCount(parsedDocument.getParagraphCount());
         response.setTableCount(parsedDocument.getTableCount());
         response.setTextLength(parsedDocument.getText().length());
+        response.setRequirementDetailLength(requirementDetail.length());
         response.setStatus(metadata.getStatus());
         response.setPreview(buildPreview(requirementDetail));
         RequirementDiagnosis diagnosis = diagnoseRequirementSection(requirementDetail);
@@ -123,39 +132,57 @@ public class DocumentParseService {
         int tableCount = 0;
 
         try (XWPFDocument document = new XWPFDocument(inputStream)) {
-            for (XWPFParagraph paragraph : document.getParagraphs()) {
-                String line = normalizeLine(paragraph.getText());
-                if (StringUtils.hasText(line)) {
-                    text.append(line).append(System.lineSeparator());
-                    paragraphCount++;
-                }
-            }
-
-            for (XWPFTable table : document.getTables()) {
-                tableCount++;
-                text.append(System.lineSeparator())
-                        .append("[TABLE ")
-                        .append(tableCount)
-                        .append("]")
-                        .append(System.lineSeparator());
-                for (XWPFTableRow row : table.getRows()) {
-                    StringBuilder rowText = new StringBuilder();
-                    for (XWPFTableCell cell : row.getTableCells()) {
-                        if (rowText.length() > 0) {
-                            rowText.append(" | ");
-                        }
-                        rowText.append(normalizeLine(cell.getText()));
-                    }
-                    if (StringUtils.hasText(rowText.toString())) {
-                        text.append(rowText).append(System.lineSeparator());
-                    }
-                }
-            }
+            DocxParseCounter counter = new DocxParseCounter();
+            appendDocxBodyElements(text, document.getBodyElements(), counter);
+            paragraphCount = counter.paragraphCount;
+            tableCount = counter.tableCount;
         } catch (IOException ex) {
             throw new BusinessException("解析 docx 文件失败，请确认文件是由 Word/WPS 正常另存为的 .docx 文件。", ex);
         }
 
         return new ParsedDocument(text.toString().trim(), paragraphCount, tableCount);
+    }
+
+    /**
+     * Word often mixes ordinary paragraphs and tables within one requirement section.
+     * Reading paragraphs and tables in two separate passes changes their original order,
+     * which can make a later heading look like it belongs before its functional description.
+     */
+    private void appendDocxBodyElements(StringBuilder text, Iterable<IBodyElement> elements, DocxParseCounter counter) {
+        for (IBodyElement element : elements) {
+            if (element instanceof XWPFParagraph) {
+                String line = normalizeLine(((XWPFParagraph) element).getText());
+                if (StringUtils.hasText(line)) {
+                    text.append(line).append(System.lineSeparator());
+                    counter.paragraphCount++;
+                }
+                continue;
+            }
+            if (element instanceof XWPFTable) {
+                appendDocxTable(text, (XWPFTable) element, counter);
+            }
+        }
+    }
+
+    private void appendDocxTable(StringBuilder text, XWPFTable table, DocxParseCounter counter) {
+        counter.tableCount++;
+        text.append(System.lineSeparator())
+                .append("[TABLE ")
+                .append(counter.tableCount)
+                .append("]")
+                .append(System.lineSeparator());
+        for (XWPFTableRow row : table.getRows()) {
+            StringBuilder rowText = new StringBuilder();
+            for (XWPFTableCell cell : row.getTableCells()) {
+                if (rowText.length() > 0) {
+                    rowText.append(" | ");
+                }
+                rowText.append(normalizeLine(cell.getText()));
+            }
+            if (StringUtils.hasText(rowText.toString())) {
+                text.append(rowText).append(System.lineSeparator());
+            }
+        }
     }
 
     private ParsedDocument parseDoc(InputStream inputStream, Path sourceFile) {
@@ -211,101 +238,13 @@ public class DocumentParseService {
         if (text == null) {
             return "";
         }
-        String preview = text.replace("\r\n", "\n")
+        return text.replace("\r\n", "\n")
                 .replace('\r', '\n')
                 .trim();
-        if (preview.length() <= PREVIEW_MAX_LENGTH) {
-            return preview;
-        }
-        return preview.substring(0, PREVIEW_MAX_LENGTH) + System.lineSeparator() + "...（内容较长，已截断）";
     }
 
     private String extractRequirementDetailPreview(String documentText) {
-        if (!StringUtils.hasText(documentText)) {
-            return "";
-        }
-        String[] lines = documentText.split("\\r?\\n");
-        StringBuilder detail = new StringBuilder();
-        boolean collecting = false;
-
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!collecting) {
-                if (isRequirementSection(line)) {
-                    collecting = true;
-                }
-                continue;
-            }
-
-            if (isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                detail.append(line).append(System.lineSeparator());
-            }
-        }
-
-        return refineRequirementDetail(detail.toString());
-    }
-
-    private String refineRequirementDetail(String text) {
-        String trimmed = text == null ? "" : text.trim();
-        if (!StringUtils.hasText(trimmed)) {
-            return "";
-        }
-        String[] lines = trimmed.split("\\r?\\n");
-        StringBuilder functionDescription = new StringBuilder();
-        boolean collectingFunctionDescription = false;
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!collectingFunctionDescription) {
-                if (isFunctionDescriptionSection(line)) {
-                    collectingFunctionDescription = true;
-                }
-                continue;
-            }
-            if (isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                functionDescription.append(line).append(System.lineSeparator());
-            }
-        }
-        if (StringUtils.hasText(functionDescription.toString())) {
-            return functionDescription.toString().trim();
-        }
-
-        StringBuilder bounded = new StringBuilder();
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (bounded.length() > 0 && isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                bounded.append(line).append(System.lineSeparator());
-            }
-        }
-        return bounded.toString().trim();
-    }
-
-    private boolean isSectionBoundary(String line) {
-        String normalized = normalizeSectionTitle(line);
-        if (!StringUtils.hasText(normalized) || isRequirementSection(line)) {
-            return false;
-        }
-        return "非功能性需求".equals(normalized)
-                || "非功能需求".equals(normalized)
-                || "附加值调整因子说明".equals(normalized)
-                || "系统现状".equals(normalized)
-                || "功能架构图".equals(normalized)
-                || "总体描述".equals(normalized)
-                || "建设目标".equals(normalized)
-                || "建设必要性".equals(normalized)
-                || "背景及目标".equals(normalized)
-                || "功能界面".equals(normalized)
-                || "流程图".equals(normalized)
-                || "调整因子情况说明".equals(normalized)
-                || isTopLevelSectionHeading(line);
+        return RequirementSectionExtractor.extract(documentText);
     }
 
     private RequirementDiagnosis diagnoseRequirementSection(String requirementDetail) {
@@ -315,50 +254,6 @@ public class DocumentParseService {
                 "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。");
         }
         return new RequirementDiagnosis(true, "", "");
-    }
-
-    private boolean isRequirementSection(String line) {
-        String normalized = normalizeSectionTitle(line);
-        return "需求内容".equals(normalized)
-                || "需求细则".equals(normalized)
-                || "业务功能".equals(normalized)
-                || "功能需求".equals(normalized)
-                || "功能性需求".equals(normalized)
-                || isFunctionDescriptionSection(line);
-    }
-
-    private boolean isFunctionDescriptionSection(String line) {
-        String normalized = normalizeSectionTitle(line);
-        return "功能描述".equals(normalized)
-                || "需求描述".equals(normalized);
-    }
-
-    private String normalizeSectionTitle(String line) {
-        if (!StringUtils.hasText(line)) {
-            return "";
-        }
-        return line.trim()
-                .replaceAll("\\s+", "")
-                .replaceAll("^\\d+(?:[.．]\\d+)+[、.．,，]?+", "")
-                .replaceAll("^[一二三四五六七八九十]+[、.．,，]?+", "")
-                .replaceAll("^\\(?\\d+\\)?[、.．,，]?+", "")
-                .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
-                .replaceAll("[:：]+$", "")
-                .trim();
-    }
-
-    private boolean isTopLevelSectionHeading(String line) {
-        if (!StringUtils.hasText(line)) {
-            return false;
-        }
-        String value = line.trim();
-        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")
-                || value.matches("^\\d+[\\.．、].*")) {
-            return false;
-        }
-        return value.matches("^[一二三四五六七八九十]+[、.．]\\s*\\S.{0,60}$")
-                || value.matches("^第[一二三四五六七八九十\\d]+[章节条]\\s*\\S.{0,60}$")
-                || value.matches("^\\d+[、.．]\\s*\\D.{0,60}$");
     }
 
     private static class ParsedDocument {
@@ -397,5 +292,10 @@ public class DocumentParseService {
             this.warning = warning;
             this.suggestion = suggestion;
         }
+    }
+
+    private static class DocxParseCounter {
+        private int paragraphCount;
+        private int tableCount;
     }
 }

@@ -123,6 +123,7 @@ public class ExcelExportService {
 
         metadata.setExcelOutputPath(actualOutputPath.toString());
         metadata.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
+        metadata.setMaterialArchiveOutputPath(null);
         metadata.setStatus("EXCEL_EXPORTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);

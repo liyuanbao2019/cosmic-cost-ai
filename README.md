@@ -291,6 +291,10 @@ DEEPSEEK_API_KEY=your-api-key
 - 支持新增行、复制单行、复制选中、删除选中和批量修改。
 - 修改复用度后自动刷新 CFP。
 - 点击“导出送审材料”会依次生成附件3、附件2和附件1。
+- 三份送审材料全部生成后会自动打包为 ZIP；ZIP 使用需求说明书的文件名，仅将 `.docx` 扩展名替换为 `.zip`。
+- 点击“AI 深度审校”会创建异步分批任务，按完整功能过程检查拆分、漏项数据移动和重复功能。
+- 长需求文本会先检索与当前功能过程相关的原文证据，再按字符预算分批调用模型；单批超时不会丢失其他批次结果。
+- 深度审校建议包含原表行号、原文证据编号、替换后的完整拆分行、置信度和 CFP 变化，采纳后自动保存审核表。
 
 ## API 列表
 
@@ -310,8 +314,12 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects/{projectId}/review` | PUT | 保存人工审核后的拆分表 |
 | `/api/projects/{projectId}/review/validate` | POST | 对当前审核行执行规则初审 |
 | `/api/projects/{projectId}/review/ai-validate` | POST | 对选中的风险行执行 AI 复核 |
+| `/api/projects/{projectId}/review/deep-split` | POST | 创建异步、分批的 AI 深度审校任务 |
+| `/api/projects/{projectId}/review/deep-split/{jobId}` | GET | 查询任务进度和已完成建议 |
+| `/api/projects/{projectId}/review/deep-split/{jobId}/retry` | POST | 仅重试超时或失败批次 |
 | `/api/projects/{projectId}/export/excel` | POST | 导出附件3功能点拆分表，并同步导出附件2业务需求信息汇总表 |
 | `/api/projects/{projectId}/export/word` | POST | 导出附件1需求说明书 |
+| `/api/projects/{projectId}/export/archive` | POST | 将附件1、附件2、附件3打包为送审材料 ZIP |
 | `/api/projects/{projectId}/exports/{fileType}/info` | GET | 获取导出文件路径、下载链接和打开目录能力 |
 | `/api/projects/{projectId}/exports/{fileType}/download` | GET | 下载导出文件 |
 | `/api/projects/{projectId}/exports/{fileType}/open-directory` | POST | Windows 环境下打开导出目录 |
@@ -323,6 +331,7 @@ DEEPSEEK_API_KEY=your-api-key
 - `excel`：附件3功能点拆分表
 - `business`：附件2业务需求信息汇总表
 - `word`：附件1需求说明书
+- `archive`：包含附件1、附件2、附件3的送审材料 ZIP
 
 ## API 示例
 
@@ -436,6 +445,7 @@ storage/projects/{projectId}
 - `cosmic-results.json`：COSMIC 统计结果。
 - `function-split-rows.json`：人工审核后的功能点拆分表行数据。
 - `split-review.{xls|xlsx}`：从已拆分 Excel 导入项目时保存的源文件。
+- `deep-split/{jobId}/state.json`：AI 深度审校的原始审核行、分批状态、失败原因和累计建议，用于进度查询与失败批次重试。
 
 导出文件生成在：
 

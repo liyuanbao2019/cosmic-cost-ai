@@ -48,15 +48,19 @@ public class AiExtractionService {
     private final long timeoutSeconds;
     private final int maxRetries;
     private final SplitRuleConfigService splitRuleConfigService;
+    private final RequirementCoverageService requirementCoverageService;
+    private final RequirementInputService requirementInputService;
 
     @Autowired
     public AiExtractionService(FileStorageService fileStorageService,
                                @Value("${cosmic.ai.base-url:}") String baseUrl,
                                @Value("${cosmic.ai.api-key:}") String apiKey,
                                @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
-                               @Value("${cosmic.ai.timeout-seconds:180}") long timeoutSeconds,
+                               @Value("${cosmic.ai.timeout-seconds:360}") long timeoutSeconds,
                                @Value("${cosmic.ai.max-retries:2}") int maxRetries,
-                               SplitRuleConfigService splitRuleConfigService) {
+                               SplitRuleConfigService splitRuleConfigService,
+                               RequirementCoverageService requirementCoverageService,
+                               RequirementInputService requirementInputService) {
         this.fileStorageService = fileStorageService;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
@@ -64,6 +68,8 @@ public class AiExtractionService {
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
         this.splitRuleConfigService = splitRuleConfigService;
+        this.requirementCoverageService = requirementCoverageService;
+        this.requirementInputService = requirementInputService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -76,10 +82,13 @@ public class AiExtractionService {
                                int maxRetries,
                                String splitRulesPath) {
         this(fileStorageService, baseUrl, apiKey, model, timeoutSeconds, maxRetries,
-                new SplitRuleConfigService("target/test-config/split-check-rules.md"));
+                new SplitRuleConfigService("target/test-config/split-check-rules.md"),
+                new RequirementCoverageService(fileStorageService),
+                new RequirementInputService(fileStorageService));
     }
 
     public ExtractResponse extract(String projectId) {
+        requirementCoverageService.ensureReadyForExtraction(projectId);
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
@@ -97,6 +106,7 @@ public class AiExtractionService {
         if (!StringUtils.hasText(prompt)) {
             throw new BusinessException("AI提示词不能为空");
         }
+        requirementCoverageService.ensureReadyForExtraction(projectId);
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
@@ -137,6 +147,7 @@ public class AiExtractionService {
         metadata.setExcelOutputPath(null);
         metadata.setBusinessRequirementOutputPath(null);
         metadata.setWordOutputPath(null);
+        metadata.setMaterialArchiveOutputPath(null);
         metadata.setStatus("EXTRACTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
@@ -182,18 +193,40 @@ public class AiExtractionService {
     }
 
     private String resolveRequirementDetail(ProjectMetadata metadata, Path projectDir) {
+        if (requirementInputService.isCustomized(projectDir) && StringUtils.hasText(metadata.getRequirementDetailPath())) {
+            Path manualInputPath = Paths.get(metadata.getRequirementDetailPath());
+            if (Files.exists(manualInputPath)) {
+                String manualInput = readText(manualInputPath);
+                if (StringUtils.hasText(manualInput)) {
+                    return manualInput.trim();
+                }
+            }
+        }
+        if (StringUtils.hasText(metadata.getDocumentTextPath())) {
+            Path documentTextPath = Paths.get(metadata.getDocumentTextPath());
+            if (Files.exists(documentTextPath)) {
+                String extracted = extractRequirementDetail(readText(documentTextPath));
+                if (StringUtils.hasText(extracted)) {
+                    Path requirementDetailPath = StringUtils.hasText(metadata.getRequirementDetailPath())
+                            ? Paths.get(metadata.getRequirementDetailPath())
+                            : projectDir.resolve("requirement-detail.txt");
+                    String existing = Files.exists(requirementDetailPath) ? readText(requirementDetailPath).trim() : "";
+                    if (!extracted.equals(existing)) {
+                        writeText(requirementDetailPath, extracted);
+                    }
+                    if (!requirementDetailPath.toString().equals(metadata.getRequirementDetailPath())) {
+                        metadata.setRequirementDetailPath(requirementDetailPath.toString());
+                        fileStorageService.saveMetadata(metadata);
+                    }
+                    return extracted;
+                }
+            }
+        }
         if (StringUtils.hasText(metadata.getRequirementDetailPath())) {
             Path requirementDetailPath = Paths.get(metadata.getRequirementDetailPath());
             if (Files.exists(requirementDetailPath)) {
                 String requirementDetail = readText(requirementDetailPath);
                 if (StringUtils.hasText(requirementDetail)) {
-                    String refined = refineRequirementDetail(requirementDetail);
-                    if (StringUtils.hasText(refined) && !refined.equals(requirementDetail.trim())) {
-                        writeText(requirementDetailPath, refined);
-                        metadata.setRequirementDetailPath(requirementDetailPath.toString());
-                        fileStorageService.saveMetadata(metadata);
-                        return refined;
-                    }
                     return requirementDetail.trim();
                 }
             }
@@ -221,134 +254,7 @@ public class AiExtractionService {
     }
 
     private String extractRequirementDetail(String documentText) {
-        String[] lines = documentText.split("\\r?\\n");
-        StringBuilder detail = new StringBuilder();
-        boolean collecting = false;
-
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!collecting) {
-                if (isRequirementSection(line)) {
-                    collecting = true;
-                }
-                continue;
-            }
-
-            if (isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                detail.append(line).append(System.lineSeparator());
-            }
-        }
-        return refineRequirementDetail(detail.toString());
-    }
-
-    private String refineRequirementDetail(String text) {
-        String trimmed = text == null ? "" : text.trim();
-        if (!StringUtils.hasText(trimmed)) {
-            return "";
-        }
-        String[] lines = trimmed.split("\\r?\\n");
-        StringBuilder functionDescription = new StringBuilder();
-        boolean collectingFunctionDescription = false;
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (!collectingFunctionDescription) {
-                if (isFunctionDescriptionSection(line)) {
-                    collectingFunctionDescription = true;
-                }
-                continue;
-            }
-            if (isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                functionDescription.append(line).append(System.lineSeparator());
-            }
-        }
-        if (StringUtils.hasText(functionDescription.toString())) {
-            return functionDescription.toString().trim();
-        }
-
-        StringBuilder bounded = new StringBuilder();
-        for (String rawLine : lines) {
-            String line = rawLine == null ? "" : rawLine.trim();
-            if (bounded.length() > 0 && isSectionBoundary(line)) {
-                break;
-            }
-            if (StringUtils.hasText(line)) {
-                bounded.append(line).append(System.lineSeparator());
-            }
-        }
-        return bounded.toString().trim();
-    }
-
-    private boolean isRequirementSection(String line) {
-        String normalized = normalizeSectionTitle(line);
-        return "需求内容".equals(normalized)
-                || "需求细则".equals(normalized)
-                || "业务功能".equals(normalized)
-                || "功能需求".equals(normalized)
-                || "功能性需求".equals(normalized)
-                || isFunctionDescriptionSection(line);
-    }
-
-    private boolean isFunctionDescriptionSection(String line) {
-        String normalized = normalizeSectionTitle(line);
-        return "功能描述".equals(normalized)
-                || "需求描述".equals(normalized);
-    }
-
-    private boolean isSectionBoundary(String line) {
-        String normalized = normalizeSectionTitle(line);
-        if (!StringUtils.hasText(normalized)) {
-            return false;
-        }
-        if (isRequirementSection(line)) {
-            return false;
-        }
-        return "非功能性需求".equals(normalized)
-                || "非功能需求".equals(normalized)
-                || "附加值调整因子说明".equals(normalized)
-                || "系统现状".equals(normalized)
-                || "功能架构图".equals(normalized)
-                || "总体描述".equals(normalized)
-                || "建设目标".equals(normalized)
-                || "建设必要性".equals(normalized)
-                || "背景及目标".equals(normalized)
-                || "功能界面".equals(normalized)
-                || "流程图".equals(normalized)
-                || "调整因子情况说明".equals(normalized)
-                || isTopLevelSectionHeading(line);
-    }
-
-    private String normalizeSectionTitle(String line) {
-        if (!StringUtils.hasText(line)) {
-            return "";
-        }
-        String value = line.trim()
-                .replaceAll("\\s+", "")
-                .replaceAll("^\\d+(?:[.．]\\d+)+[、.．,，]?+", "")
-                .replaceAll("^[一二三四五六七八九十]+[、.．,，]?+", "")
-                .replaceAll("^\\(?\\d+\\)?[、.．,，]?+", "")
-                .replaceAll("^第[一二三四五六七八九十\\d]+[章节条][、.．,，]?+", "")
-                .replaceAll("[:：]+$", "");
-        return value.trim();
-    }
-
-    private boolean isTopLevelSectionHeading(String line) {
-        if (!StringUtils.hasText(line)) {
-            return false;
-        }
-        String value = line.trim();
-        if (value.startsWith("（") || value.startsWith("(") || value.matches("^\\d+\\.\\d+.*")
-                || value.matches("^\\d+[\\.．、].*")) {
-            return false;
-        }
-        return value.matches("^[一二三四五六七八九十]+[、.．]\\s*\\S.{0,60}$")
-                || value.matches("^第[一二三四五六七八九十\\d]+[章节条]\\s*\\S.{0,60}$")
-                || value.matches("^\\d+[、.．]\\s*\\D.{0,60}$");
+        return RequirementSectionExtractor.extract(documentText);
     }
 
     private boolean containsAny(String text, String... keywords) {
@@ -370,6 +276,8 @@ public class AiExtractionService {
                 + "请只根据下面的【需求细则】识别可用于COSMIC度量的真实功能用户需求。"
                 + System.lineSeparator()
                 + "禁止使用背景、目标、系统名称、建设必要性、非功能性要求等固定内容进行发挥。"
+                + System.lineSeparator()
+                + "输入会保留完整的“业务功能需求”章节，其中可能包含功能界面、流程图或截图文字；这些内容用于防止正文遗漏，不能单独虚构成功能点，应以功能描述和明确业务动作作为拆分依据。"
                 + System.lineSeparator()
                 + "抽取原则："
                 + System.lineSeparator()

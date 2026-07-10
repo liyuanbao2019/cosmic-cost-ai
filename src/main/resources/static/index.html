@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260611-ai-desc-sync-1">
+  <link rel="stylesheet" href="/app.css?v=20260710-archive-row-1">
 </head>
 
 <body>
@@ -42,6 +42,10 @@
         </div>
         <div class="export-progress-row" id="export-step-word">
           <span>3、导出需求说明书</span>
+          <b>等待中</b>
+        </div>
+        <div class="export-progress-row" id="export-step-archive">
+          <span>4、打包送审材料压缩包</span>
           <b>等待中</b>
         </div>
       </div>
@@ -268,14 +272,44 @@
       </div>
     </section>
 
-    <section id="parsePanel" class="panel hidden">
-      <div class="panel-header">
-        <div class="panel-title-row">
-          <h2>解析预览</h2>
+    <section id="parsePanel" class="panel parse-editor-panel hidden">
+      <div class="parse-editor-header">
+        <div class="parse-editor-intro">
+          <div class="parse-editor-title-line">
+            <h2>解析与人工修订</h2>
+            <span class="parse-editor-tag">AI 输入</span>
+          </div>
+          <span id="parsePreviewHint" class="parse-preview-hint"></span>
+        </div>
+        <div class="parse-editor-actions">
+          <button id="saveRequirementInputBtn" type="button" onclick="saveEditedRequirementInput()">保存并重新校验</button>
           <button type="button" class="ghost" onclick="toggleParsePreview()">收起</button>
         </div>
       </div>
-      <pre id="preview" class="preview"></pre>
+      <label class="parse-editor-label" for="preview">
+        AI 拆分内容 <span>可直接编辑，发现遗漏可粘贴补充</span>
+      </label>
+      <textarea id="preview" class="preview preview-editor" spellcheck="false" placeholder="解析内容会显示在这里。发现遗漏时，可直接粘贴或修改后保存。"></textarea>
+    </section>
+
+    <section id="requirementCoveragePanel" class="panel hidden">
+      <div class="panel-header">
+        <div class="panel-title-row">
+          <h2>拆分前解析完整性校验</h2>
+          <span id="requirementCoverageSummary" class="coverage-summary"></span>
+        </div>
+      </div>
+      <p class="coverage-intro">系统会把原始 Word 识别到的业务功能模块，与实际送给 AI 的需求文本逐项比对。缺失模块必须先补入，才能开始 AI 拆分。</p>
+      <div class="coverage-table-wrap">
+        <table class="coverage-table">
+          <thead><tr><th>处理</th><th>原文功能模块</th><th>原文内容</th><th>AI 输入状态</th></tr></thead>
+          <tbody id="requirementCoverageRows"></tbody>
+        </table>
+      </div>
+      <div class="coverage-actions">
+        <button id="includeCoverageModulesBtn" type="button" class="secondary" onclick="includeSelectedCoverageModules()">将选中缺失模块纳入 AI 输入</button>
+        <button id="continueAfterCoverageBtn" type="button" onclick="continueAfterCoverageCheck()">确认覆盖，开始 AI 拆分</button>
+      </div>
     </section>
 
     <section id="reviewPanel" class="panel hidden">
@@ -290,6 +324,40 @@
         </div>
       </div>
 
+      <details class="review-stage-guide" open>
+        <summary>
+          <span>三个拆分环节，分别在做什么？</span>
+          <small>先出第一版 → 再查基础错误 → 最后对照原文复盘</small>
+        </summary>
+        <div class="review-stage-grid">
+          <article>
+            <span class="review-stage-index">1</span>
+            <div>
+              <b>AI 拆分：先把 Word 变成第一版表格</b>
+              <p>把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
+            </div>
+          </article>
+          <article>
+            <span class="review-stage-index">2</span>
+            <div>
+              <b>规则初审：用固定清单查基础错误</b>
+              <p>只看当前表格，逐行检查有没有漏填、E/R/W/X 写错、没有 E、没有 W/X、连续两个 E 等明显问题。它像格式检查，快，但不会回头读完整 Word 找漏功能。</p>
+            </div>
+          </article>
+          <article class="deep-review-stage">
+            <span class="review-stage-index">3</span>
+            <div>
+              <b>AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
+              <p>把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
+            </div>
+          </article>
+        </div>
+        <div class="review-stage-note">
+          <b>一句话区分：</b>AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。
+          规则初审显示“无问题”，不等于没有漏拆或错拆。
+        </div>
+      </details>
+
       <div id="ruleValidationPanel" class="rewrite-progress hidden">
         <div class="rewrite-progress-head">
           <b id="ruleValidationTitle">规则初审结果</b>
@@ -302,12 +370,33 @@
         <div id="ruleValidationDetail" class="rewrite-progress-detail"></div>
       </div>
 
+      <div id="deepSplitPanel" class="deep-split-panel hidden">
+        <div class="deep-split-head">
+          <div>
+            <b>AI 深度二次拆分</b>
+            <span id="deepSplitStatus">等待执行</span>
+          </div>
+          <div class="deep-split-head-actions">
+            <button id="deepSplitApplyAllBtn" type="button" class="deep-split-apply-all hidden" onclick="applyAllDeepSplitSuggestions()">一键采纳可用建议</button>
+            <button id="deepSplitRetryBtn" type="button" class="ghost hidden" onclick="retryDeepSplitFailed()">重试失败批次</button>
+          </div>
+        </div>
+        <div class="deep-split-purpose">
+          <b>本步骤不是重复规则初审：</b>它会结合原文证据审查整张表的功能边界和完整性，提出拆分、合并、补数据移动建议；只有采纳后才会修改审核表和 CFP。
+        </div>
+        <div class="deep-split-progress-track">
+          <div id="deepSplitProgressBar" class="deep-split-progress-bar"></div>
+        </div>
+        <div id="deepSplitMeta" class="deep-split-meta"></div>
+        <div id="deepSplitWarnings" class="deep-split-warnings"></div>
+        <div id="deepSplitSuggestions" class="deep-split-suggestions"></div>
+      </div>
+
       <div class="actions sticky-actions">
         <span class="action-label">功能区域：</span>
         <div class="primary-tools">
           <button type="button" class="secondary" onclick="saveReview()">保存</button>
-          <button type="button" class="rule-precheck-primary" onclick="validateReviewRules()">规则初审</button>
-          <button type="button" class="ai-review-secondary" onclick="aiValidateSelectedRisks()">AI&#x590d;&#x6838;</button>
+          <button id="deepSplitBtn" type="button" class="deep-split-primary" title="结合原文证据审查整张表，发现漏拆、错拆、重复和缺失数据移动，并给出可采纳的结构调整。" onclick="startDeepSplitReview()">AI 深度审校</button>
           <button type="button" onclick="insertReviewRow('above')">上方插入</button>
           <button type="button" onclick="insertReviewRow('below')">下方插入</button>
           <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
@@ -372,6 +461,7 @@
             <tr>
               <th class="w-select"><input id="selectAllRows" type="checkbox" onchange="toggleAllRows(this.checked)">
               </th>
+              <th class="w-row-number">行号</th>
               <th class="w-module">一级模块</th>
               <th class="w-module">二级模块</th>
               <th class="w-module">三级模块</th>
@@ -410,6 +500,12 @@
     let validationIssuesByRow = {};
     let lastValidationResult = null;
     let lastAiValidationResult = null;
+    let currentDeepSplitJob = null;
+    let deepSplitPollTimer = null;
+    let deepSplitRowsSnapshot = null;
+    let deepSplitRowOrigins = [];
+    let deepSplitBulkApplying = false;
+    let requirementCoverageData = null;
     let exportedMaterialInfos = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
@@ -452,7 +548,7 @@
     }
 
     function resetExportProgressDialog() {
-      ["excel", "business", "word"].forEach(function (step) {
+      ["excel", "business", "word", "archive"].forEach(function (step) {
         setExportStep(step, "等待中", "pending");
       });
       $("export-material-result").classList.add("hidden");
@@ -786,6 +882,7 @@
     }
 
     function resetPage() {
+      clearDeepSplitPolling();
       currentProjectId = "";
       splitRows = [];
       selectedRows = {};
@@ -793,6 +890,10 @@
       cellEditorState = null;
       validationIssuesByRow = {};
       lastValidationResult = null;
+      currentDeepSplitJob = null;
+      requirementCoverageData = null;
+      deepSplitRowOrigins = [];
+      resetDeepSplitPanel();
       setSplitMode("document", true, true);
       $("fileInput").value = "";
       if ($("splitExcelInput")) {
@@ -808,13 +909,14 @@
       if ($("densityBtn")) {
         $("densityBtn").textContent = "紧凑视图";
       }
-      $("preview").textContent = "";
+      $("preview").value = "";
       if ($("ruleValidationPanel")) {
         $("ruleValidationPanel").classList.add("hidden");
       }
       $("projectBadge").textContent = "未上传";
       $("projectBadge").className = "badge muted";
       $("parsePanel").classList.add("hidden");
+      $("requirementCoveragePanel").classList.add("hidden");
       $("reviewPanel").classList.add("hidden");
       $("outputPanel").classList.add("hidden");
       $("outputList").innerHTML = "";
@@ -858,18 +960,115 @@
         markActive("parse");
         setMessage("正在解析文档内容...");
         const parsed = await request("/api/projects/" + currentProjectId + "/parse", { method: "POST" });
-        $("preview").textContent = parsed.data.preview || "";
+        $("preview").value = parsed.data.preview || "";
+        const requirementDetailLength = Number(parsed.data.requirementDetailLength || 0);
+        $("parsePreviewHint").textContent = requirementDetailLength > 0
+          ? "已提取完整业务功能章节，共 " + requirementDetailLength.toLocaleString() + " 字（下方可滚动查看，不会截断）"
+          : "下方为已提取的业务功能章节";
         if (showRequirementParseWarning(parsed.data || {})) {
           $("parsePanel").classList.remove("hidden");
           setMessage("未识别到需求内容，请按提示修改文档后重新上传。", "error");
           return;
         }
         markDone("parse");
-        $("parsePanel").classList.add("hidden");
-        setMessage("解析完成，点击「解析」节点可查看预览");
+        $("parsePanel").classList.remove("hidden");
+        await loadRequirementCoverage();
+        setMessage("请先确认“拆分前解析完整性校验”；确认覆盖后才会调用 AI 拆分。", "success");
+      });
+    }
 
+    async function loadRequirementCoverage() {
+      const response = await request("/api/projects/" + currentProjectId + "/requirement-coverage");
+      requirementCoverageData = response.data || {};
+      renderRequirementCoverage(requirementCoverageData);
+      $("requirementCoveragePanel").classList.remove("hidden");
+    }
+
+    async function saveEditedRequirementInput() {
+      if (!currentProjectId) {
+        showDialog("暂无项目", "请先上传并解析需求文档。");
+        return;
+      }
+      const content = ($("preview").value || "").trim();
+      if (!content) {
+        showDialog("内容为空", "请保留或粘贴需要送给 AI 拆分的需求内容。");
+        return;
+      }
+      await withBusy(async function () {
+        const button = $("saveRequirementInputBtn");
+        button.disabled = true;
+        button.textContent = "保存中...";
+        try {
+          setMessage("正在保存人工修订的 AI 输入，并重新执行完整性校验...");
+          const response = await request("/api/projects/" + currentProjectId + "/requirement-input", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: content })
+          });
+          requirementCoverageData = response.data || {};
+          renderRequirementCoverage(requirementCoverageData);
+          $("requirementCoveragePanel").classList.remove("hidden");
+          $("parsePreviewHint").textContent = "已保存人工修订内容，共 " + content.length.toLocaleString()
+            + " 字；后续 AI 拆分将使用此版本。";
+          setMessage("人工修订内容已保存，将作为实际 AI 输入。", "success");
+        } finally {
+          button.disabled = false;
+          button.textContent = "保存修改并重新校验";
+        }
+      });
+    }
+
+    function renderRequirementCoverage(data) {
+      const total = Number(data.sourceModuleCount || 0);
+      const included = Number(data.includedModuleCount || 0);
+      const missing = Number(data.missingModuleCount || 0);
+      $("requirementCoverageSummary").textContent = total
+        ? "原文 " + total + " 个模块，AI 输入已覆盖 " + included + " 个，缺失 " + missing + " 个"
+        : "未识别到可核对的三级功能模块";
+      const rows = data.modules || [];
+      $("requirementCoverageRows").innerHTML = rows.map(function (module) {
+        const missingModule = !module.included;
+        return "<tr class=\"" + (missingModule ? "coverage-missing" : "coverage-included") + "\">"
+          + "<td>" + (missingModule ? "<label><input type=\"checkbox\" class=\"coverage-module-check\" value=\"" + escapeHtml(module.number) + "\" checked> 纳入</label>" : "—") + "</td>"
+          + "<td><b>" + escapeHtml(module.number) + "</b> " + escapeHtml(module.title) + "</td>"
+          + "<td>" + Number(module.sourceLength || 0).toLocaleString() + " 字</td>"
+          + "<td><span class=\"coverage-status " + (missingModule ? "missing" : "included") + "\">" + (missingModule ? "缺失，未送入 AI" : "已纳入 AI 输入") + "</span></td>"
+          + "</tr>";
+      }).join("") || "<tr><td colspan=\"4\">未识别到可核对的功能模块，可直接继续拆分。</td></tr>";
+      $("includeCoverageModulesBtn").style.display = missing > 0 ? "" : "none";
+      $("continueAfterCoverageBtn").disabled = missing > 0;
+      $("continueAfterCoverageBtn").textContent = missing > 0 ? "请先补入缺失模块" : "确认覆盖，开始 AI 拆分";
+    }
+
+    async function includeSelectedCoverageModules() {
+      const moduleNumbers = Array.prototype.slice.call(document.querySelectorAll(".coverage-module-check:checked"))
+        .map(function (element) { return element.value; });
+      if (!moduleNumbers.length) {
+        showDialog("请选择模块", "请勾选要补入 AI 输入的缺失功能模块。");
+        return;
+      }
+      await withBusy(async function () {
+        setMessage("正在将选中的原文功能模块补入 AI 输入...");
+        const response = await request("/api/projects/" + currentProjectId + "/requirement-coverage/include", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ moduleNumbers: moduleNumbers })
+        });
+        requirementCoverageData = response.data || {};
+        renderRequirementCoverage(requirementCoverageData);
+        setMessage("已补入原文模块，请确认覆盖结果后开始 AI 拆分。", "success");
+      });
+    }
+
+    async function continueAfterCoverageCheck() {
+      if (!requirementCoverageData || !requirementCoverageData.readyForExtraction) {
+        showDialog("尚有缺失模块", "请先将缺失模块纳入 AI 输入，避免拆分遗漏功能点。");
+        return;
+      }
+      await withBusy(async function () {
+        $("requirementCoveragePanel").classList.add("hidden");
         markActive("ai");
-        setMessage("正在调用 AI 拆分需求细则，请稍等...");
+        setMessage("完整性校验已通过，正在调用 AI 拆分需求细则，请稍等...");
         await request("/api/projects/" + currentProjectId + "/extract", { method: "POST" });
         markDone("ai");
 
@@ -911,7 +1110,7 @@
           $("projectBadge").className = "badge";
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
-          $("preview").textContent = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则初审”，按 COSMIC 拆分规则检查需要人工调整的项。";
+          $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则初审”，按 COSMIC 拆分规则检查需要人工调整的项。";
           $("parsePanel").classList.remove("hidden");
           markDone("cosmic");
           await loadReview();
@@ -989,7 +1188,8 @@
       }
       summary.innerHTML = "";
       [
-        { label: "\u521d\u5ba1\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
+        { label: "\u521d\u5ba1\u5feb\u7167\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
+        { label: "\u5f53\u524d\u8868\u683c\u884c\u6570", value: splitRows.length, className: "neutral" },
         { label: "\u9519\u8bef", value: result.errorCount || 0, className: "error" },
         { label: "\u7ed3\u6784\u98ce\u9669", value: result.structureRiskCount || result.riskCount || 0, className: "risk" }
       ].forEach(function (item) {
@@ -1310,6 +1510,440 @@
       return Math.round(Math.max(0, Math.min(1, number)) * 100) + "%";
     }
 
+    async function startDeepSplitReview() {
+      if (!currentProjectId || !splitRows.length) {
+        showDialog("暂无可审校数据", "请先完成需求拆分或导入 Excel，再执行 AI 深度审校。");
+        return;
+      }
+      if (currentDeepSplitJob && (currentDeepSplitJob.status === "QUEUED" || currentDeepSplitJob.status === "RUNNING")) {
+        showDialog("任务执行中", "当前 AI 深度审校仍在分批执行，请等待完成。");
+        return;
+      }
+      clearDeepSplitPolling();
+      deepSplitRowsSnapshot = JSON.stringify(splitRows.map(rowForSubmit));
+      deepSplitRowOrigins = splitRows.map(function (_, index) { return [index + 1]; });
+      renderDeepSplitJob({
+        status: "QUEUED",
+        totalChunks: 0,
+        completedChunks: 0,
+        failedChunks: 0,
+        progressPercent: 0,
+        suggestions: [],
+        warnings: ["正在创建异步分批任务，长文档会先检索相关原文片段。"]
+      });
+      setMessage("正在创建 AI 深度审校任务...");
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/review/deep-split", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: splitRows.map(rowForSubmit) })
+        });
+        currentDeepSplitJob = response.data || {};
+        renderDeepSplitJob(currentDeepSplitJob);
+        scheduleDeepSplitPoll();
+        setMessage("AI 深度审校已在后台分批执行，可继续查看当前页面。", "success");
+      } catch (error) {
+        resetDeepSplitPanel();
+        setMessage(error.message || "创建 AI 深度审校任务失败。", "error");
+        showDialog("AI 深度审校失败", error.message || "任务创建失败，请稍后重试。");
+      }
+    }
+
+    function scheduleDeepSplitPoll() {
+      clearDeepSplitPolling();
+      if (!currentDeepSplitJob || deepSplitTerminal(currentDeepSplitJob.status)) {
+        return;
+      }
+      deepSplitPollTimer = window.setTimeout(pollDeepSplitJob, 1500);
+    }
+
+    async function pollDeepSplitJob() {
+      if (!currentProjectId || !currentDeepSplitJob || !currentDeepSplitJob.jobId) {
+        return;
+      }
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/review/deep-split/"
+          + encodeURIComponent(currentDeepSplitJob.jobId));
+        currentDeepSplitJob = response.data || {};
+        renderDeepSplitJob(currentDeepSplitJob);
+        if (!deepSplitTerminal(currentDeepSplitJob.status)) {
+          scheduleDeepSplitPoll();
+        } else if (currentDeepSplitJob.status === "COMPLETED") {
+          setMessage("AI 深度审校完成，共生成 " + ((currentDeepSplitJob.suggestions || []).length) + " 条结构化建议。", "success");
+        } else if (currentDeepSplitJob.status === "PARTIAL") {
+          setMessage("AI 深度审校部分完成，可查看已完成建议并重试失败批次。", "error");
+        }
+      } catch (error) {
+        setMessage("读取 AI 深度审校进度失败，将稍后继续重试。", "error");
+        deepSplitPollTimer = window.setTimeout(pollDeepSplitJob, 3000);
+      }
+    }
+
+    async function retryDeepSplitFailed() {
+      if (!currentProjectId || !currentDeepSplitJob || !currentDeepSplitJob.jobId) {
+        return;
+      }
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/review/deep-split/"
+          + encodeURIComponent(currentDeepSplitJob.jobId) + "/retry", { method: "POST" });
+        currentDeepSplitJob = response.data || {};
+        renderDeepSplitJob(currentDeepSplitJob);
+        scheduleDeepSplitPoll();
+        setMessage("已只重试失败批次，之前完成的建议会继续保留。", "success");
+      } catch (error) {
+        setMessage(error.message || "重试失败批次失败。", "error");
+        showDialog("重试失败", error.message || "请稍后重试。");
+      }
+    }
+
+    function clearDeepSplitPolling() {
+      if (deepSplitPollTimer) {
+        window.clearTimeout(deepSplitPollTimer);
+        deepSplitPollTimer = null;
+      }
+    }
+
+    function resetDeepSplitPanel() {
+      clearDeepSplitPolling();
+      deepSplitRowsSnapshot = null;
+      deepSplitRowOrigins = [];
+      deepSplitBulkApplying = false;
+      const panel = $("deepSplitPanel");
+      if (panel) {
+        panel.classList.add("hidden");
+      }
+      const button = $("deepSplitBtn");
+      if (button) {
+        button.disabled = false;
+      }
+    }
+
+    function deepSplitTerminal(status) {
+      return status === "COMPLETED" || status === "PARTIAL" || status === "FAILED";
+    }
+
+    function renderDeepSplitJob(job) {
+      const panel = $("deepSplitPanel");
+      if (!panel) {
+        return;
+      }
+      panel.classList.remove("hidden");
+      const running = job && (job.status === "QUEUED" || job.status === "RUNNING");
+      const button = $("deepSplitBtn");
+      if (button) {
+        button.disabled = !!running;
+        button.textContent = running ? "深度审校中..." : "AI 深度审校";
+      }
+      $("deepSplitStatus").textContent = deepSplitStatusText(job && job.status);
+      $("deepSplitProgressBar").style.width = Math.max(0, Math.min(100, Number(job && job.progressPercent) || 0)) + "%";
+      const total = Number(job && job.totalChunks) || 0;
+      const completed = Number(job && job.completedChunks) || 0;
+      const failed = Number(job && job.failedChunks) || 0;
+      const sourceLabel = job && job.sourceAvailable ? "原始需求证据" : "仅审核表证据";
+      $("deepSplitMeta").textContent = "批次：" + completed + "/" + total
+        + (failed ? "，失败 " + failed : "") + "；依据：" + sourceLabel
+        + "；模型：" + textOr(job && job.model, "-");
+      const warnings = (job && job.warnings) || [];
+      $("deepSplitWarnings").innerHTML = warnings.map(function (warning) {
+        return "<div>• " + escapeHtml(warning) + "</div>";
+      }).join("");
+      const retryButton = $("deepSplitRetryBtn");
+      if (retryButton) {
+        retryButton.classList.toggle("hidden", !(failed > 0 && deepSplitTerminal(job && job.status)));
+      }
+      const suggestions = (job && job.suggestions) || [];
+      const applyAllButton = $("deepSplitApplyAllBtn");
+      if (applyAllButton) {
+        const available = suggestions.some(function (suggestion) {
+          const targets = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
+            return Number.isInteger(number) && number >= 1;
+          });
+          return suggestion.clientState !== "APPLIED" && deepSplitSuggestionAvailable(targets);
+        });
+        applyAllButton.classList.toggle("hidden", running || !available);
+        applyAllButton.disabled = deepSplitBulkApplying;
+        applyAllButton.textContent = deepSplitBulkApplying ? "正在批量采纳..." : "一键采纳可用建议";
+      }
+      renderDeepSplitSuggestions(suggestions, running, job && job.status);
+    }
+
+    function renderDeepSplitSuggestions(suggestions, running, status) {
+      const container = $("deepSplitSuggestions");
+      if (!container) {
+        return;
+      }
+      container.innerHTML = "";
+      if (!suggestions.length) {
+        const empty = document.createElement("div");
+        empty.className = "deep-split-empty";
+        empty.textContent = running
+          ? "各批次完成后，结构化调整建议会陆续显示在这里。"
+          : (status === "COMPLETED" ? "未发现有充分依据且适合直接采纳的结构调整。" : "当前没有可展示的建议。");
+        container.appendChild(empty);
+        return;
+      }
+      suggestions.forEach(function (suggestion) {
+        const card = document.createElement("div");
+        card.className = "deep-split-card operation-" + textOr(suggestion.operation, "unknown").toLowerCase();
+        const targetNumbers = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
+          return Number.isInteger(number) && number >= 1;
+        });
+        const applied = suggestion.clientState === "APPLIED";
+        const unavailable = !applied && !deepSplitSuggestionAvailable(targetNumbers);
+        if (applied) {
+          card.classList.add("suggestion-applied");
+        } else if (unavailable) {
+          card.classList.add("suggestion-unavailable");
+        }
+        const delta = Number(suggestion.cfpAfter || 0) - Number(suggestion.cfpBefore || 0);
+        card.innerHTML =
+          "<div class=\"deep-split-card-title\"><b>" + escapeHtml(suggestion.title || deepSplitOperationText(suggestion.operation)) + "</b>"
+          + "<span>" + escapeHtml(deepSplitOperationText(suggestion.operation)) + " · 置信度 " + escapeHtml(formatConfidence(suggestion.confidence)) + "</span></div>"
+          + "<div class=\"deep-split-target-rows\"><strong>涉及原表行：</strong><span class=\"deep-split-target-links\"></span></div>"
+          + "<div><strong>判断原因：</strong>" + escapeHtml(suggestion.reason || "") + "</div>"
+          + "<div><strong>证据：</strong>" + escapeHtml(suggestion.evidence || "") + "</div>"
+          + "<div><strong>证据编号：</strong>" + escapeHtml((suggestion.sourceReferences || []).join("、")) + "</div>"
+          + "<div><strong>替换结果：</strong>" + escapeHtml(deepSplitReplacementSummary(suggestion.replacementRows || [])) + "</div>"
+          + "<div class=\"deep-split-cfp\"><strong>CFP：</strong>" + escapeHtml(formatCfp(suggestion.cfpBefore))
+          + " → " + escapeHtml(formatCfp(suggestion.cfpAfter)) + "（" + (delta >= 0 ? "+" : "") + escapeHtml(formatCfp(delta)) + "）</div>"
+          + (applied ? "<div><strong>状态：</strong>已采纳，已计入上方 CFP。</div>"
+            : (unavailable ? "<div><strong>状态：</strong>与已采纳建议涉及相同行，不能继续采纳。</div>" : ""));
+        const targetLinks = card.querySelector(".deep-split-target-links");
+        if (!targetNumbers.length) {
+          targetLinks.textContent = "-";
+        } else {
+          targetNumbers.forEach(function (number, numberIndex) {
+            if (numberIndex > 0) {
+              targetLinks.appendChild(document.createTextNode("、"));
+            }
+            const rowButton = document.createElement("button");
+            rowButton.type = "button";
+            rowButton.className = "deep-split-row-link";
+            rowButton.textContent = String(number);
+            rowButton.title = "定位到原表第 " + number + " 行";
+            rowButton.onclick = function () {
+              focusReviewRow(number);
+            };
+            targetLinks.appendChild(rowButton);
+          });
+        }
+        const actions = document.createElement("div");
+        actions.className = "deep-split-actions";
+        const applyButton = document.createElement("button");
+        applyButton.type = "button";
+        applyButton.className = "deep-split-apply";
+        applyButton.textContent = applied ? "已采纳" : (unavailable ? "与已采纳建议冲突" : "采纳本条并保存");
+        applyButton.disabled = running || deepSplitBulkApplying || applied || unavailable;
+        applyButton.onclick = function () {
+          applyDeepSplitSuggestion(suggestion);
+        };
+        actions.appendChild(applyButton);
+        card.appendChild(actions);
+        container.appendChild(card);
+      });
+    }
+
+    function focusReviewRow(rowNumber) {
+      const number = Number(rowNumber);
+      if (deepSplitRowsSnapshot && deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit))) {
+        showDialog("审核表已变化", "深度审校开始或上次采纳后，审核表又被手动修改。请重新执行 AI 深度审校。 ");
+        return;
+      }
+      const index = currentIndexForDeepSplitOriginalRow(number);
+      if (!Number.isInteger(number) || index < 0) {
+        showDialog("无法定位", "原表第 " + rowNumber + " 行已不存在，可能是审核表结构已经发生变化。");
+        return;
+      }
+      resetReviewFilters();
+      window.requestAnimationFrame(function () {
+        const row = document.getElementById("review-row-" + (index + 1));
+        if (!row) {
+          showDialog("无法定位", "未找到原表第 " + number + " 行，请重新加载审核表。");
+          return;
+        }
+        const tableWrap = row.closest(".table-wrap");
+        if (tableWrap) {
+          tableWrap.scrollLeft = 0;
+        }
+        document.querySelectorAll("#reviewTable tr.row-focus-highlight").forEach(function (highlighted) {
+          highlighted.classList.remove("row-focus-highlight");
+        });
+        row.classList.add("row-focus-highlight");
+        row.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        window.setTimeout(function () {
+          row.classList.remove("row-focus-highlight");
+        }, 2800);
+      });
+    }
+
+    async function applyDeepSplitSuggestion(suggestion) {
+      if (!suggestion || !(suggestion.replacementRows || []).length) {
+        showDialog("无法采纳", "该建议没有完整的替换行。");
+        return;
+      }
+      if (suggestion.clientState === "APPLIED") {
+        return;
+      }
+      if (deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit))) {
+        showDialog("审核表已变化", "深度审校开始或上次采纳后，审核表又被手动修改。为避免错套建议，请重新执行 AI 深度审校。");
+        return;
+      }
+      const numbers = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
+        return Number.isInteger(number) && number >= 1;
+      });
+      const targetIndexes = numbers.map(currentIndexForDeepSplitOriginalRow).filter(function (index) {
+        return index >= 0;
+      });
+      if (!numbers.length || targetIndexes.length !== numbers.length) {
+        showDialog("无法采纳", "该建议与已采纳建议涉及相同原表行，不能继续采纳。请重新执行 AI 深度审校获取新的建议。");
+        return;
+      }
+      const targets = {};
+      targetIndexes.forEach(function (index) { targets[index] = true; });
+      const insertAt = Math.min.apply(null, targetIndexes);
+      const replacements = suggestion.replacementRows.map(normalizeRow);
+      const nextRows = [];
+      const nextOrigins = [];
+      splitRows.forEach(function (row, index) {
+        if (index === insertAt) {
+          replacements.forEach(function (replacement) {
+            nextRows.push(replacement);
+            nextOrigins.push([]);
+          });
+        }
+        if (!targets[index]) {
+          nextRows.push(row);
+          nextOrigins.push(deepSplitRowOrigins[index] || []);
+        }
+      });
+      splitRows = nextRows;
+      deepSplitRowOrigins = nextOrigins;
+      selectedRows = {};
+      markAllValidationStale();
+      renderTable();
+      updateStats();
+      await withBusy(async function () {
+        setMessage("正在采纳深度审校建议并保存...");
+        await persistReviewAfterAiApply();
+      });
+      suggestion.clientState = "APPLIED";
+      deepSplitRowsSnapshot = JSON.stringify(splitRows.map(rowForSubmit));
+      renderDeepSplitJob(currentDeepSplitJob);
+      const suggestions = (currentDeepSplitJob && currentDeepSplitJob.suggestions) || [];
+      const appliedCount = suggestions.filter(function (item) { return item.clientState === "APPLIED"; }).length;
+      $("deepSplitStatus").textContent = "已采纳 " + appliedCount + "/" + suggestions.length
+        + " 条建议；上方 CFP 只统计已采纳结果";
+      setMessage("已采纳并保存第 " + appliedCount + " 条建议。其余不冲突建议仍可继续采纳；请重新执行规则初审。", "success");
+    }
+
+    function currentIndexForDeepSplitOriginalRow(rowNumber) {
+      const number = Number(rowNumber);
+      if (!Number.isInteger(number) || number < 1) {
+        return -1;
+      }
+      for (let index = 0; index < deepSplitRowOrigins.length; index++) {
+        if ((deepSplitRowOrigins[index] || []).indexOf(number) >= 0) {
+          return index;
+        }
+      }
+      return -1;
+    }
+
+    function deepSplitSuggestionAvailable(targetNumbers) {
+      return targetNumbers.length > 0 && targetNumbers.every(function (number) {
+        return currentIndexForDeepSplitOriginalRow(number) >= 0;
+      });
+    }
+
+    async function applyAllDeepSplitSuggestions() {
+      const suggestions = (currentDeepSplitJob && currentDeepSplitJob.suggestions) || [];
+      if (!suggestions.length || deepSplitBulkApplying) {
+        return;
+      }
+      if (deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit))) {
+        showDialog("审核表已变化", "深度审校开始或上次采纳后，审核表又被手动修改。请重新执行 AI 深度审校后再一键采纳。");
+        return;
+      }
+      const reservedRows = {};
+      const candidates = suggestions.filter(function (suggestion) {
+        const targets = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
+          return Number.isInteger(number) && number >= 1;
+        });
+        if (suggestion.clientState === "APPLIED" || !deepSplitSuggestionAvailable(targets)
+            || targets.some(function (number) { return reservedRows[number]; })) {
+          return false;
+        }
+        targets.forEach(function (number) { reservedRows[number] = true; });
+        return true;
+      });
+      if (!candidates.length) {
+        showDialog("没有可采纳建议", "当前建议均已采纳、已失效或与已采纳建议冲突。请重新执行 AI 深度审校获取新建议。");
+        return;
+      }
+
+      deepSplitBulkApplying = true;
+      renderDeepSplitJob(currentDeepSplitJob);
+      let applied = 0;
+      let failed = false;
+      try {
+        for (let index = 0; index < candidates.length; index++) {
+          const suggestion = candidates[index];
+          const targets = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
+            return Number.isInteger(number) && number >= 1;
+          });
+          if (!deepSplitSuggestionAvailable(targets)) {
+            continue;
+          }
+          setMessage("正在批量采纳 " + (index + 1) + "/" + candidates.length + " 条建议...");
+          try {
+            await applyDeepSplitSuggestion(suggestion);
+            if (suggestion.clientState === "APPLIED") {
+              applied++;
+            }
+          } catch (error) {
+            failed = true;
+            break;
+          }
+        }
+      } finally {
+        deepSplitBulkApplying = false;
+        renderDeepSplitJob(currentDeepSplitJob);
+      }
+      const skipped = candidates.length - applied;
+      const message = "已一键采纳 " + applied + " 条不冲突建议"
+        + (skipped ? "，跳过 " + skipped + " 条" : "")
+        + "；上方 CFP 已按已采纳结果更新，请重新执行规则初审。";
+      setMessage(message, failed ? "error" : "success");
+    }
+
+    function deepSplitStatusText(status) {
+      if (status === "QUEUED") return "排队中";
+      if (status === "RUNNING") return "分批审校中";
+      if (status === "COMPLETED") return "全部完成";
+      if (status === "PARTIAL") return "部分完成";
+      if (status === "FAILED") return "执行失败";
+      return "等待执行";
+    }
+
+    function deepSplitOperationText(operation) {
+      if (operation === "SPLIT_FUNCTION") return "拆分功能过程";
+      if (operation === "ADD_MISSING_MOVEMENT") return "补充数据移动";
+      if (operation === "MERGE_DUPLICATE") return "合并重复功能";
+      return "结构调整";
+    }
+
+    function deepSplitReplacementSummary(rows) {
+      const groups = {};
+      (rows || []).forEach(function (row) {
+        const process = textOr(row.functionProcess, "未命名功能");
+        if (!groups[process]) groups[process] = [];
+        groups[process].push(textOr(row.movementType, "?"));
+      });
+      return Object.keys(groups).map(function (process) {
+        return process + "（" + groups[process].join("-") + "）";
+      }).join("；");
+    }
+
     function buildValidationIssueMap(issues) {
       const map = {};
       (issues || []).forEach(function (issue) {
@@ -1407,6 +2041,7 @@
         setSplitMode("excel", true, false);
       }
       splitRows = (data.splitRows || []).map(normalizeRow);
+      deepSplitRowOrigins = [];
       if (splitRows.length > 0 && splitRows[0].projectName) {
         const select = $("projectName");
         const val = splitRows[0].projectName;
@@ -1446,7 +2081,7 @@
       if (!splitRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 16;
+        td.colSpan = 17;
         td.className = "empty";
         td.textContent = "暂无功能点拆分数据，请先完成 AI 拆分和 COSMIC 分析。";
         tr.appendChild(td);
@@ -1457,7 +2092,7 @@
       if (!visibleRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 16;
+        td.colSpan = 17;
         td.className = "empty";
         td.textContent = "没有符合筛选条件的数据。";
         tr.appendChild(td);
@@ -1470,8 +2105,11 @@
         const row = entry.row;
         const index = entry.index;
         const tr = document.createElement("tr");
+        tr.id = "review-row-" + (index + 1);
+        tr.dataset.rowNumber = String(index + 1);
         applyValidationRowState(tr, index);
         addRowSelectCell(tr, index);
+        addRowNumberCell(tr, index);
         addTextCell(tr, row, index, "level1Module");
         addTextCell(tr, row, index, "level2Module");
         addTextCell(tr, row, index, "level3Module");
@@ -1584,6 +2222,14 @@
       input.dataset.field = field;
       input.addEventListener("input", onCellChange);
       td.appendChild(input);
+      tr.appendChild(td);
+    }
+
+    function addRowNumberCell(tr, index) {
+      const td = document.createElement("td");
+      td.className = "row-number-cell";
+      td.textContent = String(index + 1);
+      td.title = "原表第 " + (index + 1) + " 行";
       tr.appendChild(td);
     }
 
@@ -1876,19 +2522,15 @@
       updateStats();
     }
 
-    function markValidationStale(index, keepIssue) {
-      if (validationIssuesByRow && validationIssuesByRow[index]) {
-        if (!keepIssue) {
-          delete validationIssuesByRow[index];
-        }
-        const status = $("ruleValidationStatus");
-        if (status) {
-          status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u521d\u5ba1";
-        }
-      }
+    function markValidationStale() {
+      invalidateRuleValidation("表格数据已修改，请重新执行规则初审。");
     }
 
     function markAllValidationStale() {
+      invalidateRuleValidation("表格行已调整，请重新执行规则初审。");
+    }
+
+    function invalidateRuleValidation(detailText) {
       validationIssuesByRow = {};
       lastValidationResult = null;
       lastAiValidationResult = null;
@@ -1896,9 +2538,17 @@
       if (status) {
         status.textContent = "\u6570\u636e\u5df2\u4fee\u6539\uff0c\u8bf7\u91cd\u65b0\u521d\u5ba1";
       }
+      const bar = $("ruleValidationBar");
+      if (bar) {
+        bar.style.width = "0%";
+      }
+      const summary = $("ruleValidationSummary");
+      if (summary) {
+        summary.innerHTML = "";
+      }
       const detail = $("ruleValidationDetail");
       if (detail) {
-        detail.textContent = "表格行已调整，请重新执行规则初审。";
+        detail.textContent = detailText;
       }
       renderAiValidationResult(null);
     }
@@ -2366,10 +3016,17 @@
     }
 
     async function loadExportedMaterialInfos() {
+      let archiveInfo = null;
+      try {
+        archiveInfo = await getStrictExportInfo("archive");
+      } catch (error) {
+        archiveInfo = null;
+      }
       return {
         excel: await getStrictExportInfo("excel"),
         business: await getStrictExportInfo("business"),
-        word: await getStrictExportInfo("word")
+        word: await getStrictExportInfo("word"),
+        archive: archiveInfo
       };
     }
 
@@ -2386,7 +3043,9 @@
       setExportStep("excel", "已导出", "done");
       setExportStep("business", "已导出", "done");
       setExportStep("word", "已导出", "done");
-      renderMaterialResult(exportedMaterialInfos.excel, exportedMaterialInfos.business, exportedMaterialInfos.word, true);
+      setExportStep("archive", exportedMaterialInfos.archive ? "已生成" : "未生成", exportedMaterialInfos.archive ? "done" : "pending");
+      renderMaterialResult(exportedMaterialInfos.excel, exportedMaterialInfos.business, exportedMaterialInfos.word,
+        exportedMaterialInfos.archive, true);
       $("export-dialog-close").disabled = false;
     }
 
@@ -2422,15 +3081,22 @@
           const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
           setExportStep("word", "已完成", "done");
 
-          renderMaterialResult(excelInfo, businessInfo, wordInfo);
+          setExportStep("archive", "进行中", "running");
+          setMessage("三个送审材料已导出，正在生成 ZIP 压缩包...");
+          const archiveResponse = await request("/api/projects/" + currentProjectId + "/export/archive", { method: "POST" });
+          const archiveInfo = archiveResponse.data || await getExportInfo("archive", "");
+          setExportStep("archive", "已完成", "done");
+
+          renderMaterialResult(excelInfo, businessInfo, wordInfo, archiveInfo);
           exportedMaterialInfos = {
             excel: excelInfo,
             business: businessInfo,
-            word: wordInfo
+            word: wordInfo,
+            archive: archiveInfo
           };
           setMaterialActionExported(true);
           $("outputPanel").classList.add("hidden");
-          setMessage("送审材料已导出。", "success");
+          setMessage("送审材料已导出并完成 ZIP 打包。", "success");
         } catch (error) {
           markRunningExportFailed();
           setMessage(error.message || "导出送审材料失败。", "error");
@@ -2442,7 +3108,7 @@
     }
 
     function markRunningExportFailed() {
-      ["excel", "business", "word"].some(function (step) {
+      ["excel", "business", "word", "archive"].some(function (step) {
         const row = $("export-step-" + step);
         if (row.classList.contains("running")) {
           setExportStep(step, "失败", "failed");
@@ -2461,16 +3127,17 @@
       }
     }
 
-    function renderMaterialResult(excelInfo, businessInfo, wordInfo, existing) {
+    function renderMaterialResult(excelInfo, businessInfo, wordInfo, archiveInfo, existing) {
       const result = $("export-material-result");
       result.innerHTML =
         "<div class=\"material-summary\">" +
         "<b>" + (existing ? "已导出的送审材料" : "材料所在路径") + "</b>" +
-        "<p>" + (existing ? "当前项目已生成附件1、附件2、附件3，可直接下载或打开所在目录。" : "已按功能点拆分表生成业务需求汇总表和需求说明书。") + "</p>" +
+        "<p>" + (existing ? "当前项目已生成附件1、附件2、附件3，可直接下载或打开所在目录。" : "已生成三份送审材料并完成 ZIP 打包。") + "</p>" +
         "</div>" +
         renderMaterialFile("功能点拆分表", "excel", excelInfo) +
         renderMaterialFile("业务需求汇总表", "business", businessInfo) +
-        renderMaterialFile("需求说明书", "word", wordInfo);
+        renderMaterialFile("需求说明书", "word", wordInfo) +
+        (archiveInfo ? renderMaterialFile("送审材料压缩包", "archive", archiveInfo) : "");
       result.classList.remove("hidden");
     }
 
