@@ -61,4 +61,58 @@ class AiExtractionServiceSectionTest {
         assertFalse(extracted.contains("流程图"));
         assertFalse(extracted.contains("调整因子"));
     }
+
+    @Test
+    void extractsRequirementDescriptionAfterOwnershipMetadata() throws Exception {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod("extractRequirementDetail", String.class);
+        method.setAccessible(true);
+
+        String text = "背景及目标\n"
+                + "这里是背景说明。\n"
+                + "需求细则\n"
+                + "归属系统\n"
+                + "家客终端管理平台\n"
+                + "需求描述\n"
+                + "赔付信息填报模块\n"
+                + "支持创建新赔付工单。\n"
+                + "功能界面\n"
+                + "这里是界面说明。";
+
+        String extracted = (String) method.invoke(service, text);
+
+        assertTrue(extracted.contains("赔付信息填报模块"));
+        assertTrue(extracted.contains("支持创建新赔付工单"));
+        assertFalse(extracted.contains("归属系统"));
+        assertFalse(extracted.contains("家客终端管理平台"));
+        assertFalse(extracted.contains("功能界面"));
+    }
+
+    @Test
+    void extractsStandardAttachmentFunctionRequirementSection() throws Exception {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod("extractRequirementDetail", String.class);
+        method.setAccessible(true);
+
+        String text = "背景及目标\n"
+                + "背景说明。\n"
+                + "需求归属系统\n"
+                + "家客运维系统\n"
+                + "功能需求\n"
+                + "一级需求模块标题\n"
+                + "二级需求模块标题\n"
+                + "功能性用户需求标题1(请注明本需求是：新增、优化、删除）\n"
+                + "支持创建新赔付工单并保存赔付记录。\n"
+                + "非功能需求\n"
+                + "性能要求。";
+
+        String extracted = (String) method.invoke(service, text);
+
+        assertTrue(extracted.contains("一级需求模块标题"));
+        assertTrue(extracted.contains("支持创建新赔付工单"));
+        assertFalse(extracted.contains("背景说明"));
+        assertFalse(extracted.contains("性能要求"));
+    }
 }

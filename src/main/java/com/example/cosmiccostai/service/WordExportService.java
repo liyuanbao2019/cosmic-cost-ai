@@ -53,8 +53,9 @@ import java.util.Set;
 public class WordExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-    private static final String SUBSECTION_HEADING_STYLE = "10";
     private static final String BODY_TEXT_STYLE = "2";
+    private static final String PROCESS_HEADING_STYLE = "10";
+    private static final String SUBSECTION_HEADING_STYLE = BODY_TEXT_STYLE;
 
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
@@ -247,10 +248,12 @@ public class WordExportService {
         Map<String, FunctionGroup> map = new LinkedHashMap<String, FunctionGroup>();
         for (FunctionSplitRow row : rows) {
             normalizeRow(row);
-            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f" + safe(row.getFunctionProcess());
+            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f"
+                    + safe(row.getLevel3Module()) + "\u001f" + safe(row.getFunctionProcess());
             FunctionGroup group = map.get(key);
             if (group == null) {
-                group = new FunctionGroup(row.getLevel1Module(), row.getLevel2Module(), row.getFunctionProcess(), row.getFunctionDescription());
+                group = new FunctionGroup(row.getLevel1Module(), row.getLevel2Module(), row.getLevel3Module(),
+                        row.getFunctionProcess(), row.getFunctionDescription());
                 map.put(key, group);
             }
             group.rows.add(row);
@@ -306,17 +309,28 @@ public class WordExportService {
 
         String lastLevel1 = null;
         String lastLevel2 = null;
+        String lastLevel3 = null;
         for (FunctionGroup group : groups) {
             if (StringUtils.hasText(group.level1) && !group.level1.equals(lastLevel1)) {
-                last = insertParagraphAfter(document, last, zh("\u529f\u80fd\u9700\u6c42\uff08") + group.level1 + zh("\uff09"), "5", true);
+                last = insertParagraphAfter(document, last, group.level1, "5", true);
                 lastLevel1 = group.level1;
                 lastLevel2 = null;
+                lastLevel3 = null;
             }
-            if (StringUtils.hasText(group.level2) && !group.level2.equals(lastLevel2)) {
+            if (shouldEmitModuleHeading(group.level2, group.level1) && !group.level2.equals(lastLevel2)) {
                 last = insertParagraphAfter(document, last, group.level2, "7", true);
                 lastLevel2 = group.level2;
+                lastLevel3 = null;
             }
-            last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), "9", true);
+            boolean hasLevel3Heading = shouldEmitModuleHeading(group.level3, group.level2)
+                    && shouldEmitModuleHeading(group.level3, group.level1)
+                    && !sameText(group.level3, group.functionProcess);
+            if (hasLevel3Heading && !group.level3.equals(lastLevel3)) {
+                last = insertParagraphAfter(document, last, group.level3, "9", true);
+                lastLevel3 = group.level3;
+            }
+            String processStyle = hasLevel3Heading ? PROCESS_HEADING_STYLE : "9";
+            last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), processStyle, true);
             last = insertParagraphAfter(document, last, zh("\u5173\u952e\u65f6\u5e8f\u56fe/\u4e1a\u52a1\u903b\u8f91\u56fe"), SUBSECTION_HEADING_STYLE, true);
             last = insertImageAfter(document, last, group);
             last = insertParagraphAfter(document, last, zh("\u672c\u65f6\u5e8f\u56fe\u6b65\u9aa4\u5982\u4e0b\uff1a"), SUBSECTION_HEADING_STYLE, true);
@@ -329,6 +343,14 @@ public class WordExportService {
             last = insertParagraphAfter(document, last, zh("\u529f\u80fd\u63cf\u8ff0"), SUBSECTION_HEADING_STYLE, true);
             last = insertBodyParagraphAfter(document, last, safe(group.description));
         }
+    }
+
+    private boolean shouldEmitModuleHeading(String value, String parentValue) {
+        return StringUtils.hasText(value) && !sameText(value, parentValue);
+    }
+
+    private boolean sameText(String left, String right) {
+        return safe(left).trim().equals(safe(right).trim());
     }
 
     private XWPFParagraph insertImageAfter(XWPFDocument document, XWPFParagraph anchor, FunctionGroup group) {
@@ -626,13 +648,15 @@ public class WordExportService {
     private static class FunctionGroup {
         private final String level1;
         private final String level2;
+        private final String level3;
         private final String functionProcess;
         private String description;
         private final List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
 
-        private FunctionGroup(String level1, String level2, String functionProcess, String description) {
+        private FunctionGroup(String level1, String level2, String level3, String functionProcess, String description) {
             this.level1 = level1;
             this.level2 = level2;
+            this.level3 = level3;
             this.functionProcess = functionProcess;
             this.description = description;
         }

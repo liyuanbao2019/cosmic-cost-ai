@@ -255,7 +255,7 @@ public class AiExtractionService {
         for (String rawLine : lines) {
             String line = rawLine == null ? "" : rawLine.trim();
             if (!collectingFunctionDescription) {
-                if ("功能描述".equals(normalizeSectionTitle(line))) {
+                if (isFunctionDescriptionSection(line)) {
                     collectingFunctionDescription = true;
                 }
                 continue;
@@ -289,7 +289,15 @@ public class AiExtractionService {
         return "需求内容".equals(normalized)
                 || "需求细则".equals(normalized)
                 || "业务功能".equals(normalized)
-                || "功能描述".equals(normalized);
+                || "功能需求".equals(normalized)
+                || "功能性需求".equals(normalized)
+                || isFunctionDescriptionSection(line);
+    }
+
+    private boolean isFunctionDescriptionSection(String line) {
+        String normalized = normalizeSectionTitle(line);
+        return "功能描述".equals(normalized)
+                || "需求描述".equals(normalized);
     }
 
     private boolean isSectionBoundary(String line) {
@@ -309,7 +317,6 @@ public class AiExtractionService {
                 || "建设目标".equals(normalized)
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
-                || "归属系统".equals(normalized)
                 || "功能界面".equals(normalized)
                 || "流程图".equals(normalized)
                 || "调整因子情况说明".equals(normalized)

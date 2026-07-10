@@ -641,12 +641,65 @@ button.flow-rule-config-btn:hover {
   flex: 0 0 280px;
 }
 
+.split-mode-field {
+  flex: 0 0 168px;
+  min-width: 168px;
+}
+
+#documentUploadField,
+#excelUploadField {
+  flex: 2 1 360px;
+  min-width: 320px;
+}
+
+.upload-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.upload-field-head label {
+  min-width: 0;
+}
+
+.template-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 2px 10px;
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+  background: #f0f9ff;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.template-download-link:hover {
+  border-color: var(--primary-light);
+  background: #e0f2fe;
+  color: var(--primary-dark);
+  box-shadow: 0 3px 10px rgba(8, 145, 178, 0.12);
+}
+
 .upload-field label span {
   display: block;
   margin-bottom: 5px;
   font-weight: 500;
   font-size: 12px;
   color: var(--secondary);
+}
+
+.upload-field .upload-field-head label span {
+  margin-bottom: 0;
 }
 
 .upload-field label em {
@@ -941,6 +994,19 @@ button.export {
 
 button.export:hover {
   box-shadow: 0 3px 10px rgba(217, 119, 6, 0.4);
+}
+
+button.material-view-btn {
+  border: 1px solid #99f6e4;
+  background: #f0fdfa;
+  color: #0f766e;
+  box-shadow: none;
+}
+
+button.material-view-btn:hover {
+  border-color: #5eead4;
+  background: #ccfbf1;
+  box-shadow: 0 3px 10px rgba(20, 184, 166, 0.14);
 }
 
 button.ghost {
@@ -2097,9 +2163,13 @@ tbody tr.validation-suggestion .cell-preview {
     gap: 12px;
   }
 
-  .project-select-field {
+  .project-select-field,
+  .split-mode-field,
+  #documentUploadField,
+  #excelUploadField {
     flex: none;
     width: 100%;
+    min-width: 0;
   }
 
   main {

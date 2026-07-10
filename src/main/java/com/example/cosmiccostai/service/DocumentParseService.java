@@ -3,6 +3,13 @@ package com.example.cosmiccostai.service;
 import com.example.cosmiccostai.common.BusinessException;
 import com.example.cosmiccostai.dto.ParseResponse;
 import com.example.cosmiccostai.model.ProjectMetadata;
+import org.apache.poi.EmptyFileException;
+import org.apache.poi.OldFileFormatException;
+import org.apache.poi.hwpf.HWPFDocument;
+import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.poifs.filesystem.FileMagic;
+import org.apache.poi.poifs.filesystem.OfficeXmlFileException;
+import org.apache.poi.poifs.filesystem.POIFSFileSystem;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
@@ -41,7 +48,7 @@ public class DocumentParseService {
             throw new BusinessException("Source file not found: " + sourceFile);
         }
 
-        ParsedDocument parsedDocument = parseDocx(sourceFile);
+        ParsedDocument parsedDocument = parseWordDocument(sourceFile);
         Path textPath = fileStorageService.resolveProjectDir(projectId).resolve("document-text.txt");
         try {
             Files.write(textPath, parsedDocument.getText().getBytes(StandardCharsets.UTF_8));
@@ -86,18 +93,36 @@ public class DocumentParseService {
         if (!StringUtils.hasText(metadata.getSourceFileName())) {
             throw new BusinessException("Source file name is required");
         }
-        if (!"docx".equalsIgnoreCase(metadata.getFileType())) {
-            throw new BusinessException("Only docx requirement files can be parsed");
+        if (!"docx".equalsIgnoreCase(metadata.getFileType()) && !"doc".equalsIgnoreCase(metadata.getFileType())) {
+            throw new BusinessException("Only doc or docx requirement files can be parsed");
         }
     }
 
-    private ParsedDocument parseDocx(Path sourceFile) {
+    private ParsedDocument parseWordDocument(Path sourceFile) {
+        try (InputStream inputStream = FileMagic.prepareToCheckMagic(Files.newInputStream(sourceFile))) {
+            FileMagic fileMagic = FileMagic.valueOf(inputStream);
+            if (FileMagic.OOXML.equals(fileMagic)) {
+                return parseDocx(inputStream, sourceFile);
+            }
+            if (FileMagic.OLE2.equals(fileMagic)) {
+                return parseDoc(inputStream, sourceFile);
+            }
+            throw new BusinessException("无法识别 Word 文件格式，请上传真正的 .doc 或 .docx 文件，不要仅手动修改文件后缀。");
+        } catch (BusinessException ex) {
+            throw ex;
+        } catch (EmptyFileException ex) {
+            throw new BusinessException("上传的 Word 文件为空，请重新选择文件。", ex);
+        } catch (IOException ex) {
+            throw new BusinessException("读取 Word 文件失败，请确认文件未损坏或未被其他程序占用。", ex);
+        }
+    }
+
+    private ParsedDocument parseDocx(InputStream inputStream, Path sourceFile) {
         StringBuilder text = new StringBuilder();
         int paragraphCount = 0;
         int tableCount = 0;
 
-        try (InputStream inputStream = Files.newInputStream(sourceFile);
-             XWPFDocument document = new XWPFDocument(inputStream)) {
+        try (XWPFDocument document = new XWPFDocument(inputStream)) {
             for (XWPFParagraph paragraph : document.getParagraphs()) {
                 String line = normalizeLine(paragraph.getText());
                 if (StringUtils.hasText(line)) {
@@ -127,10 +152,48 @@ public class DocumentParseService {
                 }
             }
         } catch (IOException ex) {
-            throw new BusinessException("Parse docx failed: " + sourceFile, ex);
+            throw new BusinessException("解析 docx 文件失败，请确认文件是由 Word/WPS 正常另存为的 .docx 文件。", ex);
         }
 
         return new ParsedDocument(text.toString().trim(), paragraphCount, tableCount);
+    }
+
+    private ParsedDocument parseDoc(InputStream inputStream, Path sourceFile) {
+        StringBuilder text = new StringBuilder();
+        int paragraphCount = 0;
+
+        try (POIFSFileSystem fileSystem = new POIFSFileSystem(inputStream);
+             HWPFDocument document = new HWPFDocument(fileSystem);
+             WordExtractor extractor = new WordExtractor(document)) {
+            String[] paragraphs = extractor.getParagraphText();
+            if (paragraphs != null) {
+                for (String paragraph : paragraphs) {
+                    String line = normalizeLine(paragraph);
+                    if (StringUtils.hasText(line)) {
+                        text.append(line).append(System.lineSeparator());
+                        paragraphCount++;
+                    }
+                }
+            }
+            if (!StringUtils.hasText(text.toString())) {
+                String bodyText = normalizeLine(extractor.getText());
+                if (StringUtils.hasText(bodyText)) {
+                    text.append(bodyText).append(System.lineSeparator());
+                    paragraphCount = 1;
+                }
+            }
+        } catch (OfficeXmlFileException ex) {
+            throw new BusinessException("文件内容是 docx 格式，请使用 .docx 后缀重新上传。", ex);
+        } catch (OldFileFormatException ex) {
+            throw new BusinessException("该 doc 文件版本过旧，暂不支持直接解析。请用 Word/WPS 打开后另存为 .docx 再上传。", ex);
+        } catch (IOException | RuntimeException ex) {
+            throw new BusinessException("解析 doc 文件失败，请用 Word/WPS 打开后另存为 .docx 再上传。", ex);
+        }
+
+        if (!StringUtils.hasText(text.toString())) {
+            throw new BusinessException("未从 doc 文件中读取到有效文本，请确认文档内容不是图片扫描件。");
+        }
+        return new ParsedDocument(text.toString().trim(), paragraphCount, 0);
     }
 
     private String normalizeLine(String text) {
@@ -196,7 +259,7 @@ public class DocumentParseService {
         for (String rawLine : lines) {
             String line = rawLine == null ? "" : rawLine.trim();
             if (!collectingFunctionDescription) {
-                if ("功能描述".equals(normalizeSectionTitle(line))) {
+                if (isFunctionDescriptionSection(line)) {
                     collectingFunctionDescription = true;
                 }
                 continue;
@@ -239,7 +302,6 @@ public class DocumentParseService {
                 || "建设目标".equals(normalized)
                 || "建设必要性".equals(normalized)
                 || "背景及目标".equals(normalized)
-                || "归属系统".equals(normalized)
                 || "功能界面".equals(normalized)
                 || "流程图".equals(normalized)
                 || "调整因子情况说明".equals(normalized)
@@ -260,7 +322,15 @@ public class DocumentParseService {
         return "需求内容".equals(normalized)
                 || "需求细则".equals(normalized)
                 || "业务功能".equals(normalized)
-                || "功能描述".equals(normalized);
+                || "功能需求".equals(normalized)
+                || "功能性需求".equals(normalized)
+                || isFunctionDescriptionSection(line);
+    }
+
+    private boolean isFunctionDescriptionSection(String line) {
+        String normalized = normalizeSectionTitle(line);
+        return "功能描述".equals(normalized)
+                || "需求描述".equals(normalized);
     }
 
     private String normalizeSectionTitle(String line) {

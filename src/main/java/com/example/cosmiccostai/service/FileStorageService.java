@@ -159,8 +159,8 @@ public class FileStorageService {
             throw new BusinessException("Uploaded file name is required");
         }
         String fileType = getExtension(originalFileName);
-        if (!"docx".equals(fileType)) {
-            throw new BusinessException("Only docx requirement files are supported");
+        if (!"docx".equals(fileType) && !"doc".equals(fileType)) {
+            throw new BusinessException("Only doc or docx requirement files are supported");
         }
     }
 

@@ -23,7 +23,7 @@
         </svg>
       </div>
       <h3 id="dialog-title" class="dialog-title">欢迎使用 COSMIC 软件造价 AI 工作台</h3>
-      <p id="dialog-message" class="dialog-message">请先上传需求文档（docx 或 pdf），然后点击「开始拆分」</p>
+      <p id="dialog-message" class="dialog-message">请先上传需求文档（doc 或 docx），然后点击「开始拆分」</p>
       <button class="dialog-btn" onclick="closeDialog()">知道了</button>
     </div>
   </div>
@@ -135,10 +135,15 @@
           </select>
         </div>
         <div id="documentUploadField" class="upload-field">
-          <label for="fileInput">
-            <span>需求文档 <em>（请上传需求文档（docx 或 pdf））</em></span>
-          </label>
-          <input id="fileInput" type="file" accept=".docx,.pdf">
+          <div class="upload-field-head">
+            <label for="fileInput">
+              <span>需求文档 <em>（请上传需求文档（doc 或 docx））</em></span>
+            </label>
+            <a class="template-download-link"
+               href="/templates/requirement-standard-template.docx"
+               download="需求说明书标准模板.docx">标准模板</a>
+          </div>
+          <input id="fileInput" type="file" accept=".doc,.docx">
         </div>
         <div id="excelUploadField" class="upload-field hidden">
           <label for="splitExcelInput">
@@ -328,7 +333,8 @@
         </div>
         <div class="review-view-tools">
           <button id="densityBtn" type="button" class="ghost" onclick="toggleReviewDensity()">紧凑视图</button>
-          <button type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
+          <button id="materialViewBtn" type="button" class="secondary material-view-btn hidden" onclick="showExportedMaterials()">查看送审材料</button>
+          <button id="materialExportBtn" type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
         </div>
       </div>
 
@@ -404,6 +410,7 @@
     let validationIssuesByRow = {};
     let lastValidationResult = null;
     let lastAiValidationResult = null;
+    let exportedMaterialInfos = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -451,6 +458,17 @@
       $("export-material-result").classList.add("hidden");
       $("export-material-result").innerHTML = "";
       $("export-dialog-close").disabled = false;
+    }
+
+    function setMaterialActionExported(exported) {
+      const viewButton = $("materialViewBtn");
+      const exportButton = $("materialExportBtn");
+      if (viewButton) {
+        viewButton.classList.toggle("hidden", !exported);
+      }
+      if (exportButton) {
+        exportButton.textContent = exported ? "重新导出送审材料" : "导出送审材料";
+      }
     }
 
     function setExportStep(step, text, state) {
@@ -821,7 +839,7 @@
       }
       const file = $("fileInput").files[0];
       if (!file) {
-        showDialog("请先上传需求文档", "请选择 docx 或 pdf 格式的需求文档，然后点击「开始拆分」");
+        showDialog("请先上传需求文档", "请选择 doc 或 docx 格式的需求文档，然后点击「开始拆分」");
         return;
       }
       await withBusy(async function () {
@@ -1372,6 +1390,7 @@
           renderRuleValidation(validationResponse.data || {});
         }
         markCurrentFlowComplete();
+        await refreshExportedMaterialsState();
         setMessage("\u5df2\u52a0\u8f7d\u9879\u76ee\u5ba1\u6838\u6570\u636e\uff0c\u53ef\u7ee7\u7eed\u7f16\u8f91\u3001\u89c4\u5219\u521d\u5ba1\u6216 AI \u590d\u6838\u3002", "success");
       });
     }
@@ -1407,6 +1426,7 @@
       renderTable();
       updateStats();
       markDone("review");
+      setMaterialActionExported(false);
     }
 
     function renderTable() {
@@ -2327,6 +2347,49 @@
       });
     }
 
+    async function refreshExportedMaterialsState() {
+      if (!currentProjectId) {
+        exportedMaterialInfos = null;
+        setMaterialActionExported(false);
+        return null;
+      }
+      try {
+        const infos = await loadExportedMaterialInfos();
+        exportedMaterialInfos = infos;
+        setMaterialActionExported(true);
+        return infos;
+      } catch (error) {
+        exportedMaterialInfos = null;
+        setMaterialActionExported(false);
+        return null;
+      }
+    }
+
+    async function loadExportedMaterialInfos() {
+      return {
+        excel: await getStrictExportInfo("excel"),
+        business: await getStrictExportInfo("business"),
+        word: await getStrictExportInfo("word")
+      };
+    }
+
+    async function getStrictExportInfo(fileType) {
+      const response = await request("/api/projects/" + currentProjectId + "/exports/" + fileType + "/info");
+      return response.data || {};
+    }
+
+    function showExportedMaterials() {
+      if (!exportedMaterialInfos) {
+        return;
+      }
+      openExportDialog();
+      setExportStep("excel", "已导出", "done");
+      setExportStep("business", "已导出", "done");
+      setExportStep("word", "已导出", "done");
+      renderMaterialResult(exportedMaterialInfos.excel, exportedMaterialInfos.business, exportedMaterialInfos.word, true);
+      $("export-dialog-close").disabled = false;
+    }
+
     async function exportReviewMaterials() {
       if (!currentProjectId || !splitRows.length) {
         showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
@@ -2360,6 +2423,12 @@
           setExportStep("word", "已完成", "done");
 
           renderMaterialResult(excelInfo, businessInfo, wordInfo);
+          exportedMaterialInfos = {
+            excel: excelInfo,
+            business: businessInfo,
+            word: wordInfo
+          };
+          setMaterialActionExported(true);
           $("outputPanel").classList.add("hidden");
           setMessage("送审材料已导出。", "success");
         } catch (error) {
@@ -2392,12 +2461,12 @@
       }
     }
 
-    function renderMaterialResult(excelInfo, businessInfo, wordInfo) {
+    function renderMaterialResult(excelInfo, businessInfo, wordInfo, existing) {
       const result = $("export-material-result");
       result.innerHTML =
         "<div class=\"material-summary\">" +
-        "<b>材料所在路径</b>" +
-        "<p>已按功能点拆分表生成业务需求汇总表和需求说明书。</p>" +
+        "<b>" + (existing ? "已导出的送审材料" : "材料所在路径") + "</b>" +
+        "<p>" + (existing ? "当前项目已生成附件1、附件2、附件3，可直接下载或打开所在目录。" : "已按功能点拆分表生成业务需求汇总表和需求说明书。") + "</p>" +
         "</div>" +
         renderMaterialFile("功能点拆分表", "excel", excelInfo) +
         renderMaterialFile("业务需求汇总表", "business", businessInfo) +
