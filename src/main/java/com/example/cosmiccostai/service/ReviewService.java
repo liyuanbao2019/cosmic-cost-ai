@@ -55,7 +55,7 @@ public class ReviewService {
         validateMetadata(metadata);
         List<FunctionSplitRow> rows = readOrCreateSplitRows(metadata);
         List<CosmicResult> results = toCosmicResults(rows);
-        return buildResponse(projectId, metadata.getStatus(), results, rows);
+        return buildResponse(metadata, results, rows);
     }
 
     public ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows) {
@@ -63,7 +63,7 @@ public class ReviewService {
     }
 
     public ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
-        return saveReview(projectId, rows, "REVIEWED", polishFunctionDescription);
+        return saveReview(projectId, rows, "REVIEWED", false);
     }
 
     public ReviewResponse importReview(String projectId, List<FunctionSplitRow> rows) {
@@ -71,7 +71,7 @@ public class ReviewService {
     }
 
     public ReviewResponse importReview(String projectId, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
-        return saveReview(projectId, rows, "EXCEL_IMPORTED", polishFunctionDescription);
+        return saveReview(projectId, rows, "EXCEL_IMPORTED", false);
     }
 
     private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status) {
@@ -102,7 +102,7 @@ public class ReviewService {
         fileStorageService.saveMetadata(metadata);
         log.info("Saved review rows. projectId={}, status={}, rows={}, elapsedMs={}",
                 projectId, status, rows.size(), System.currentTimeMillis() - startedAt);
-        return buildResponse(projectId, metadata.getStatus(), results, rows);
+        return buildResponse(metadata, results, rows);
     }
 
     private List<FunctionSplitRow> readOrCreateSplitRows(ProjectMetadata metadata) {
@@ -123,7 +123,7 @@ public class ReviewService {
         for (CosmicResult result : results) {
             rows.addAll(toSplitRows(metadata, result));
         }
-        normalizeRows(metadata, rows, true);
+        normalizeRows(metadata, rows, false);
         return rows;
     }
 
@@ -479,19 +479,40 @@ public class ReviewService {
         }
     }
 
-    private ReviewResponse buildResponse(String projectId, String status, List<CosmicResult> results, List<FunctionSplitRow> rows) {
+    private ReviewResponse buildResponse(ProjectMetadata metadata, List<CosmicResult> results, List<FunctionSplitRow> rows) {
         double totalCfp = 0;
         for (CosmicResult result : results) {
             totalCfp += result.getCfp();
         }
         ReviewResponse response = new ReviewResponse();
-        response.setProjectId(projectId);
+        response.setProjectId(metadata.getId());
         response.setFunctionCount(results.size());
         response.setTotalCfp(totalCfp);
-        response.setStatus(status);
+        response.setStatus(metadata.getStatus());
+        response.setSourceType(sourceType(metadata));
         response.setResults(results);
         response.setSplitRows(rows);
         return response;
+    }
+
+    private String sourceType(ProjectMetadata metadata) {
+        String status = safe(metadata.getStatus());
+        String fileType = safe(metadata.getFileType());
+        String storedPath = safe(metadata.getStoredFilePath());
+        String sourceFileName = safe(metadata.getSourceFileName());
+        if (status.startsWith("EXCEL")
+                || "xls".equals(fileType)
+                || "xlsx".equals(fileType)
+                || storedPath.contains("split-review")
+                || sourceFileName.endsWith(".xls")
+                || sourceFileName.endsWith(".xlsx")) {
+            return "EXCEL";
+        }
+        return "DOCUMENT";
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private String zh(String value) {

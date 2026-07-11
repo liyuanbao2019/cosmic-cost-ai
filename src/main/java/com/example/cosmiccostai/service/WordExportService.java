@@ -24,6 +24,7 @@ import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.xmlbeans.XmlCursor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -54,10 +55,10 @@ public class WordExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String BODY_TEXT_STYLE = "2";
-    private static final String PROCESS_HEADING_STYLE = "10";
     private static final String SUBSECTION_HEADING_STYLE = BODY_TEXT_STYLE;
 
     private final FileStorageService fileStorageService;
+    private final FunctionDescriptionAiService functionDescriptionAiService;
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
@@ -65,7 +66,16 @@ public class WordExportService {
     public WordExportService(FileStorageService fileStorageService,
                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
                              @Value("${cosmic.template.word-path:}") String configuredTemplatePath) {
+        this(fileStorageService, outputBaseDir, configuredTemplatePath, new FunctionDescriptionAiService());
+    }
+
+    @Autowired
+    public WordExportService(FileStorageService fileStorageService,
+                             @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
+                             @Value("${cosmic.template.word-path:}") String configuredTemplatePath,
+                             FunctionDescriptionAiService functionDescriptionAiService) {
         this.fileStorageService = fileStorageService;
+        this.functionDescriptionAiService = functionDescriptionAiService;
         this.objectMapper = new ObjectMapper();
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
@@ -78,6 +88,7 @@ public class WordExportService {
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> rows = readReviewedRows(metadata);
         List<FunctionGroup> groups = groupRows(rows);
+        applyExportFunctionDescriptions(metadata, groups);
         double totalCfp = calculateTotalCfp(results);
 
         Path projectOutputDir = outputBaseDir.resolve(projectId);
@@ -254,7 +265,7 @@ public class WordExportService {
             FunctionGroup group = map.get(key);
             if (group == null) {
                 group = new FunctionGroup(row.getLevel1Module(), row.getLevel2Module(), row.getLevel3Module(),
-                        row.getFunctionProcess(), row.getFunctionDescription());
+                        row.getFunctionProcess(), "");
                 map.put(key, group);
             }
             group.rows.add(row);
@@ -263,6 +274,42 @@ public class WordExportService {
             }
         }
         return new ArrayList<FunctionGroup>(map.values());
+    }
+
+    private void applyExportFunctionDescriptions(ProjectMetadata metadata, List<FunctionGroup> groups) {
+        if (!isExcelImportProject(metadata)) {
+            for (FunctionGroup group : groups) {
+                if (!StringUtils.hasText(group.description)) {
+                    group.description = buildGroupFunctionDescription(group.rows);
+                }
+            }
+            return;
+        }
+        Map<String, List<FunctionSplitRow>> rowsByGroup = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        Map<String, FunctionGroup> groupByKey = new LinkedHashMap<String, FunctionGroup>();
+        for (FunctionGroup group : groups) {
+            String key = groupKey(group.level1, group.level2, group.level3, group.functionProcess);
+            rowsByGroup.put(key, group.rows);
+            groupByKey.put(key, group);
+        }
+        Map<String, String> aiDescriptions = functionDescriptionAiService.generateDescriptions(rowsByGroup);
+        for (Map.Entry<String, FunctionGroup> entry : groupByKey.entrySet()) {
+            String description = aiDescriptions.get(entry.getKey());
+            if (!StringUtils.hasText(description)) {
+                description = buildGroupFunctionDescription(entry.getValue().rows);
+            }
+            entry.getValue().description = description;
+        }
+    }
+
+    private boolean isExcelImportProject(ProjectMetadata metadata) {
+        if (metadata == null) {
+            return false;
+        }
+        String fileType = safe(metadata.getFileType()).toLowerCase();
+        return "xls".equals(fileType) || "xlsx".equals(fileType)
+                || "EXCEL_UPLOADED".equalsIgnoreCase(metadata.getStatus())
+                || "EXCEL_IMPORTED".equalsIgnoreCase(metadata.getStatus());
     }
 
     private void normalizeRow(FunctionSplitRow row) {
@@ -324,14 +371,14 @@ public class WordExportService {
                 lastLevel3 = null;
             }
             boolean hasLevel3Heading = shouldEmitModuleHeading(group.level3, group.level2)
-                    && shouldEmitModuleHeading(group.level3, group.level1)
-                    && !sameText(group.level3, group.functionProcess);
+                    && shouldEmitModuleHeading(group.level3, group.level1);
             if (hasLevel3Heading && !group.level3.equals(lastLevel3)) {
-                last = insertParagraphAfter(document, last, group.level3, "9", true);
+                last = insertParagraphAfter(document, last, group.level3, "8", true);
                 lastLevel3 = group.level3;
             }
-            String processStyle = hasLevel3Heading ? PROCESS_HEADING_STYLE : "9";
-            last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), processStyle, true);
+            if (!hasLevel3Heading || !sameText(group.level3, group.functionProcess)) {
+                last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), BODY_TEXT_STYLE, true);
+            }
             last = insertParagraphAfter(document, last, zh("\u5173\u952e\u65f6\u5e8f\u56fe/\u4e1a\u52a1\u903b\u8f91\u56fe"), SUBSECTION_HEADING_STYLE, true);
             last = insertImageAfter(document, last, group);
             last = insertParagraphAfter(document, last, zh("\u672c\u65f6\u5e8f\u56fe\u6b65\u9aa4\u5982\u4e0b\uff1a"), SUBSECTION_HEADING_STYLE, true);
@@ -352,6 +399,74 @@ public class WordExportService {
 
     private boolean sameText(String left, String right) {
         return safe(left).trim().equals(safe(right).trim());
+    }
+
+    private String groupKey(String level1, String level2, String level3, String functionProcess) {
+        return safe(level1) + "\u001f" + safe(level2) + "\u001f" + safe(level3) + "\u001f" + safe(functionProcess);
+    }
+
+    private String buildGroupFunctionDescription(List<FunctionSplitRow> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return "";
+        }
+        FunctionSplitRow first = rows.get(0);
+        String process = safe(first.getFunctionProcess());
+        List<String> actions = new ArrayList<String>();
+        Set<String> dataGroups = new LinkedHashSet<String>();
+        Set<String> attributes = new LinkedHashSet<String>();
+        for (FunctionSplitRow row : rows) {
+            addUnique(actions, safe(row.getSubProcessDescription()));
+            addUnique(dataGroups, safe(row.getDataGroup()));
+            for (String attribute : splitAttributes(row.getDataAttributes())) {
+                addUnique(attributes, attribute);
+            }
+        }
+        StringBuilder builder = new StringBuilder();
+        builder.append(zh("\u672c\u529f\u80fd\u7528\u4e8e\u5b8c\u6210")).append(process).append(zh("\uff0c"));
+        builder.append(zh("\u7cfb\u7edf\u6309\u7167")).append(joinChinese(actions, zh("\u3001"))).append(zh("\u7684\u5904\u7406\u6d41\u7a0b"));
+        if (!dataGroups.isEmpty()) {
+            builder.append(zh("\uff0c\u56f4\u7ed5")).append(joinChinese(new ArrayList<String>(dataGroups), zh("\u3001"))).append(zh("\u7b49\u6570\u636e\u7ec4"));
+        }
+        if (!attributes.isEmpty()) {
+            builder.append(zh("\uff0c\u5904\u7406")).append(joinChinese(limit(new ArrayList<String>(attributes), 12), zh("\u3001"))).append(zh("\u7b49\u4e1a\u52a1\u5c5e\u6027"));
+        }
+        builder.append(zh("\uff0c\u5f62\u6210\u8be5\u529f\u80fd\u7684\u8f93\u5165\u3001\u8bfb\u53d6\u3001\u5199\u5165\u6216\u8f93\u51fa\u7ed3\u679c\u3002"));
+        return builder.toString();
+    }
+
+    private List<String> splitAttributes(String value) {
+        List<String> result = new ArrayList<String>();
+        String text = safe(value).replace('\uff0c', ',').replace('\u3001', ',').replace(';', ',').replace('\uff1b', ',');
+        for (String part : text.split(",")) {
+            addUnique(result, part.trim());
+        }
+        return result;
+    }
+
+    private List<String> limit(List<String> values, int max) {
+        if (values.size() <= max) {
+            return values;
+        }
+        return new ArrayList<String>(values.subList(0, max));
+    }
+
+    private void addUnique(List<String> values, String value) {
+        if (StringUtils.hasText(value) && !values.contains(value)) {
+            values.add(value);
+        }
+    }
+
+    private void addUnique(Set<String> values, String value) {
+        if (StringUtils.hasText(value)) {
+            values.add(value);
+        }
+    }
+
+    private String joinChinese(List<String> values, String delimiter) {
+        if (values == null || values.isEmpty()) {
+            return zh("\u4e1a\u52a1\u6570\u636e\u5904\u7406");
+        }
+        return String.join(delimiter, values);
     }
 
     private XWPFParagraph insertImageAfter(XWPFDocument document, XWPFParagraph anchor, FunctionGroup group) {

@@ -15,8 +15,17 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusinessException(BusinessException ex) {
-        log.warn("Business exception: {}", ex.getMessage(), ex);
+        if (isExportInfoProbeMiss(ex)) {
+            log.debug("Ignored export info probe miss: {}", ex.getMessage());
+        } else {
+            log.warn("Business exception: {}", ex.getMessage());
+        }
         return ResponseEntity.badRequest().body(ApiResponse.<Void>fail(ex.getMessage()));
+    }
+
+    private boolean isExportInfoProbeMiss(BusinessException ex) {
+        String message = ex.getMessage();
+        return message != null && message.endsWith(" has not been exported yet");
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)

@@ -51,13 +51,13 @@ public class ExcelReviewImportService {
     public ReviewResponse importSplitExcel(MultipartFile file, String projectName, boolean polishFunctionDescription) {
         String originalFilename = file == null ? "" : file.getOriginalFilename();
         long fileSize = file == null ? 0 : file.getSize();
-        log.info("Import split Excel started. file={}, size={} bytes, projectName={}, polishFunctionDescription={}",
+        log.info("Import split Excel started. file={}, size={} bytes, projectName={}, polishFunctionDescription={} (ignored; Word export generates descriptions)",
                 originalFilename, fileSize, projectName, polishFunctionDescription);
         ProjectMetadata metadata = fileStorageService.uploadSplitExcel(file, projectName);
         List<FunctionSplitRow> rows = readRows(metadata);
         log.info("Import split Excel parsed successfully. projectId={}, storedFile={}, rows={}",
                 metadata.getId(), metadata.getStoredFilePath(), rows.size());
-        return reviewService.importReview(metadata.getId(), rows, polishFunctionDescription);
+        return reviewService.importReview(metadata.getId(), rows, false);
     }
 
     private List<FunctionSplitRow> readRows(ProjectMetadata metadata) {

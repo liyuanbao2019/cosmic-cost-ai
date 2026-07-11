@@ -64,7 +64,7 @@ class ExcelReviewImportServiceTest {
     }
 
     @Test
-    void polishesFunctionDescriptionOnlyWhenRequested() throws Exception {
+    void ignoresFunctionDescriptionPolishRequestDuringImport() throws Exception {
         FileStorageService fileStorageService = new FileStorageService(tempDir.toString());
         TrackingFunctionDescriptionAiService aiService = new TrackingFunctionDescriptionAiService();
         ReviewService reviewService = new ReviewService(fileStorageService, aiService);
@@ -75,7 +75,7 @@ class ExcelReviewImportServiceTest {
 
         importService.importSplitExcel(file, "review-import-project", true);
 
-        assertEquals(1, aiService.callCount);
+        assertEquals(0, aiService.callCount);
     }
 
     private byte[] workbookBytes() throws Exception {

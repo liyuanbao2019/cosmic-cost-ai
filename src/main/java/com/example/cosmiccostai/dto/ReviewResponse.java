@@ -11,6 +11,7 @@ public class ReviewResponse {
     private int functionCount;
     private double totalCfp;
     private String status;
+    private String sourceType;
     private List<CosmicResult> results;
     private List<FunctionSplitRow> splitRows;
 
@@ -44,6 +45,14 @@ public class ReviewResponse {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getSourceType() {
+        return sourceType;
+    }
+
+    public void setSourceType(String sourceType) {
+        this.sourceType = sourceType;
     }
 
     public List<CosmicResult> getResults() {

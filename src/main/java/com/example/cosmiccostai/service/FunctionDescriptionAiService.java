@@ -24,6 +24,8 @@ import java.util.Map;
 public class FunctionDescriptionAiService {
 
     private static final Logger log = LoggerFactory.getLogger(FunctionDescriptionAiService.class);
+    private static final int MAX_GROUPS_PER_REQUEST = 20;
+    private static final int MAX_PROMPT_CHARS_PER_REQUEST = 12000;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -56,19 +58,48 @@ public class FunctionDescriptionAiService {
                     groups == null ? 0 : groups.size(), StringUtils.hasText(baseUrl), StringUtils.hasText(resolveApiKey()));
             return Collections.emptyMap();
         }
-        String prompt = buildPrompt(groups);
         long startedAt = System.currentTimeMillis();
-        log.info("AI function description generation started. groups={}, promptLength={}, model={}, baseUrl={}, timeoutSeconds={}, maxRetries={}",
-                groups.size(), prompt.length(), model, baseUrl, timeoutSeconds, maxRetries);
+        log.info("AI function description generation started. groups={}, model={}, baseUrl={}, timeoutSeconds={}, maxRetries={}, maxGroupsPerRequest={}, maxPromptChars={}",
+                groups.size(), model, baseUrl, timeoutSeconds, maxRetries, MAX_GROUPS_PER_REQUEST, MAX_PROMPT_CHARS_PER_REQUEST);
+        Map<String, String> result = new LinkedHashMap<String, String>();
+        Map<String, List<FunctionSplitRow>> batch = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        for (Map.Entry<String, List<FunctionSplitRow>> entry : groups.entrySet()) {
+            if (!batch.isEmpty() && shouldFlushBatch(batch, entry)) {
+                result.putAll(generateDescriptionsBatch(batch));
+                batch.clear();
+            }
+            batch.put(entry.getKey(), entry.getValue());
+        }
+        if (!batch.isEmpty()) {
+            result.putAll(generateDescriptionsBatch(batch));
+        }
+        log.info("AI function description generation completed. groups={}, generated={}, elapsedMs={}",
+                groups.size(), result.size(), System.currentTimeMillis() - startedAt);
+        return result;
+    }
+
+    private boolean shouldFlushBatch(Map<String, List<FunctionSplitRow>> batch, Map.Entry<String, List<FunctionSplitRow>> next) {
+        if (batch.size() >= MAX_GROUPS_PER_REQUEST) {
+            return true;
+        }
+        Map<String, List<FunctionSplitRow>> probe = new LinkedHashMap<String, List<FunctionSplitRow>>(batch);
+        probe.put(next.getKey(), next.getValue());
+        return buildPrompt(probe).length() > MAX_PROMPT_CHARS_PER_REQUEST;
+    }
+
+    private Map<String, String> generateDescriptionsBatch(Map<String, List<FunctionSplitRow>> batch) {
+        String prompt = buildPrompt(batch);
+        long startedAt = System.currentTimeMillis();
+        log.info("AI function description batch started. groups={}, promptLength={}", batch.size(), prompt.length());
         try {
             String aiText = callAi(prompt);
             Map<String, String> descriptions = parseDescriptions(aiText);
-            log.info("AI function description generation completed. groups={}, generated={}, responseLength={}, elapsedMs={}",
-                    groups.size(), descriptions.size(), aiText == null ? 0 : aiText.length(), System.currentTimeMillis() - startedAt);
+            log.info("AI function description batch completed. groups={}, generated={}, responseLength={}, elapsedMs={}",
+                    batch.size(), descriptions.size(), aiText == null ? 0 : aiText.length(), System.currentTimeMillis() - startedAt);
             return descriptions;
         } catch (RuntimeException ex) {
-            log.warn("AI function description generation failed, fallback to local description. groups={}, promptLength={}, elapsedMs={}",
-                    groups.size(), prompt.length(), System.currentTimeMillis() - startedAt, ex);
+            log.warn("AI function description batch failed, fallback to local description. groups={}, promptLength={}, elapsedMs={}",
+                    batch.size(), prompt.length(), System.currentTimeMillis() - startedAt, ex);
             return Collections.emptyMap();
         }
     }

@@ -154,10 +154,6 @@
             <span>已拆分 Excel <em>（按附件3功能点拆分表导入）</em></span>
           </label>
           <input id="splitExcelInput" type="file" accept=".xlsx,.xls">
-          <label class="excel-polish-toggle" title="默认不调用 AI，保持 Excel 中的功能描述原文；勾选后会按功能过程分组调用 AI 润色功能描述，可能耗时较久。">
-            <input id="polishFunctionDescriptionInput" type="checkbox">
-            <span>AI 润色功能描述</span>
-          </label>
         </div>
         <div class="actions">
           <button id="runBtn" type="button" onclick="startSplit()">开始拆分</button>
@@ -517,6 +513,7 @@
     let reviewDensity = "comfortable";
     let cellEditorState = null;
     let splitMode = "document";
+    let currentProjectSourceType = "";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
     let lastAiValidationResult = null;
@@ -600,7 +597,19 @@
     }
 
     function onSplitModeChange() {
-      setSplitMode($("splitMode").value || "document", false, true);
+      const mode = $("splitMode").value || "document";
+      currentProjectSourceType = mode === "excel" ? "EXCEL" : "DOCUMENT";
+      setSplitMode(mode, false, true);
+    }
+
+    function rememberProjectSourceType(sourceType) {
+      if (sourceType === "EXCEL" || sourceType === "DOCUMENT") {
+        currentProjectSourceType = sourceType;
+      }
+    }
+
+    function isCurrentProjectExcelMode() {
+      return splitMode === "excel" || currentProjectSourceType === "EXCEL";
     }
 
     function setSplitMode(mode, keepFiles, resetFlow) {
@@ -630,7 +639,7 @@
     }
 
     function updateReviewStageGuide() {
-      const excelMode = splitMode === "excel";
+      const excelMode = isCurrentProjectExcelMode();
       if ($("reviewStageSubtitle")) {
         $("reviewStageSubtitle").textContent = excelMode
           ? "导入已有表格 → 再查基础错误 → 最后复核表格结构"
@@ -643,7 +652,7 @@
       }
       if ($("stageAiSplitText")) {
         $("stageAiSplitText").textContent = excelMode
-          ? "系统直接读取你上传的功能点拆分表，保留已有行和字段作为审核基础；默认不会再用 AI 改写功能描述。"
+          ? "系统直接读取你上传的功能点拆分表，保留已有行和字段作为审核基础；功能描述会在导出需求说明书时按功能过程汇总生成。"
           : "把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。";
       }
       if ($("stageDeepReviewTitle")) {
@@ -957,6 +966,7 @@
       selectedRows = {};
       reviewDensity = "comfortable";
       cellEditorState = null;
+      currentProjectSourceType = "";
       validationIssuesByRow = {};
       lastValidationResult = null;
       currentDeepSplitJob = null;
@@ -1283,7 +1293,6 @@
           const formData = new FormData();
           formData.append("file", file);
           formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
-          formData.append("polishFunctionDescription", $("polishFunctionDescriptionInput") && $("polishFunctionDescriptionInput").checked ? "true" : "false");
           setMessage("正在导入 Excel，并解析到审核界面...");
           const imported = await request("/api/files/upload-split-excel", { method: "POST", body: formData });
           currentProjectId = imported.data.projectId;
@@ -1298,6 +1307,9 @@
           markDone("cosmic");
           await loadReview();
           markActive("precheck");
+          window.setTimeout(function () {
+            validateReviewRules();
+          }, 0);
           setMessage("已导入 Excel，请点击“规则初审”检查风险项，再人工审核导出。", "success");
         });
       } catch (error) {
@@ -1805,6 +1817,10 @@
       return status === "COMPLETED" || status === "PARTIAL" || status === "FAILED";
     }
 
+    function deepSplitRowsChanged() {
+      return !!(deepSplitRowsSnapshot && deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit)));
+    }
+
     function renderDeepSplitJob(job) {
       const panel = $("deepSplitPanel");
       if (!panel) {
@@ -1826,7 +1842,12 @@
       $("deepSplitMeta").textContent = "批次：" + completed + "/" + total
         + (failed ? "，失败 " + failed : "") + "；依据：" + sourceLabel
         + "；模型：" + textOr(job && job.model, "-");
-      const warnings = (job && job.warnings) || [];
+      const warnings = ((job && job.warnings) || []).slice();
+      if (deepSplitRowsChanged()) {
+        warnings.unshift("当前审核表已被手动修改：本次深度审校建议仍可查看和定位，但不能采纳或一键全部采纳；请重新执行 AI 深度审校获取可采纳建议。");
+      } else if (running) {
+        warnings.unshift("深度审校运行期间请尽量不要手动修改下方审核表；修改后，本次建议会按旧表失效，不能再采纳。");
+      }
       $("deepSplitWarnings").innerHTML = warnings.map(function (warning) {
         return "<div>• " + escapeHtml(warning) + "</div>";
       }).join("");
@@ -1837,6 +1858,7 @@
       const suggestions = (job && job.suggestions) || [];
       const applyAllButton = $("deepSplitApplyAllBtn");
       if (applyAllButton) {
+        const stale = deepSplitRowsChanged();
         const available = suggestions.some(function (suggestion) {
           const targets = (suggestion.targetRowNumbers || []).map(Number).filter(function (number) {
             return Number.isInteger(number) && number >= 1;
@@ -1844,7 +1866,7 @@
           return suggestion.clientState !== "APPLIED" && deepSplitSuggestionAvailable(targets);
         });
         applyAllButton.classList.toggle("hidden", running || !available);
-        applyAllButton.disabled = deepSplitBulkApplying;
+        applyAllButton.disabled = deepSplitBulkApplying || stale;
         applyAllButton.textContent = deepSplitBulkApplying ? "正在批量采纳..." : "一键采纳可用建议";
       }
       renderDeepSplitSuggestions(suggestions, running, job && job.status);
@@ -1872,7 +1894,7 @@
           return Number.isInteger(number) && number >= 1;
         });
         const applied = suggestion.clientState === "APPLIED";
-        const unavailable = !applied && !deepSplitSuggestionAvailable(targetNumbers);
+        const unavailable = !applied && (deepSplitRowsChanged() || !deepSplitSuggestionAvailable(targetNumbers));
         if (applied) {
           card.classList.add("suggestion-applied");
         } else if (unavailable) {
@@ -1928,14 +1950,13 @@
 
     function focusReviewRow(rowNumber) {
       const number = Number(rowNumber);
-      if (deepSplitRowsSnapshot && deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit))) {
-        showDialog("审核表已变化", "深度审校开始或上次采纳后，审核表又被手动修改。请重新执行 AI 深度审校。 ");
-        return;
-      }
       const index = currentIndexForDeepSplitOriginalRow(number);
       if (!Number.isInteger(number) || index < 0) {
         showDialog("无法定位", "原表第 " + rowNumber + " 行已不存在，可能是审核表结构已经发生变化。");
         return;
+      }
+      if (deepSplitRowsChanged()) {
+        setMessage("审核表已被手动修改：当前仅定位查看，不能采纳本次深度审校建议。", "error");
       }
       resetReviewFilters();
       window.requestAnimationFrame(function () {
@@ -2220,8 +2241,11 @@
     async function loadReview() {
       const response = await request("/api/projects/" + currentProjectId + "/review");
       const data = response.data || {};
-      if (data.status === "EXCEL_IMPORTED") {
+      rememberProjectSourceType(data.sourceType);
+      if (isCurrentProjectExcelMode() || data.status === "EXCEL_IMPORTED") {
         setSplitMode("excel", true, false);
+      } else if (data.sourceType === "DOCUMENT") {
+        setSplitMode("document", true, false);
       }
       splitRows = (data.splitRows || []).map(normalizeRow);
       deepSplitRowOrigins = [];
@@ -3261,6 +3285,9 @@
 
           setExportStep("word", "进行中", "running");
           setMessage("正在按功能点拆分表生成需求说明书...");
+          if (isCurrentProjectExcelMode()) {
+            setMessage("正在生成需求说明书：Excel 上传模式需要调用大模型按功能过程汇总生成功能描述，耗时会比普通导出更长，请耐心等待...");
+          }
           const wordResponse = await request("/api/projects/" + currentProjectId + "/export/word", { method: "POST" });
           const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
           setExportStep("word", "已完成", "done");

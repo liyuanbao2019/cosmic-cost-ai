@@ -45,6 +45,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class DeepSplitAiService {
@@ -76,6 +84,7 @@ public class DeepSplitAiService {
     private final int chunkPromptChars;
     private final int evidenceChars;
     private final int maxRequestRows;
+    private final int chunkParallelism;
 
     @Autowired
     public DeepSplitAiService(FileStorageService fileStorageService,
@@ -87,7 +96,8 @@ public class DeepSplitAiService {
                               @Value("${cosmic.ai.max-retries:2}") int maxRetries,
                               @Value("${cosmic.ai.deep-split.chunk-prompt-chars:9000}") int chunkPromptChars,
                               @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars,
-                              @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows) {
+                              @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows,
+                              @Value("${cosmic.ai.deep-split.chunk-parallelism:2}") int chunkParallelism) {
         this.fileStorageService = fileStorageService;
         this.taskExecutor = taskExecutor;
         this.baseUrl = baseUrl;
@@ -98,6 +108,7 @@ public class DeepSplitAiService {
         this.chunkPromptChars = Math.max(6000, chunkPromptChars);
         this.evidenceChars = Math.max(2000, evidenceChars);
         this.maxRequestRows = Math.max(MIN_REQUEST_ROWS_LIMIT, maxRequestRows);
+        this.chunkParallelism = Math.max(1, chunkParallelism);
         this.objectMapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
                 .enable(SerializationFeature.INDENT_OUTPUT);
@@ -116,8 +127,8 @@ public class DeepSplitAiService {
         if (!StringUtils.hasText(resolveApiKey())) {
             throw new BusinessException("AI api key is not configured. Please set OPENAI_API_KEY.");
         }
-        log.info("AI deep split start requested. projectId={}, rows={}, maxRequestRows={}, model={}, chunkPromptChars={}, evidenceChars={}, timeoutSeconds={}",
-                projectId, rows.size(), maxRequestRows, model, chunkPromptChars, evidenceChars, chunkTimeoutSeconds);
+        log.info("AI deep split start requested. projectId={}, rows={}, maxRequestRows={}, model={}, chunkPromptChars={}, evidenceChars={}, timeoutSeconds={}, chunkParallelism={}",
+                projectId, rows.size(), maxRequestRows, model, chunkPromptChars, evidenceChars, chunkTimeoutSeconds, chunkParallelism);
 
         String jobId = "DS" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.ROOT);
@@ -212,37 +223,128 @@ public class DeepSplitAiService {
 
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         List<EvidenceBlock> evidenceBlocks = readEvidenceBlocks(resolveRequirementSource(metadata));
+        List<DeepSplitChunk> pendingChunks = new ArrayList<DeepSplitChunk>();
         for (DeepSplitChunk chunk : state.getChunks()) {
-            if (!"PENDING".equals(chunk.getStatus())) {
-                continue;
+            if ("PENDING".equals(chunk.getStatus())) {
+                pendingChunks.add(chunk);
             }
-            try {
-                chunk.setStatus("RUNNING");
-                chunk.setAttempts(chunk.getAttempts() + 1);
-                state.setUpdatedAt(now());
-                saveState(state);
+        }
+        int parallelism = Math.min(chunkParallelism, pendingChunks.size());
+        log.info("Deep split job chunks prepared. projectId={}, jobId={}, pendingChunks={}, chunkParallelism={}",
+                projectId, jobId, pendingChunks.size(), parallelism);
+        if (parallelism <= 1) {
+            for (DeepSplitChunk chunk : pendingChunks) {
+                processChunk(state, evidenceBlocks, chunk);
+            }
+        } else {
+            runChunksInParallel(state, evidenceBlocks, pendingChunks, parallelism);
+        }
+        synchronized (state) {
+            finishState(state);
+            saveState(state);
+        }
+    }
 
-                List<EvidenceBlock> selectedEvidence = selectEvidenceBlocks(
-                        evidenceBlocks, state.getOriginalRows(), chunk.getRowNumbers());
-                String prompt = buildPrompt(state, chunk, selectedEvidence);
-                String aiText = callAiWithRetries(projectId, jobId, chunk, prompt, selectedEvidence.size());
-                List<DeepSplitSuggestion> suggestions = parseSuggestions(aiText);
-                List<DeepSplitSuggestion> accepted = normalizeSuggestions(state, chunk, selectedEvidence, suggestions);
+    private void runChunksInParallel(final DeepSplitJobState state,
+                                     final List<EvidenceBlock> evidenceBlocks,
+                                     List<DeepSplitChunk> pendingChunks,
+                                     int parallelism) {
+        ExecutorService chunkExecutor = Executors.newFixedThreadPool(parallelism, new ThreadFactory() {
+            private final AtomicInteger counter = new AtomicInteger(1);
+
+            @Override
+            public Thread newThread(Runnable runnable) {
+                Thread thread = new Thread(runnable);
+                thread.setName("deep-split-chunk-" + state.getJobId() + "-" + counter.getAndIncrement());
+                thread.setDaemon(true);
+                return thread;
+            }
+        });
+        List<Future<Void>> futures = new ArrayList<Future<Void>>();
+        for (final DeepSplitChunk chunk : pendingChunks) {
+            futures.add(chunkExecutor.submit(new Callable<Void>() {
+                @Override
+                public Void call() {
+                    processChunk(state, evidenceBlocks, chunk);
+                    return null;
+                }
+            }));
+        }
+        chunkExecutor.shutdown();
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                markPendingChunksFailed(state, pendingChunks, "AI 深度审校任务被中断，请重试失败批次。");
+                break;
+            } catch (ExecutionException ex) {
+                log.warn("Deep split chunk worker crashed, projectId={}, jobId={}",
+                        state.getProjectId(), state.getJobId(), ex);
+            }
+        }
+        try {
+            if (!chunkExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                chunkExecutor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            chunkExecutor.shutdownNow();
+            markPendingChunksFailed(state, pendingChunks, "AI 深度审校任务被中断，请重试失败批次。");
+        }
+    }
+
+    private void processChunk(DeepSplitJobState state,
+                              List<EvidenceBlock> evidenceBlocks,
+                              DeepSplitChunk chunk) {
+        synchronized (state) {
+            if (!"PENDING".equals(chunk.getStatus())) {
+                return;
+            }
+            chunk.setStatus("RUNNING");
+            chunk.setAttempts(chunk.getAttempts() + 1);
+            state.setUpdatedAt(now());
+            saveState(state);
+        }
+        try {
+            List<EvidenceBlock> selectedEvidence = selectEvidenceBlocks(
+                    evidenceBlocks, state.getOriginalRows(), chunk.getRowNumbers());
+            String prompt = buildPrompt(state, chunk, selectedEvidence);
+            String aiText = callAiWithRetries(state.getProjectId(), state.getJobId(),
+                    chunk, prompt, selectedEvidence.size());
+            List<DeepSplitSuggestion> suggestions = parseSuggestions(aiText);
+            List<DeepSplitSuggestion> accepted = normalizeSuggestions(state, chunk, selectedEvidence, suggestions);
+            synchronized (state) {
                 mergeSuggestions(state.getSuggestions(), accepted);
                 chunk.setSuggestionCount(accepted.size());
                 chunk.setStatus("COMPLETED");
                 chunk.setError("");
-            } catch (RuntimeException ex) {
+                state.setUpdatedAt(now());
+                saveState(state);
+            }
+        } catch (RuntimeException ex) {
+            synchronized (state) {
                 chunk.setStatus("FAILED");
                 chunk.setError(userFacingChunkError(ex));
-                log.warn("Deep split chunk failed, projectId={}, jobId={}, chunkId={}",
-                        projectId, jobId, chunk.getId(), ex);
+                state.setUpdatedAt(now());
+                saveState(state);
+            }
+            log.warn("Deep split chunk failed, projectId={}, jobId={}, chunkId={}",
+                    state.getProjectId(), state.getJobId(), chunk.getId(), ex);
+        }
+    }
+
+    private void markPendingChunksFailed(DeepSplitJobState state, List<DeepSplitChunk> chunks, String message) {
+        synchronized (state) {
+            for (DeepSplitChunk chunk : chunks) {
+                if ("PENDING".equals(chunk.getStatus()) || "RUNNING".equals(chunk.getStatus())) {
+                    chunk.setStatus("FAILED");
+                    chunk.setError(message);
+                }
             }
             state.setUpdatedAt(now());
             saveState(state);
         }
-        finishState(state);
-        saveState(state);
     }
 
     List<DeepSplitChunk> buildChunks(List<FunctionSplitRow> rows) {
