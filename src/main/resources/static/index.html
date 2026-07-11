@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260710-archive-row-1">
+  <link rel="stylesheet" href="/app.css?v=20260711-excel-flow-label-1">
 </head>
 
 <body>
@@ -154,6 +154,10 @@
             <span>已拆分 Excel <em>（按附件3功能点拆分表导入）</em></span>
           </label>
           <input id="splitExcelInput" type="file" accept=".xlsx,.xls">
+          <label class="excel-polish-toggle" title="默认不调用 AI，保持 Excel 中的功能描述原文；勾选后会按功能过程分组调用 AI 润色功能描述，可能耗时较久。">
+            <input id="polishFunctionDescriptionInput" type="checkbox">
+            <span>AI 润色功能描述</span>
+          </label>
         </div>
         <div class="actions">
           <button id="runBtn" type="button" onclick="startSplit()">开始拆分</button>
@@ -237,7 +241,7 @@
                 </svg>
               </div>
             </div>
-            <span class="step-label">COSMIC</span>
+            <span id="stepCosmicLabel" class="step-label">COSMIC</span>
           </div>
           <div class="flow-step-wrap">
             <div id="step-precheck" class="flow-step" onclick="handleStepClick('precheck')">
@@ -272,6 +276,22 @@
       </div>
     </section>
 
+    <section id="chapterSelectionPanel" class="panel chapter-selection-panel hidden">
+      <div class="chapter-selection-toolbar">
+        <div class="chapter-selection-title">
+          <h2>选择送给 AI 的章节</h2>
+          <span id="chapterSelectionStats">-</span>
+        </div>
+        <div class="chapter-selection-actions">
+          <button type="button" class="ghost" onclick="selectRecommendedChapters()">恢复推荐</button>
+          <button type="button" class="ghost" onclick="toggleAllChapters(true)">全选</button>
+          <button type="button" class="ghost" onclick="toggleAllChapters(false)">清空</button>
+          <button id="applyChapterSelectionBtn" type="button" onclick="applyChapterSelection()">应用章节选择</button>
+        </div>
+      </div>
+      <div id="chapterSelectionList" class="chapter-selection-list"></div>
+    </section>
+
     <section id="parsePanel" class="panel parse-editor-panel hidden">
       <div class="parse-editor-header">
         <div class="parse-editor-intro">
@@ -299,7 +319,7 @@
           <span id="requirementCoverageSummary" class="coverage-summary"></span>
         </div>
       </div>
-      <p class="coverage-intro">系统会把原始 Word 识别到的业务功能模块，与实际送给 AI 的需求文本逐项比对。缺失模块必须先补入，才能开始 AI 拆分。</p>
+      <p class="coverage-intro">系统从所选业务章节识别功能模块，并与上方实际 AI 输入逐项比对；这里展示的是模块覆盖情况，不是另一份解析内容。</p>
       <div class="coverage-table-wrap">
         <table class="coverage-table">
           <thead><tr><th>处理</th><th>原文功能模块</th><th>原文内容</th><th>AI 输入状态</th></tr></thead>
@@ -327,14 +347,14 @@
       <details class="review-stage-guide" open>
         <summary>
           <span>三个拆分环节，分别在做什么？</span>
-          <small>先出第一版 → 再查基础错误 → 最后对照原文复盘</small>
+          <small id="reviewStageSubtitle">先出第一版 → 再查基础错误 → 最后对照原文复盘</small>
         </summary>
         <div class="review-stage-grid">
           <article>
             <span class="review-stage-index">1</span>
             <div>
-              <b>AI 拆分：先把 Word 变成第一版表格</b>
-              <p>把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
+              <b id="stageAiSplitTitle">AI 拆分：先把 Word 变成第一版表格</b>
+              <p id="stageAiSplitText">把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
             </div>
           </article>
           <article>
@@ -347,13 +367,13 @@
           <article class="deep-review-stage">
             <span class="review-stage-index">3</span>
             <div>
-              <b>AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
-              <p>把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
+              <b id="stageDeepReviewTitle">AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
+              <p id="stageDeepReviewText">把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
             </div>
           </article>
         </div>
         <div class="review-stage-note">
-          <b>一句话区分：</b>AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。
+          <b>一句话区分：</b><span id="reviewStageNoteText">AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。</span>
           规则初审显示“无问题”，不等于没有漏拆或错拆。
         </div>
       </details>
@@ -506,6 +526,7 @@
     let deepSplitRowOrigins = [];
     let deepSplitBulkApplying = false;
     let requirementCoverageData = null;
+    let documentChapterSelectionData = null;
     let exportedMaterialInfos = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
@@ -589,6 +610,14 @@
       }
       $("documentUploadField").classList.toggle("hidden", splitMode !== "document");
       $("excelUploadField").classList.toggle("hidden", splitMode !== "excel");
+      if ($("stepCosmicLabel")) {
+        $("stepCosmicLabel").textContent = splitMode === "excel" ? "解析功能拆分表" : "COSMIC";
+      }
+      if (splitMode === "excel") {
+        $("parsePanel").classList.add("hidden");
+        $("chapterSelectionPanel").classList.add("hidden");
+        $("requirementCoveragePanel").classList.add("hidden");
+      }
       if (!keepFiles) {
         $("fileInput").value = "";
         $("splitExcelInput").value = "";
@@ -597,6 +626,46 @@
         resetFlowStateForMode();
       }
       applyFlowMode();
+      updateReviewStageGuide();
+    }
+
+    function updateReviewStageGuide() {
+      const excelMode = splitMode === "excel";
+      if ($("reviewStageSubtitle")) {
+        $("reviewStageSubtitle").textContent = excelMode
+          ? "导入已有表格 → 再查基础错误 → 最后复核表格结构"
+          : "先出第一版 → 再查基础错误 → 最后对照原文复盘";
+      }
+      if ($("stageAiSplitTitle")) {
+        $("stageAiSplitTitle").textContent = excelMode
+          ? "Excel 导入：把已有拆分表载入审核区"
+          : "AI 拆分：先把 Word 变成第一版表格";
+      }
+      if ($("stageAiSplitText")) {
+        $("stageAiSplitText").textContent = excelMode
+          ? "系统直接读取你上传的功能点拆分表，保留已有行和字段作为审核基础；默认不会再用 AI 改写功能描述。"
+          : "把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。";
+      }
+      if ($("stageDeepReviewTitle")) {
+        $("stageDeepReviewTitle").textContent = excelMode
+          ? "AI 深度审校：只拿“当前拆分表”做结构复核"
+          : "AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘";
+      }
+      if ($("stageDeepReviewText")) {
+        $("stageDeepReviewText").textContent = excelMode
+          ? "Excel 上传模式没有原始需求文档，AI 只能根据当前拆分表检查功能边界、重复计量、E/R/W/X 是否缺失、数据组和属性是否合理；它不能判断 Word 里有没有漏拆的新功能。"
+          : "把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。";
+      }
+      if ($("reviewStageNoteText")) {
+        $("reviewStageNoteText").textContent = excelMode
+          ? "Excel 导入负责“载入已有表格”，规则初审负责“查明显错误”，AI 深度审校负责“在没有原文的前提下复核表格结构”。"
+          : "AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。";
+      }
+      if ($("deepSplitBtn")) {
+        $("deepSplitBtn").title = excelMode
+          ? "仅基于当前 Excel/审核表审查功能边界、重复计量和 E/R/W/X 完整性；没有原始 Word 时不会做漏需求对照。"
+          : "结合原文证据审查整张表，发现漏拆、错拆、重复和缺失数据移动，并给出可采纳的结构调整。";
+      }
     }
 
     function flowStepsForCurrentMode() {
@@ -892,12 +961,16 @@
       lastValidationResult = null;
       currentDeepSplitJob = null;
       requirementCoverageData = null;
+      documentChapterSelectionData = null;
       deepSplitRowOrigins = [];
       resetDeepSplitPanel();
       setSplitMode("document", true, true);
       $("fileInput").value = "";
       if ($("splitExcelInput")) {
         $("splitExcelInput").value = "";
+      }
+      if ($("polishFunctionDescriptionInput")) {
+        $("polishFunctionDescriptionInput").checked = false;
       }
       $("projectName").value = "";
       if ($("reviewSearch")) {
@@ -916,6 +989,7 @@
       $("projectBadge").textContent = "未上传";
       $("projectBadge").className = "badge muted";
       $("parsePanel").classList.add("hidden");
+      $("chapterSelectionPanel").classList.add("hidden");
       $("requirementCoveragePanel").classList.add("hidden");
       $("reviewPanel").classList.add("hidden");
       $("outputPanel").classList.add("hidden");
@@ -972,6 +1046,7 @@
         }
         markDone("parse");
         $("parsePanel").classList.remove("hidden");
+        await loadDocumentChapters(true);
         await loadRequirementCoverage();
         setMessage("请先确认“拆分前解析完整性校验”；确认覆盖后才会调用 AI 拆分。", "success");
       });
@@ -982,6 +1057,108 @@
       requirementCoverageData = response.data || {};
       renderRequirementCoverage(requirementCoverageData);
       $("requirementCoveragePanel").classList.remove("hidden");
+    }
+
+    async function loadDocumentChapters(applyInitialSelection) {
+      const response = await request("/api/projects/" + currentProjectId + "/document-chapters");
+      documentChapterSelectionData = response.data || {};
+      renderDocumentChapters(documentChapterSelectionData);
+      $("chapterSelectionPanel").classList.remove("hidden");
+      if (applyInitialSelection) {
+        const initiallySelected = (documentChapterSelectionData.chapters || [])
+          .filter(function (chapter) { return chapter.selected; })
+          .map(function (chapter) { return chapter.id; });
+        if (initiallySelected.length) {
+          const applied = await request("/api/projects/" + currentProjectId + "/document-chapters", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chapterIds: initiallySelected })
+          });
+          documentChapterSelectionData = applied.data || {};
+          renderDocumentChapters(documentChapterSelectionData);
+          $("preview").value = documentChapterSelectionData.aiInput || "";
+          $("preview").scrollTop = 0;
+          $("parsePreviewHint").textContent = "已按所选章节生成 AI 输入，共 "
+            + Number((documentChapterSelectionData.aiInput || "").length).toLocaleString() + " 字。";
+        }
+      }
+    }
+
+    function renderDocumentChapters(data) {
+      const chapters = data.chapters || [];
+      $("chapterSelectionList").innerHTML = chapters.map(function (chapter) {
+        const label = (chapter.number ? chapter.number + ". " : "") + (chapter.title || "未命名章节");
+        return "<label class=\"chapter-select-item" + (chapter.recommended ? " recommended" : "") + "\">"
+          + "<input type=\"checkbox\" class=\"document-chapter-check\" value=\"" + escapeHtml(chapter.id) + "\""
+          + (chapter.selected ? " checked" : "") + " onchange=\"updateChapterSelectionStats()\">"
+          + "<span class=\"chapter-select-name\">" + escapeHtml(label) + "</span>"
+          + "<span class=\"chapter-select-size\">" + Number(chapter.charCount || 0).toLocaleString() + "字</span>"
+          + (chapter.recommended ? "<span class=\"chapter-recommended-tag\">推荐</span>" : "")
+          + "</label>";
+      }).join("") || "<span class=\"muted\">未识别到章节，系统将提供全文选项。</span>";
+      updateChapterSelectionStats();
+    }
+
+    function selectedChapterIds() {
+      return Array.prototype.slice.call(document.querySelectorAll(".document-chapter-check:checked"))
+        .map(function (element) { return element.value; });
+    }
+
+    function updateChapterSelectionStats() {
+      const data = documentChapterSelectionData || {};
+      const selected = new Set(selectedChapterIds());
+      const selectedLength = (data.chapters || []).reduce(function (sum, chapter) {
+        return sum + (selected.has(chapter.id) ? Number(chapter.charCount || 0) : 0);
+      }, 0);
+      $("chapterSelectionStats").textContent = "全文 " + Number(data.documentLength || 0).toLocaleString()
+        + " 字 → 本次约 " + selectedLength.toLocaleString() + " 字";
+    }
+
+    function toggleAllChapters(checked) {
+      document.querySelectorAll(".document-chapter-check").forEach(function (element) {
+        element.checked = checked;
+      });
+      updateChapterSelectionStats();
+    }
+
+    function selectRecommendedChapters() {
+      const recommended = new Set((documentChapterSelectionData && documentChapterSelectionData.chapters || [])
+        .filter(function (chapter) { return chapter.recommended; })
+        .map(function (chapter) { return chapter.id; }));
+      document.querySelectorAll(".document-chapter-check").forEach(function (element) {
+        element.checked = recommended.has(element.value);
+      });
+      updateChapterSelectionStats();
+    }
+
+    async function applyChapterSelection() {
+      const chapterIds = selectedChapterIds();
+      if (!chapterIds.length) {
+        showDialog("未选择章节", "请至少选择一个要送给 AI 的章节。");
+        return;
+      }
+      await withBusy(async function () {
+        const button = $("applyChapterSelectionBtn");
+        button.disabled = true;
+        try {
+          setMessage("正在根据章节选择生成 AI 输入...");
+          const response = await request("/api/projects/" + currentProjectId + "/document-chapters", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chapterIds: chapterIds })
+          });
+          documentChapterSelectionData = response.data || {};
+          renderDocumentChapters(documentChapterSelectionData);
+          $("preview").value = documentChapterSelectionData.aiInput || "";
+          $("preview").scrollTop = 0;
+          $("parsePreviewHint").textContent = "已按章节生成 AI 输入，共 "
+            + Number((documentChapterSelectionData.aiInput || "").length).toLocaleString() + " 字。";
+          await loadRequirementCoverage();
+          setMessage("章节选择已应用，请确认 AI 输入和完整性校验。", "success");
+        } finally {
+          button.disabled = false;
+        }
+      });
     }
 
     async function saveEditedRequirementInput() {
@@ -1023,14 +1200,17 @@
       const included = Number(data.includedModuleCount || 0);
       const missing = Number(data.missingModuleCount || 0);
       $("requirementCoverageSummary").textContent = total
-        ? "原文 " + total + " 个模块，AI 输入已覆盖 " + included + " 个，缺失 " + missing + " 个"
-        : "未识别到可核对的三级功能模块";
+        ? "当前 AI 输入 " + Number(data.aiInputLength || 0).toLocaleString() + " 字；识别 " + total
+          + " 个功能模块，已覆盖 " + included + " 个，缺失 " + missing + " 个"
+        : "当前 AI 输入 " + Number(data.aiInputLength || 0).toLocaleString()
+          + " 字；未识别到可逐项核对的功能模块";
       const rows = data.modules || [];
       $("requirementCoverageRows").innerHTML = rows.map(function (module) {
         const missingModule = !module.included;
+        const displayNumber = /^OUTLINE/.test(module.number || "") ? "" : (module.number || "");
         return "<tr class=\"" + (missingModule ? "coverage-missing" : "coverage-included") + "\">"
           + "<td>" + (missingModule ? "<label><input type=\"checkbox\" class=\"coverage-module-check\" value=\"" + escapeHtml(module.number) + "\" checked> 纳入</label>" : "—") + "</td>"
-          + "<td><b>" + escapeHtml(module.number) + "</b> " + escapeHtml(module.title) + "</td>"
+          + "<td>" + (displayNumber ? "<b>" + escapeHtml(displayNumber) + "</b> " : "") + escapeHtml(module.title) + "</td>"
           + "<td>" + Number(module.sourceLength || 0).toLocaleString() + " 字</td>"
           + "<td><span class=\"coverage-status " + (missingModule ? "missing" : "included") + "\">" + (missingModule ? "缺失，未送入 AI" : "已纳入 AI 输入") + "</span></td>"
           + "</tr>";
@@ -1103,6 +1283,7 @@
           const formData = new FormData();
           formData.append("file", file);
           formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
+          formData.append("polishFunctionDescription", $("polishFunctionDescriptionInput") && $("polishFunctionDescriptionInput").checked ? "true" : "false");
           setMessage("正在导入 Excel，并解析到审核界面...");
           const imported = await request("/api/files/upload-split-excel", { method: "POST", body: formData });
           currentProjectId = imported.data.projectId;
@@ -1111,7 +1292,9 @@
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
           $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则初审”，按 COSMIC 拆分规则检查需要人工调整的项。";
-          $("parsePanel").classList.remove("hidden");
+          $("parsePanel").classList.add("hidden");
+          $("chapterSelectionPanel").classList.add("hidden");
+          $("requirementCoveragePanel").classList.add("hidden");
           markDone("cosmic");
           await loadReview();
           markActive("precheck");
@@ -2058,6 +2241,7 @@
       }
       $("statusText").textContent = data.status || "ANALYZED";
       $("reviewPanel").classList.remove("hidden");
+      updateReviewStageGuide();
       renderTable();
       updateStats();
       markDone("review");

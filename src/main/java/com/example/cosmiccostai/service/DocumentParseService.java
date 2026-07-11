@@ -16,6 +16,8 @@ import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.apache.poi.xwpf.usermodel.XWPFStyle;
+import org.apache.poi.xwpf.usermodel.XWPFStyles;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
@@ -28,6 +30,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class DocumentParseService {
@@ -59,6 +63,8 @@ public class DocumentParseService {
         Path textPath = fileStorageService.resolveProjectDir(projectId).resolve("document-text.txt");
         try {
             Files.write(textPath, parsedDocument.getText().getBytes(StandardCharsets.UTF_8));
+            writeDocumentOutline(fileStorageService.resolveProjectDir(projectId).resolve("document-outline.tsv"),
+                    parsedDocument.getHeadings());
         } catch (IOException ex) {
             throw new BusinessException("Write parsed text failed: " + projectId, ex);
         }
@@ -133,14 +139,13 @@ public class DocumentParseService {
 
         try (XWPFDocument document = new XWPFDocument(inputStream)) {
             DocxParseCounter counter = new DocxParseCounter();
-            appendDocxBodyElements(text, document.getBodyElements(), counter);
+            appendDocxBodyElements(text, document.getBodyElements(), document.getStyles(), counter);
             paragraphCount = counter.paragraphCount;
             tableCount = counter.tableCount;
+            return new ParsedDocument(text.toString().trim(), paragraphCount, tableCount, counter.headings);
         } catch (IOException ex) {
             throw new BusinessException("解析 docx 文件失败，请确认文件是由 Word/WPS 正常另存为的 .docx 文件。", ex);
         }
-
-        return new ParsedDocument(text.toString().trim(), paragraphCount, tableCount);
     }
 
     /**
@@ -148,13 +153,21 @@ public class DocumentParseService {
      * Reading paragraphs and tables in two separate passes changes their original order,
      * which can make a later heading look like it belongs before its functional description.
      */
-    private void appendDocxBodyElements(StringBuilder text, Iterable<IBodyElement> elements, DocxParseCounter counter) {
+    private void appendDocxBodyElements(StringBuilder text,
+                                        Iterable<IBodyElement> elements,
+                                        XWPFStyles styles,
+                                        DocxParseCounter counter) {
         for (IBodyElement element : elements) {
             if (element instanceof XWPFParagraph) {
-                String line = normalizeLine(((XWPFParagraph) element).getText());
+                XWPFParagraph paragraph = (XWPFParagraph) element;
+                String line = normalizeLine(paragraph.getText());
                 if (StringUtils.hasText(line)) {
                     text.append(line).append(System.lineSeparator());
                     counter.paragraphCount++;
+                    int headingLevel = resolveHeadingLevel(paragraph, styles);
+                    if (headingLevel > 0 && headingLevel <= 9) {
+                        counter.headings.add(new HeadingMarker(headingLevel, line));
+                    }
                 }
                 continue;
             }
@@ -162,6 +175,43 @@ public class DocumentParseService {
                 appendDocxTable(text, (XWPFTable) element, counter);
             }
         }
+    }
+
+    private int resolveHeadingLevel(XWPFParagraph paragraph, XWPFStyles styles) {
+        if (paragraph.getCTP().isSetPPr()
+                && paragraph.getCTP().getPPr().isSetOutlineLvl()
+                && paragraph.getCTP().getPPr().getOutlineLvl().getVal() != null) {
+            return paragraph.getCTP().getPPr().getOutlineLvl().getVal().intValue() + 1;
+        }
+        String styleId = paragraph.getStyle();
+        if (!StringUtils.hasText(styleId) || styles == null) {
+            return 0;
+        }
+        XWPFStyle style = styles.getStyle(styleId);
+        if (style == null) {
+            return 0;
+        }
+        if (style.getCTStyle().isSetPPr()
+                && style.getCTStyle().getPPr().isSetOutlineLvl()
+                && style.getCTStyle().getPPr().getOutlineLvl().getVal() != null) {
+            return style.getCTStyle().getPPr().getOutlineLvl().getVal().intValue() + 1;
+        }
+        String styleName = style.getName() == null ? "" : style.getName().trim().toLowerCase();
+        if (styleName.matches("heading\\s*[1-9]")) {
+            return Integer.parseInt(styleName.replaceAll("\\D+", ""));
+        }
+        if (styleName.matches("标题\\s*[1-9]")) {
+            return Integer.parseInt(styleName.replaceAll("\\D+", ""));
+        }
+        return 0;
+    }
+
+    private void writeDocumentOutline(Path path, List<HeadingMarker> headings) throws IOException {
+        List<String> lines = new ArrayList<String>();
+        for (HeadingMarker heading : headings) {
+            lines.add(heading.level + "\t" + heading.title.replace('\t', ' '));
+        }
+        Files.write(path, lines, StandardCharsets.UTF_8);
     }
 
     private void appendDocxTable(StringBuilder text, XWPFTable table, DocxParseCounter counter) {
@@ -220,7 +270,7 @@ public class DocumentParseService {
         if (!StringUtils.hasText(text.toString())) {
             throw new BusinessException("未从 doc 文件中读取到有效文本，请确认文档内容不是图片扫描件。");
         }
-        return new ParsedDocument(text.toString().trim(), paragraphCount, 0);
+        return new ParsedDocument(text.toString().trim(), paragraphCount, 0, new ArrayList<HeadingMarker>());
     }
 
     private String normalizeLine(String text) {
@@ -261,11 +311,13 @@ public class DocumentParseService {
         private final String text;
         private final int paragraphCount;
         private final int tableCount;
+        private final List<HeadingMarker> headings;
 
-        private ParsedDocument(String text, int paragraphCount, int tableCount) {
+        private ParsedDocument(String text, int paragraphCount, int tableCount, List<HeadingMarker> headings) {
             this.text = text;
             this.paragraphCount = paragraphCount;
             this.tableCount = tableCount;
+            this.headings = headings;
         }
 
         public String getText() {
@@ -278,6 +330,10 @@ public class DocumentParseService {
 
         public int getTableCount() {
             return tableCount;
+        }
+
+        public List<HeadingMarker> getHeadings() {
+            return headings;
         }
     }
 
@@ -297,5 +353,16 @@ public class DocumentParseService {
     private static class DocxParseCounter {
         private int paragraphCount;
         private int tableCount;
+        private final List<HeadingMarker> headings = new ArrayList<HeadingMarker>();
+    }
+
+    private static class HeadingMarker {
+        private final int level;
+        private final String title;
+
+        private HeadingMarker(int level, String title) {
+            this.level = level;
+            this.title = title;
+        }
     }
 }

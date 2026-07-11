@@ -36,7 +36,8 @@ public class FileController {
     @Operation(summary = "Import reviewed split Excel", description = "Import a pre-split Excel file and load it into the normal review workflow.")
     @PostMapping("/upload-split-excel")
     public ApiResponse<ReviewResponse> uploadSplitExcel(@RequestParam("file") MultipartFile file,
-                                                        @RequestParam(value = "projectName", required = false) String projectName) {
-        return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName));
+                                                        @RequestParam(value = "projectName", required = false) String projectName,
+                                                        @RequestParam(value = "polishFunctionDescription", defaultValue = "false") boolean polishFunctionDescription) {
+        return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName, polishFunctionDescription));
     }
 }

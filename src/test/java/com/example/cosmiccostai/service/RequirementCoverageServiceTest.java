@@ -16,6 +16,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RequirementCoverageServiceTest {
 
     @Test
+    void usesWordOutlineForUnnumberedFunctionalModules() throws Exception {
+        FileStorageService storage = new FileStorageService("target/test-outline-coverage-storage");
+        String projectId = "outline-coverage-project";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path documentText = projectDir.resolve("document-text.txt");
+        Path aiInput = projectDir.resolve("requirement-detail.txt");
+        String fullText = "业务功能需求\n技术服务支撑情况上报流程\n设备厂商后评估\n"
+                + "评估流程管理模块\n功能描述\n创建评估。\n"
+                + "清单配置管理模块\n功能描述\n配置清单。\n"
+                + "技术服务支撑半年报\n功能描述\n查询和导出。\n"
+                + "调整因子情况说明\n调整内容。\n";
+        Files.write(documentText, fullText.getBytes(StandardCharsets.UTF_8));
+        Files.write(aiInput, fullText.substring(0, fullText.indexOf("调整因子情况说明"))
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("document-outline.tsv"), Arrays.asList(
+                "1\t业务功能需求", "2\t技术服务支撑情况上报流程", "3\t设备厂商后评估",
+                "4\t评估流程管理模块", "5\t功能描述", "4\t清单配置管理模块",
+                "5\t功能描述", "3\t技术服务支撑半年报", "4\t功能描述", "1\t调整因子情况说明"),
+                StandardCharsets.UTF_8);
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setDocumentTextPath(documentText.toString());
+        metadata.setRequirementDetailPath(aiInput.toString());
+        storage.saveMetadata(metadata);
+
+        RequirementCoverageResponse response = new RequirementCoverageService(storage).getCoverage(projectId);
+        assertEquals(3, response.getSourceModuleCount());
+        assertEquals(3, response.getIncludedModuleCount());
+        assertTrue(response.isReadyForExtraction());
+    }
+
+    @Test
     void reportsMissingModulesAndCanSupplementThemBeforeAiExtraction() throws Exception {
         FileStorageService storage = new FileStorageService("target/test-coverage-storage");
         String projectId = "coverage-project";

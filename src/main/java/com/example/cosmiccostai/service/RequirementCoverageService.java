@@ -47,7 +47,7 @@ public class RequirementCoverageService {
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         String documentText = readRequired(metadata.getDocumentTextPath(), "项目尚未完成文档解析");
         String aiInput = readOptional(metadata.getRequirementDetailPath());
-        List<ModuleBlock> sourceModules = findSourceModules(documentText);
+        List<ModuleBlock> sourceModules = findSourceModules(projectId, documentText);
         return buildResponse(sourceModules, aiInput, documentText.length());
     }
 
@@ -58,7 +58,7 @@ public class RequirementCoverageService {
                 ? Paths.get(metadata.getRequirementDetailPath())
                 : fileStorageService.resolveProjectDir(projectId).resolve("requirement-detail.txt");
         String aiInput = readOptional(requirementPath.toString());
-        List<ModuleBlock> modules = findSourceModules(documentText);
+        List<ModuleBlock> modules = findSourceModules(projectId, documentText);
         Set<String> selected = new LinkedHashSet<>(moduleNumbers == null ? Collections.<String>emptyList() : moduleNumbers);
         if (selected.isEmpty()) {
             throw new BusinessException("请选择需要补入 AI 输入的功能模块");
@@ -118,7 +118,15 @@ public class RequirementCoverageService {
         return response;
     }
 
-    private List<ModuleBlock> findSourceModules(String documentText) {
+    private List<ModuleBlock> findSourceModules(String projectId, String documentText) {
+        List<ModuleBlock> numbered = findNumberedSourceModules(documentText);
+        if (!numbered.isEmpty()) {
+            return numbered;
+        }
+        return findOutlineSourceModules(projectId, documentText);
+    }
+
+    private List<ModuleBlock> findNumberedSourceModules(String documentText) {
         String[] lines = documentText.split("\\r?\\n");
         boolean inBusinessSection = false;
         List<ModuleBlock> modules = new ArrayList<>();
@@ -151,7 +159,125 @@ public class RequirementCoverageService {
         return modules;
     }
 
+    private List<ModuleBlock> findOutlineSourceModules(String projectId, String documentText) {
+        Path outlinePath = fileStorageService.resolveProjectDir(projectId).resolve("document-outline.tsv");
+        if (!Files.exists(outlinePath)) {
+            return Collections.emptyList();
+        }
+        List<OutlineMarker> markers = new ArrayList<OutlineMarker>();
+        try {
+            for (String line : Files.readAllLines(outlinePath, StandardCharsets.UTF_8)) {
+                String[] parts = line.split("\\t", 2);
+                if (parts.length == 2 && parts[0].matches("[1-9]") && StringUtils.hasText(parts[1])) {
+                    markers.add(new OutlineMarker(Integer.parseInt(parts[0]), parts[1].trim()));
+                }
+            }
+        } catch (IOException ex) {
+            return Collections.emptyList();
+        }
+        int businessIndex = -1;
+        int endIndex = markers.size();
+        for (int i = 0; i < markers.size(); i++) {
+            String normalized = normalizeTitle(markers.get(i).title);
+            if (businessIndex < 0 && ("业务功能需求".equals(normalized)
+                    || "业务功能".equals(normalized)
+                    || "功能需求".equals(normalized)
+                    || "需求细则".equals(normalized))) {
+                businessIndex = i;
+                continue;
+            }
+            if (businessIndex >= 0 && markers.get(i).level == 1) {
+                endIndex = i;
+                break;
+            }
+        }
+        if (businessIndex < 0) {
+            return Collections.emptyList();
+        }
+        List<OutlineMarker> candidates = new ArrayList<OutlineMarker>();
+        for (int i = businessIndex + 1; i < endIndex; i++) {
+            OutlineMarker marker = markers.get(i);
+            if (marker.level >= 3 && isFunctionalOutlineTitle(marker.title)) {
+                candidates.add(marker);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return Collections.emptyList();
+        }
+        String[] documentLines = documentText.split("\\r?\\n");
+        List<Integer> starts = new ArrayList<Integer>();
+        List<OutlineMarker> locatedCandidates = new ArrayList<OutlineMarker>();
+        int searchFrom = 0;
+        for (OutlineMarker candidate : candidates) {
+            int found = findExactLine(documentLines, candidate.title, searchFrom);
+            if (found >= 0) {
+                starts.add(found);
+                locatedCandidates.add(candidate);
+                searchFrom = found + 1;
+            }
+        }
+        int businessEndLine = documentLines.length;
+        if (endIndex < markers.size()) {
+            int foundEnd = findExactLine(documentLines, markers.get(endIndex).title, searchFrom);
+            if (foundEnd >= 0) {
+                businessEndLine = foundEnd;
+            }
+        }
+        List<ModuleBlock> modules = new ArrayList<ModuleBlock>();
+        for (int i = 0; i < starts.size(); i++) {
+            int end = i + 1 < starts.size() ? starts.get(i + 1) : businessEndLine;
+            OutlineMarker candidate = locatedCandidates.get(i);
+            ModuleBlock module = new ModuleBlock("OUTLINE" + (i + 1), candidate.title);
+            for (int line = starts.get(i); line < end; line++) {
+                if (StringUtils.hasText(documentLines[line])) {
+                    module.text.append(documentLines[line].trim()).append(System.lineSeparator());
+                }
+            }
+            modules.add(module);
+        }
+        return modules;
+    }
+
+    private boolean isFunctionalOutlineTitle(String title) {
+        String normalized = normalizeTitle(title);
+        if (!StringUtils.hasText(normalized)
+                || "功能描述".equals(normalized)
+                || normalized.endsWith("规则")
+                || normalized.endsWith("逻辑")
+                || normalized.endsWith("算法")
+                || normalized.endsWith("机制")
+                || "功能界面".equals(normalized)
+                || "流程图".equals(normalized)) {
+            return false;
+        }
+        return normalized.endsWith("模块")
+                || normalized.endsWith("报")
+                || normalized.endsWith("报告")
+                || containsAny(normalized, "查询", "新增", "修改", "删除", "上报", "填报", "归档", "配置", "派发", "评分", "汇总");
+    }
+
+    private boolean containsAny(String text, String... keywords) {
+        for (String keyword : keywords) {
+            if (text.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private int findExactLine(String[] lines, String title, int start) {
+        for (int i = Math.max(0, start); i < lines.length; i++) {
+            if (title.equals(lines[i].trim())) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     private boolean containsModule(String input, ModuleBlock module) {
+        if (module.number.startsWith("OUTLINE")) {
+            return input.contains(module.title);
+        }
         return input.contains(module.number + " " + module.title)
                 || input.contains(module.number + "　" + module.title)
                 || input.contains(module.number + " " + module.title.replace(" ", ""));
@@ -216,6 +342,16 @@ public class RequirementCoverageService {
 
         private ModuleBlock(String number, String title) {
             this.number = number;
+            this.title = title;
+        }
+    }
+
+    private static class OutlineMarker {
+        private final int level;
+        private final String title;
+
+        private OutlineMarker(int level, String title) {
+            this.level = level;
             this.title = title;
         }
     }

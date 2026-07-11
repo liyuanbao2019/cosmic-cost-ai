@@ -52,7 +52,7 @@ public class DeepSplitAiService {
     private static final Logger log = LoggerFactory.getLogger(DeepSplitAiService.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Set<String> OPERATIONS = new HashSet<String>();
-    private static final int MAX_REQUEST_ROWS = 2000;
+    private static final int MIN_REQUEST_ROWS_LIMIT = 2000;
     private static final int EVIDENCE_BLOCK_CHARS = 900;
     private static final int MAX_EVIDENCE_BLOCKS = 10;
     private static final int MAX_GROUPS_PER_CHUNK = 6;
@@ -75,6 +75,7 @@ public class DeepSplitAiService {
     private final int maxRetries;
     private final int chunkPromptChars;
     private final int evidenceChars;
+    private final int maxRequestRows;
 
     @Autowired
     public DeepSplitAiService(FileStorageService fileStorageService,
@@ -85,7 +86,8 @@ public class DeepSplitAiService {
                               @Value("${cosmic.ai.deep-split.chunk-timeout-seconds:180}") long chunkTimeoutSeconds,
                               @Value("${cosmic.ai.max-retries:2}") int maxRetries,
                               @Value("${cosmic.ai.deep-split.chunk-prompt-chars:9000}") int chunkPromptChars,
-                              @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars) {
+                              @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars,
+                              @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows) {
         this.fileStorageService = fileStorageService;
         this.taskExecutor = taskExecutor;
         this.baseUrl = baseUrl;
@@ -95,6 +97,7 @@ public class DeepSplitAiService {
         this.maxRetries = Math.max(0, maxRetries);
         this.chunkPromptChars = Math.max(6000, chunkPromptChars);
         this.evidenceChars = Math.max(2000, evidenceChars);
+        this.maxRequestRows = Math.max(MIN_REQUEST_ROWS_LIMIT, maxRequestRows);
         this.objectMapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
                 .enable(SerializationFeature.INDENT_OUTPUT);
@@ -106,12 +109,15 @@ public class DeepSplitAiService {
         if (rows == null || rows.isEmpty()) {
             throw new BusinessException("请先生成或导入功能点拆分数据，再执行 AI 深度审校。");
         }
-        if (rows.size() > MAX_REQUEST_ROWS) {
-            throw new BusinessException("单个深度审校任务最多支持 " + MAX_REQUEST_ROWS + " 行，请按项目或模块拆分后处理。");
+        if (rows.size() > maxRequestRows) {
+            throw new BusinessException("单个深度审校任务最多支持 " + maxRequestRows
+                    + " 行，请按项目或模块拆分后处理，或调大 cosmic.ai.deep-split.max-request-rows。");
         }
         if (!StringUtils.hasText(resolveApiKey())) {
             throw new BusinessException("AI api key is not configured. Please set OPENAI_API_KEY.");
         }
+        log.info("AI deep split start requested. projectId={}, rows={}, maxRequestRows={}, model={}, chunkPromptChars={}, evidenceChars={}, timeoutSeconds={}",
+                projectId, rows.size(), maxRequestRows, model, chunkPromptChars, evidenceChars, chunkTimeoutSeconds);
 
         String jobId = "DS" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.ROOT);

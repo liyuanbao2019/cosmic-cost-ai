@@ -10,6 +10,9 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -25,8 +28,11 @@ import java.util.Locale;
 @Service
 public class ExcelReviewImportService {
 
+    private static final Logger log = LoggerFactory.getLogger(ExcelReviewImportService.class);
     private static final int FALLBACK_DATA_START_ROW_INDEX = 5;
     private static final int MAX_ERROR_COUNT = 10;
+    private static final double SPLIT_EXCEL_MIN_INFLATE_RATIO = 0.009d;
+    private static final Object POI_ZIP_SECURITY_LOCK = new Object();
 
     private final FileStorageService fileStorageService;
     private final ReviewService reviewService;
@@ -39,25 +45,53 @@ public class ExcelReviewImportService {
     }
 
     public ReviewResponse importSplitExcel(MultipartFile file, String projectName) {
+        return importSplitExcel(file, projectName, false);
+    }
+
+    public ReviewResponse importSplitExcel(MultipartFile file, String projectName, boolean polishFunctionDescription) {
+        String originalFilename = file == null ? "" : file.getOriginalFilename();
+        long fileSize = file == null ? 0 : file.getSize();
+        log.info("Import split Excel started. file={}, size={} bytes, projectName={}, polishFunctionDescription={}",
+                originalFilename, fileSize, projectName, polishFunctionDescription);
         ProjectMetadata metadata = fileStorageService.uploadSplitExcel(file, projectName);
         List<FunctionSplitRow> rows = readRows(metadata);
-        return reviewService.importReview(metadata.getId(), rows);
+        log.info("Import split Excel parsed successfully. projectId={}, storedFile={}, rows={}",
+                metadata.getId(), metadata.getStoredFilePath(), rows.size());
+        return reviewService.importReview(metadata.getId(), rows, polishFunctionDescription);
     }
 
     private List<FunctionSplitRow> readRows(ProjectMetadata metadata) {
+        synchronized (POI_ZIP_SECURITY_LOCK) {
+            double originalMinInflateRatio = ZipSecureFile.getMinInflateRatio();
+            try {
+                ZipSecureFile.setMinInflateRatio(Math.min(originalMinInflateRatio, SPLIT_EXCEL_MIN_INFLATE_RATIO));
+                return readRowsFromWorkbook(metadata);
+            } finally {
+                ZipSecureFile.setMinInflateRatio(originalMinInflateRatio);
+            }
+        }
+    }
+
+    private List<FunctionSplitRow> readRowsFromWorkbook(ProjectMetadata metadata) {
         try (InputStream inputStream = Files.newInputStream(Paths.get(metadata.getStoredFilePath()));
              Workbook workbook = WorkbookFactory.create(inputStream)) {
             Sheet sheet = resolveSplitSheet(workbook);
+            log.info("Import split Excel workbook opened. projectId={}, sheet={}, sheets={}, lastRow={}",
+                    metadata.getId(), sheet.getSheetName(), workbook.getNumberOfSheets(), sheet.getLastRowNum() + 1);
             List<String> errors = new ArrayList<String>();
             List<FunctionSplitRow> rows = parseRows(sheet, metadata, errors);
             if (rows.isEmpty()) {
                 errors.add("未读取到有效拆分数据：请确认功能点拆分数据从第 6 行开始，并填写 A-M 列");
             }
             if (!errors.isEmpty()) {
+                log.warn("Import split Excel validation failed. projectId={}, errorCount={}, firstErrors={}",
+                        metadata.getId(), errors.size(), joinErrors(errors));
                 throw new BusinessException("导入已拆分 Excel 失败：" + joinErrors(errors));
             }
             return rows;
         } catch (IOException ex) {
+            log.warn("Import split Excel read failed. projectId={}, storedFile={}",
+                    metadata.getId(), metadata.getStoredFilePath(), ex);
             throw new BusinessException("读取已拆分 Excel 失败，请确认文件未损坏且格式为 xlsx/xls", ex);
         }
     }
@@ -146,7 +180,7 @@ public class ExcelReviewImportService {
                 continue;
             }
             String[] values = readValues(excelRow);
-            if (isBlankRow(values)) {
+            if (isBlankRow(values) || isCfpSummaryRow(values)) {
                 continue;
             }
 
@@ -229,6 +263,18 @@ public class ExcelReviewImportService {
     private boolean isBlankRow(String[] values) {
         for (int i = 0; i <= 14; i++) {
             if (StringUtils.hasText(values[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean isCfpSummaryRow(String[] values) {
+        if (!StringUtils.hasText(values[12])) {
+            return false;
+        }
+        for (int i = 0; i < values.length; i++) {
+            if (i != 12 && StringUtils.hasText(values[i])) {
                 return false;
             }
         }

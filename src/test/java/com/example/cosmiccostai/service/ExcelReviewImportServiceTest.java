@@ -1,6 +1,7 @@
 package com.example.cosmiccostai.service;
 
 import com.example.cosmiccostai.dto.ReviewResponse;
+import com.example.cosmiccostai.model.FunctionSplitRow;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -12,6 +13,9 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -41,6 +45,37 @@ class ExcelReviewImportServiceTest {
         assertEquals("module-a", response.getSplitRows().get(1).getLevel1Module());
         assertTrue(Files.exists(tempDir.resolve("projects").resolve(response.getProjectId()).resolve("cosmic-results.json")));
         assertTrue(Files.exists(tempDir.resolve("projects").resolve(response.getProjectId()).resolve("function-split-rows.json")));
+    }
+
+    @Test
+    void doesNotPolishFunctionDescriptionByDefault() throws Exception {
+        FileStorageService fileStorageService = new FileStorageService(tempDir.toString());
+        TrackingFunctionDescriptionAiService aiService = new TrackingFunctionDescriptionAiService();
+        ReviewService reviewService = new ReviewService(fileStorageService, aiService);
+        ExcelReviewImportService importService = new ExcelReviewImportService(fileStorageService, reviewService);
+
+        MockMultipartFile file = new MockMultipartFile("file", "split.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbookBytes());
+
+        ReviewResponse response = importService.importSplitExcel(file, "review-import-project");
+
+        assertEquals(0, aiService.callCount);
+        assertEquals("process-a description", response.getSplitRows().get(0).getFunctionDescription());
+    }
+
+    @Test
+    void polishesFunctionDescriptionOnlyWhenRequested() throws Exception {
+        FileStorageService fileStorageService = new FileStorageService(tempDir.toString());
+        TrackingFunctionDescriptionAiService aiService = new TrackingFunctionDescriptionAiService();
+        ReviewService reviewService = new ReviewService(fileStorageService, aiService);
+        ExcelReviewImportService importService = new ExcelReviewImportService(fileStorageService, reviewService);
+
+        MockMultipartFile file = new MockMultipartFile("file", "split.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbookBytes());
+
+        importService.importSplitExcel(file, "review-import-project", true);
+
+        assertEquals(1, aiService.callCount);
     }
 
     private byte[] workbookBytes() throws Exception {
@@ -78,6 +113,16 @@ class ExcelReviewImportServiceTest {
 
             workbook.write(outputStream);
             return outputStream.toByteArray();
+        }
+    }
+
+    private static class TrackingFunctionDescriptionAiService extends FunctionDescriptionAiService {
+        private int callCount;
+
+        @Override
+        public Map<String, String> generateDescriptions(Map<String, List<FunctionSplitRow>> groups) {
+            callCount++;
+            return Collections.emptyMap();
         }
     }
 }

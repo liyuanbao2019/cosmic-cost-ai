@@ -8,6 +8,8 @@ import com.example.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -29,6 +31,7 @@ import java.util.Set;
 @Service
 public class ReviewService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReviewService.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final FileStorageService fileStorageService;
@@ -56,21 +59,36 @@ public class ReviewService {
     }
 
     public ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows) {
-        return saveReview(projectId, rows, "REVIEWED");
+        return saveReview(projectId, rows, false);
+    }
+
+    public ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
+        return saveReview(projectId, rows, "REVIEWED", polishFunctionDescription);
     }
 
     public ReviewResponse importReview(String projectId, List<FunctionSplitRow> rows) {
-        return saveReview(projectId, rows, "EXCEL_IMPORTED");
+        return importReview(projectId, rows, false);
+    }
+
+    public ReviewResponse importReview(String projectId, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
+        return saveReview(projectId, rows, "EXCEL_IMPORTED", polishFunctionDescription);
     }
 
     private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status) {
+        return saveReview(projectId, rows, status, false);
+    }
+
+    private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status, boolean polishFunctionDescription) {
         if (rows == null || rows.isEmpty()) {
             throw new BusinessException("Review split rows cannot be empty");
         }
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
-        normalizeRows(metadata, rows);
+        long startedAt = System.currentTimeMillis();
+        log.info("Saving review rows. projectId={}, status={}, rows={}, polishFunctionDescription={}",
+                projectId, status, rows.size(), polishFunctionDescription);
+        normalizeRows(metadata, rows, polishFunctionDescription);
         List<CosmicResult> results = toCosmicResults(rows);
 
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
@@ -82,6 +100,8 @@ public class ReviewService {
         metadata.setStatus(status);
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
+        log.info("Saved review rows. projectId={}, status={}, rows={}, elapsedMs={}",
+                projectId, status, rows.size(), System.currentTimeMillis() - startedAt);
         return buildResponse(projectId, metadata.getStatus(), results, rows);
     }
 
@@ -91,7 +111,7 @@ public class ReviewService {
                 List<FunctionSplitRow> rows = objectMapper.readValue(Paths.get(metadata.getFunctionSplitRowsPath()).toFile(),
                         new TypeReference<List<FunctionSplitRow>>() {
                         });
-                normalizeRows(metadata, rows);
+                normalizeRows(metadata, rows, false);
                 return rows;
             } catch (IOException ex) {
                 throw new BusinessException("Read function split rows failed", ex);
@@ -103,7 +123,7 @@ public class ReviewService {
         for (CosmicResult result : results) {
             rows.addAll(toSplitRows(metadata, result));
         }
-        normalizeRows(metadata, rows);
+        normalizeRows(metadata, rows, true);
         return rows;
     }
 
@@ -143,7 +163,7 @@ public class ReviewService {
         }
     }
 
-    private void normalizeRows(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+    private void normalizeRows(ProjectMetadata metadata, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
         String lastLevel1 = "";
         String lastLevel2 = "";
         String lastLevel3 = "";
@@ -195,7 +215,11 @@ public class ReviewService {
             lastLevel3 = row.getLevel3Module();
             lastProcess = row.getFunctionProcess();
         }
-        applyGroupFunctionDescriptions(rows);
+        if (polishFunctionDescription) {
+            applyGroupFunctionDescriptions(rows);
+        } else {
+            log.info("Skip AI function description polish. projectId={}, rows={}", metadata.getId(), rows.size());
+        }
     }
 
     private String normalizeMovementType(String movementType) {

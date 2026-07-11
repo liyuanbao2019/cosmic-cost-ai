@@ -52,14 +52,23 @@ public class FunctionDescriptionAiService {
 
     public Map<String, String> generateDescriptions(Map<String, List<FunctionSplitRow>> groups) {
         if (groups == null || groups.isEmpty() || !StringUtils.hasText(baseUrl) || !StringUtils.hasText(resolveApiKey())) {
+            log.info("Skip AI function description generation. groups={}, baseUrlConfigured={}, apiKeyConfigured={}",
+                    groups == null ? 0 : groups.size(), StringUtils.hasText(baseUrl), StringUtils.hasText(resolveApiKey()));
             return Collections.emptyMap();
         }
         String prompt = buildPrompt(groups);
+        long startedAt = System.currentTimeMillis();
+        log.info("AI function description generation started. groups={}, promptLength={}, model={}, baseUrl={}, timeoutSeconds={}, maxRetries={}",
+                groups.size(), prompt.length(), model, baseUrl, timeoutSeconds, maxRetries);
         try {
             String aiText = callAi(prompt);
-            return parseDescriptions(aiText);
+            Map<String, String> descriptions = parseDescriptions(aiText);
+            log.info("AI function description generation completed. groups={}, generated={}, responseLength={}, elapsedMs={}",
+                    groups.size(), descriptions.size(), aiText == null ? 0 : aiText.length(), System.currentTimeMillis() - startedAt);
+            return descriptions;
         } catch (RuntimeException ex) {
-            log.warn("AI function description generation failed, fallback to local description", ex);
+            log.warn("AI function description generation failed, fallback to local description. groups={}, promptLength={}, elapsedMs={}",
+                    groups.size(), prompt.length(), System.currentTimeMillis() - startedAt, ex);
             return Collections.emptyMap();
         }
     }

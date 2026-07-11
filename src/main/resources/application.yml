@@ -16,6 +16,10 @@ management:
       exposure:
         include: health,info
 
+logging:
+  level:
+    org.apache.poi.openxml4j.opc.PackageRelationshipCollection: OFF
+
 springdoc:
   api-docs:
     path: /v3/api-docs
@@ -42,5 +46,6 @@ cosmic:
       chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:360}
       chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
       evidence-chars: ${COSMIC_DEEP_SPLIT_EVIDENCE_CHARS:5000}
+      max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}
   rules:
     split-rules-path: ${COSMIC_SPLIT_RULES_PATH:classpath:/static/split-check-rules.md}

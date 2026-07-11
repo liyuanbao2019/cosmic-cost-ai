@@ -8,6 +8,8 @@ import com.example.cosmiccostai.dto.AiReviewValidationResponse;
 import com.example.cosmiccostai.dto.CosmicAnalyzeResponse;
 import com.example.cosmiccostai.dto.DeepSplitJobResponse;
 import com.example.cosmiccostai.dto.DeepSplitRequest;
+import com.example.cosmiccostai.dto.DocumentChapterSelectionRequest;
+import com.example.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
 import com.example.cosmiccostai.dto.ExportFileActionResponse;
@@ -24,6 +26,7 @@ import com.example.cosmiccostai.service.AiExtractionService;
 import com.example.cosmiccostai.service.AiReviewValidationService;
 import com.example.cosmiccostai.service.CosmicAnalysisService;
 import com.example.cosmiccostai.service.DocumentParseService;
+import com.example.cosmiccostai.service.DocumentChapterSelectionService;
 import com.example.cosmiccostai.service.DeepSplitAiService;
 import com.example.cosmiccostai.service.ExcelExportService;
 import com.example.cosmiccostai.service.ExportFileService;
@@ -47,6 +50,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.UnsupportedEncodingException;
@@ -72,6 +76,7 @@ public class ProjectController {
     private final ProjectListService projectListService;
     private final RequirementCoverageService requirementCoverageService;
     private final RequirementInputService requirementInputService;
+    private final DocumentChapterSelectionService documentChapterSelectionService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -86,7 +91,8 @@ public class ProjectController {
                              DeepSplitAiService deepSplitAiService,
                              ProjectListService projectListService,
                              RequirementCoverageService requirementCoverageService,
-                             RequirementInputService requirementInputService) {
+                             RequirementInputService requirementInputService,
+                             DocumentChapterSelectionService documentChapterSelectionService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -101,6 +107,7 @@ public class ProjectController {
         this.projectListService = projectListService;
         this.requirementCoverageService = requirementCoverageService;
         this.requirementInputService = requirementInputService;
+        this.documentChapterSelectionService = documentChapterSelectionService;
     }
 
     @Operation(summary = "List projects", description = "List historical projects from local storage.")
@@ -126,6 +133,20 @@ public class ProjectController {
     @PostMapping("/{projectId}/parse")
     public ApiResponse<ParseResponse> parse(@PathVariable String projectId) {
         return ApiResponse.ok(documentParseService.parseProject(projectId));
+    }
+
+    @Operation(summary = "Get selectable document chapters", description = "Return locally parsed top-level chapters and current AI input selection.")
+    @GetMapping("/{projectId}/document-chapters")
+    public ApiResponse<DocumentChapterSelectionResponse> documentChapters(@PathVariable String projectId) {
+        return ApiResponse.ok(documentChapterSelectionService.get(projectId));
+    }
+
+    @Operation(summary = "Apply document chapter selection", description = "Generate the actual AI input from selected local document chapters.")
+    @PutMapping("/{projectId}/document-chapters")
+    public ApiResponse<DocumentChapterSelectionResponse> applyDocumentChapters(@PathVariable String projectId,
+                                                                                @RequestBody DocumentChapterSelectionRequest request) {
+        return ApiResponse.ok(documentChapterSelectionService.apply(projectId,
+                request == null ? null : request.getChapterIds()));
     }
 
     @Operation(summary = "Get requirement coverage", description = "Compare business function modules in the original parsed Word text with the actual AI input.")
@@ -182,8 +203,10 @@ public class ProjectController {
 
     @Operation(summary = "Save review data", description = "Save manually reviewed COSMIC results before exporting Excel and Word.")
     @PutMapping("/{projectId}/review")
-    public ApiResponse<ReviewResponse> saveReview(@PathVariable String projectId, @RequestBody List<FunctionSplitRow> rows) {
-        return ApiResponse.ok(reviewService.saveReview(projectId, rows));
+    public ApiResponse<ReviewResponse> saveReview(@PathVariable String projectId,
+                                                  @RequestParam(value = "polishFunctionDescription", defaultValue = "false") boolean polishFunctionDescription,
+                                                  @RequestBody List<FunctionSplitRow> rows) {
+        return ApiResponse.ok(reviewService.saveReview(projectId, rows, polishFunctionDescription));
     }
 
     @Operation(summary = "Validate review rows", description = "Validate current function split rows with deterministic COSMIC rules.")

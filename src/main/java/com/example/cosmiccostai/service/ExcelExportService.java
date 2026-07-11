@@ -782,7 +782,6 @@ public class ExcelExportService {
             lastLevel1 = row.getLevel1Module();
             lastProcess = row.getFunctionProcess();
         }
-        applyGroupFunctionDescriptions(rows);
     }
 
     private String normalizeReuseDegree(String reuseDegree) {
