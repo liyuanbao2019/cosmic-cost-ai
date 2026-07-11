@@ -2451,6 +2451,17 @@ tbody tr.validation-suggestion .cell-preview {
   color: var(--error-text);
 }
 
+.export-progress-hint {
+  margin: -6px 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--primary-light);
+  border-radius: 8px;
+  background: #ecfeff;
+  color: var(--primary-dark);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .export-material-result {
   border-top: 1px solid var(--line);
   padding-top: 16px;

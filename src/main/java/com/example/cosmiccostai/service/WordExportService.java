@@ -56,9 +56,11 @@ public class WordExportService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String BODY_TEXT_STYLE = "2";
     private static final String SUBSECTION_HEADING_STYLE = BODY_TEXT_STYLE;
+    private static final String PROCESS_HEADING_STYLE = "9";
 
     private final FileStorageService fileStorageService;
     private final FunctionDescriptionAiService functionDescriptionAiService;
+    private final ExportProgressService exportProgressService;
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
@@ -66,16 +68,18 @@ public class WordExportService {
     public WordExportService(FileStorageService fileStorageService,
                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
                              @Value("${cosmic.template.word-path:}") String configuredTemplatePath) {
-        this(fileStorageService, outputBaseDir, configuredTemplatePath, new FunctionDescriptionAiService());
+        this(fileStorageService, outputBaseDir, configuredTemplatePath, new FunctionDescriptionAiService(), new ExportProgressService());
     }
 
     @Autowired
     public WordExportService(FileStorageService fileStorageService,
                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
                              @Value("${cosmic.template.word-path:}") String configuredTemplatePath,
-                             FunctionDescriptionAiService functionDescriptionAiService) {
+                             FunctionDescriptionAiService functionDescriptionAiService,
+                             ExportProgressService exportProgressService) {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
+        this.exportProgressService = exportProgressService;
         this.objectMapper = new ObjectMapper();
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
@@ -292,7 +296,24 @@ public class WordExportService {
             rowsByGroup.put(key, group.rows);
             groupByKey.put(key, group);
         }
-        Map<String, String> aiDescriptions = functionDescriptionAiService.generateDescriptions(rowsByGroup);
+        exportProgressService.startFunctionDescription(metadata.getId(), groups.size());
+        Map<String, String> aiDescriptions;
+        try {
+            aiDescriptions = functionDescriptionAiService.generateDescriptions(rowsByGroup,
+                    new FunctionDescriptionAiService.ProgressCallback() {
+                        @Override
+                        public void onStart(int total) {
+                            exportProgressService.startFunctionDescription(metadata.getId(), total);
+                        }
+
+                        @Override
+                        public void onBatchCompleted(int completedIncrement) {
+                            exportProgressService.advanceFunctionDescription(metadata.getId(), completedIncrement);
+                        }
+                    });
+        } finally {
+            exportProgressService.finishFunctionDescription(metadata.getId());
+        }
         for (Map.Entry<String, FunctionGroup> entry : groupByKey.entrySet()) {
             String description = aiDescriptions.get(entry.getKey());
             if (!StringUtils.hasText(description)) {
@@ -365,19 +386,17 @@ public class WordExportService {
                 lastLevel2 = null;
                 lastLevel3 = null;
             }
-            if (shouldEmitModuleHeading(group.level2, group.level1) && !group.level2.equals(lastLevel2)) {
+            if (StringUtils.hasText(group.level2) && !group.level2.equals(lastLevel2)) {
                 last = insertParagraphAfter(document, last, group.level2, "7", true);
                 lastLevel2 = group.level2;
                 lastLevel3 = null;
             }
-            boolean hasLevel3Heading = shouldEmitModuleHeading(group.level3, group.level2)
-                    && shouldEmitModuleHeading(group.level3, group.level1);
-            if (hasLevel3Heading && !group.level3.equals(lastLevel3)) {
+            if (StringUtils.hasText(group.level3) && !group.level3.equals(lastLevel3)) {
                 last = insertParagraphAfter(document, last, group.level3, "8", true);
                 lastLevel3 = group.level3;
             }
-            if (!hasLevel3Heading || !sameText(group.level3, group.functionProcess)) {
-                last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), BODY_TEXT_STYLE, true);
+            if (StringUtils.hasText(group.functionProcess)) {
+                last = insertParagraphAfter(document, last, group.functionProcess + zh("\uff08\u65b0\u589e\uff09"), PROCESS_HEADING_STYLE, true);
             }
             last = insertParagraphAfter(document, last, zh("\u5173\u952e\u65f6\u5e8f\u56fe/\u4e1a\u52a1\u903b\u8f91\u56fe"), SUBSECTION_HEADING_STYLE, true);
             last = insertImageAfter(document, last, group);
@@ -391,14 +410,6 @@ public class WordExportService {
             last = insertParagraphAfter(document, last, zh("\u529f\u80fd\u63cf\u8ff0"), SUBSECTION_HEADING_STYLE, true);
             last = insertBodyParagraphAfter(document, last, safe(group.description));
         }
-    }
-
-    private boolean shouldEmitModuleHeading(String value, String parentValue) {
-        return StringUtils.hasText(value) && !sameText(value, parentValue);
-    }
-
-    private boolean sameText(String left, String right) {
-        return safe(left).trim().equals(safe(right).trim());
     }
 
     private String groupKey(String level1, String level2, String level3, String functionProcess) {

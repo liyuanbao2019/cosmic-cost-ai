@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260711-excel-flow-label-1">
+  <link rel="stylesheet" href="/app.css?v=20260711-export-hint-1">
 </head>
 
 <body>
@@ -49,6 +49,7 @@
           <b>等待中</b>
         </div>
       </div>
+      <div id="export-progress-hint" class="export-progress-hint hidden"></div>
       <div id="export-material-result" class="export-material-result hidden"></div>
       <div class="dialog-actions">
         <button id="export-dialog-close" class="dialog-btn ghost-btn" onclick="closeExportDialog()">关闭</button>
@@ -525,6 +526,7 @@
     let requirementCoverageData = null;
     let documentChapterSelectionData = null;
     let exportedMaterialInfos = null;
+    let exportProgressPollTimer = null;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -566,9 +568,11 @@
     }
 
     function resetExportProgressDialog() {
+      stopExportProgressPolling();
       ["excel", "business", "word", "archive"].forEach(function (step) {
         setExportStep(step, "等待中", "pending");
       });
+      setExportProgressHint("");
       $("export-material-result").classList.add("hidden");
       $("export-material-result").innerHTML = "";
       $("export-dialog-close").disabled = false;
@@ -589,6 +593,49 @@
       const row = $("export-step-" + step);
       row.className = "export-progress-row " + (state || "pending");
       row.querySelector("b").textContent = text;
+    }
+
+    function setExportProgressHint(text) {
+      const hint = $("export-progress-hint");
+      if (!hint) {
+        return;
+      }
+      hint.textContent = text || "";
+      hint.classList.toggle("hidden", !text);
+    }
+
+    function startExportProgressPolling() {
+      stopExportProgressPolling();
+      pollExportProgress();
+      exportProgressPollTimer = window.setInterval(pollExportProgress, 1500);
+    }
+
+    function stopExportProgressPolling() {
+      if (exportProgressPollTimer) {
+        window.clearInterval(exportProgressPollTimer);
+        exportProgressPollTimer = null;
+      }
+    }
+
+    async function pollExportProgress() {
+      if (!currentProjectId || !isCurrentProjectExcelMode()) {
+        return;
+      }
+      try {
+        const response = await request("/api/projects/" + currentProjectId + "/export/word/progress");
+        const progress = response.data || {};
+        if (progress.total > 0) {
+          const message = (progress.message || "正在调用大模型生成功能描述")
+            + "（批次并发，完成数按功能过程累计）";
+          setExportProgressHint(message);
+          setExportStep("word", progress.completed + "/" + progress.total, "running");
+        }
+        if (progress.total > 0 && !progress.running && progress.completed >= progress.total) {
+          stopExportProgressPolling();
+        }
+      } catch (error) {
+        // 进度查询失败不影响正在进行的导出请求。
+      }
     }
 
     function setBusy(busy) {
@@ -3286,9 +3333,15 @@
           setExportStep("word", "进行中", "running");
           setMessage("正在按功能点拆分表生成需求说明书...");
           if (isCurrentProjectExcelMode()) {
-            setMessage("正在生成需求说明书：Excel 上传模式需要调用大模型按功能过程汇总生成功能描述，耗时会比普通导出更长，请耐心等待...");
+            const wordAiHint = "Excel 上传模式正在调用大模型，按功能过程汇总生成功能描述。这个步骤会比普通导出更久，请耐心等待，不要关闭页面。";
+            setExportProgressHint(wordAiHint);
+            setMessage(wordAiHint);
+            startExportProgressPolling();
+          } else {
+            setExportProgressHint("");
           }
           const wordResponse = await request("/api/projects/" + currentProjectId + "/export/word", { method: "POST" });
+          stopExportProgressPolling();
           const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
           setExportStep("word", "已完成", "done");
 
@@ -3309,6 +3362,7 @@
           $("outputPanel").classList.add("hidden");
           setMessage("送审材料已导出并完成 ZIP 打包。", "success");
         } catch (error) {
+          stopExportProgressPolling();
           markRunningExportFailed();
           setMessage(error.message || "导出送审材料失败。", "error");
           throw error;

@@ -13,6 +13,7 @@ import com.example.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.example.cosmiccostai.dto.ExtractResponse;
 import com.example.cosmiccostai.dto.ExcelExportResponse;
 import com.example.cosmiccostai.dto.ExportFileActionResponse;
+import com.example.cosmiccostai.dto.ExportProgressResponse;
 import com.example.cosmiccostai.dto.ParseResponse;
 import com.example.cosmiccostai.dto.ProjectListResponse;
 import com.example.cosmiccostai.dto.ReviewResponse;
@@ -30,6 +31,7 @@ import com.example.cosmiccostai.service.DocumentChapterSelectionService;
 import com.example.cosmiccostai.service.DeepSplitAiService;
 import com.example.cosmiccostai.service.ExcelExportService;
 import com.example.cosmiccostai.service.ExportFileService;
+import com.example.cosmiccostai.service.ExportProgressService;
 import com.example.cosmiccostai.service.MaterialArchiveService;
 import com.example.cosmiccostai.service.ProjectListService;
 import com.example.cosmiccostai.service.ReviewService;
@@ -69,6 +71,7 @@ public class ProjectController {
     private final ExcelExportService excelExportService;
     private final WordExportService wordExportService;
     private final ExportFileService exportFileService;
+    private final ExportProgressService exportProgressService;
     private final MaterialArchiveService materialArchiveService;
     private final RuleValidationService ruleValidationService;
     private final AiReviewValidationService aiReviewValidationService;
@@ -85,6 +88,7 @@ public class ProjectController {
                              ExcelExportService excelExportService,
                              WordExportService wordExportService,
                              ExportFileService exportFileService,
+                             ExportProgressService exportProgressService,
                              MaterialArchiveService materialArchiveService,
                              RuleValidationService ruleValidationService,
                              AiReviewValidationService aiReviewValidationService,
@@ -100,6 +104,7 @@ public class ProjectController {
         this.excelExportService = excelExportService;
         this.wordExportService = wordExportService;
         this.exportFileService = exportFileService;
+        this.exportProgressService = exportProgressService;
         this.materialArchiveService = materialArchiveService;
         this.ruleValidationService = ruleValidationService;
         this.aiReviewValidationService = aiReviewValidationService;
@@ -254,6 +259,12 @@ public class ProjectController {
     @PostMapping("/{projectId}/export/word")
     public ApiResponse<WordExportResponse> exportWord(@PathVariable String projectId) {
         return ApiResponse.ok(wordExportService.export(projectId));
+    }
+
+    @Operation(summary = "Get Word export progress", description = "Return AI function description generation progress during Word export.")
+    @GetMapping("/{projectId}/export/word/progress")
+    public ApiResponse<ExportProgressResponse> wordExportProgress(@PathVariable String projectId) {
+        return ApiResponse.ok(exportProgressService.get(projectId));
     }
 
     @Operation(summary = "Export review material archive", description = "Create a ZIP containing attachment 1, attachment 2, and attachment 3 after all three files have been exported.")

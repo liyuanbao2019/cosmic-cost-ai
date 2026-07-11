@@ -496,11 +496,11 @@ public class ReviewService {
     }
 
     private String sourceType(ProjectMetadata metadata) {
-        String status = safe(metadata.getStatus());
-        String fileType = safe(metadata.getFileType());
-        String storedPath = safe(metadata.getStoredFilePath());
-        String sourceFileName = safe(metadata.getSourceFileName());
-        if (status.startsWith("EXCEL")
+        String status = safe(metadata.getStatus()).toLowerCase(Locale.ROOT);
+        String fileType = safe(metadata.getFileType()).toLowerCase(Locale.ROOT);
+        String storedPath = safe(metadata.getStoredFilePath()).toLowerCase(Locale.ROOT);
+        String sourceFileName = safe(metadata.getSourceFileName()).toLowerCase(Locale.ROOT);
+        if (status.startsWith("excel")
                 || "xls".equals(fileType)
                 || "xlsx".equals(fileType)
                 || storedPath.contains("split-review")
@@ -509,10 +509,6 @@ public class ReviewService {
             return "EXCEL";
         }
         return "DOCUMENT";
-    }
-
-    private String safe(String value) {
-        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private String zh(String value) {

@@ -1,52 +1,84 @@
+# Web 服务配置
 server:
+  # 后端服务端口；本地访问地址通常是 http://localhost:8080
   port: 8080
 
+# Spring Boot 基础配置
 spring:
   application:
+    # 应用名称，主要用于日志、监控、Spring 应用标识
     name: cosmic-cost-ai
   servlet:
     multipart:
+      # 上传文件的临时落盘目录；可通过环境变量 COSMIC_MULTIPART_LOCATION 覆盖
       location: ${COSMIC_MULTIPART_LOCATION:./storage/tmp}
+      # 单个上传文件最大大小；用于 Word/Excel 大文件上传限制
       max-file-size: 500MB
+      # 单次 HTTP 请求最大大小；需要略大于 max-file-size，避免 multipart 请求整体超限
       max-request-size: 600MB
 
+# Spring Boot Actuator 监控端点配置
 management:
   endpoints:
     web:
       exposure:
+        # 对外暴露的监控端点；health 用于健康检查，info 用于应用信息
         include: health,info
 
+# 日志配置
 logging:
   level:
+    # 关闭 Apache POI 读取部分 Excel/Office 关系文件时的噪声日志；这类日志通常不影响业务处理
     org.apache.poi.openxml4j.opc.PackageRelationshipCollection: OFF
 
+# OpenAPI / Swagger 接口文档配置
 springdoc:
   api-docs:
+    # OpenAPI JSON 文档地址
     path: /v3/api-docs
   swagger-ui:
+    # Swagger UI 页面地址
     path: /swagger-ui.html
 
+# COSMIC 软件造价工作台业务配置
 cosmic:
   storage:
+    # 项目过程文件存储目录；包括上传文件、解析结果、审核表、AI 深度审核状态等
     base-dir: storage
   output:
+    # 导出文件输出目录；包括功能点拆分表、业务需求汇总表、需求说明书、送审 ZIP 包
     base-dir: output
   template:
+    # 功能点拆分表 Excel 模板路径；可通过 COSMIC_EXCEL_TEMPLATE 环境变量覆盖
     excel-path: ${COSMIC_EXCEL_TEMPLATE:templates/附件3-XX项目功能点拆分表V1.0.xlsx}
+    # 需求说明书 Word 模板路径；可通过 COSMIC_WORD_TEMPLATE 环境变量覆盖
     word-path: ${COSMIC_WORD_TEMPLATE:templates/附件1-XX项目需求说明书V1.0.docx}
   ai:
+    # 当前大模型供应商标识；主要用于配置可读性和后续扩展，目前实际调用按 base-url/api-key/model 执行
     provider: deepseek
+    # 大模型接口 Base URL；默认 DeepSeek OpenAI 兼容接口，可通过 OPENAI_BASE_URL 覆盖
     base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
+    # 大模型 API Key；优先读取 OPENAI_API_KEY，其次读取 DEEPSEEK_API_KEY
     api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
+    # 大模型名称；用于 AI 拆分、AI 深度审核、导出 Word 时生成功能描述等
     model: ${OPENAI_MODEL:deepseek-v4-pro}
+    # 普通 AI 调用超时时间，单位秒；大文档或导出功能描述较慢时可适当调大
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
+    # 普通 AI 调用失败后的最大重试次数；网络抖动或模型服务短暂失败时使用
     max-retries: ${OPENAI_MAX_RETRIES:2}
     deep-split:
+      # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
       worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:1}
+      # AI 深度审核单个分批调用超时时间，单位秒；避免某一批长时间卡死
       chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:360}
+      # AI 深度审核单批提示词最大字符数；越大单批上下文越多，但越容易超时
       chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
+      # AI 深度审核每批检索原始需求证据的最大字符数；用于控制原文证据长度和调用成本
       evidence-chars: ${COSMIC_DEEP_SPLIT_EVIDENCE_CHARS:5000}
+      # AI 深度审核单次任务允许处理的最大审核表行数；防止超大表格误触发导致长时间占用资源
       max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}
+      # AI 分批并发数；同时用于 AI 深度审核分批并发，以及 Excel 导出 Word 时功能描述生成的批次并发
       chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:10}
   rules:
+    # 规则初审使用的规则说明文件路径；默认读取前端 static 目录下的 split-check-rules.md
     split-rules-path: ${COSMIC_SPLIT_RULES_PATH:classpath:/static/split-check-rules.md}
