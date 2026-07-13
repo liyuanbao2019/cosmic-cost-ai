@@ -61,6 +61,7 @@ public class DeepSplitAiService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Set<String> OPERATIONS = new HashSet<String>();
     private static final int MIN_REQUEST_ROWS_LIMIT = 2000;
+    private static final double MIN_ACCEPTED_CONFIDENCE = 0.78;
     private static final int EVIDENCE_BLOCK_CHARS = 900;
     private static final int MAX_EVIDENCE_BLOCKS = 10;
     private static final int MAX_GROUPS_PER_CHUNK = 6;
@@ -473,6 +474,7 @@ public class DeepSplitAiService {
         StringBuilder builder = new StringBuilder();
         builder.append("你是资深 COSMIC 功能点分析专家。请对当前批次的完整功能过程进行结构化二次审校。\n");
         builder.append("只输出确有必要且可以直接采纳的变更建议；正确内容不要输出建议。\n");
+        builder.append("这是送审前终审，不是文字润色。已经满足 COSMIC 基本规则的功能过程视为收敛，不要为了“更细一点/更完整一点/表达更顺一点”反复提出建议。\n");
         builder.append("允许的 operation 只有 SPLIT_FUNCTION、ADD_MISSING_MOVEMENT、MERGE_DUPLICATE。\n");
         builder.append("- SPLIT_FUNCTION：一个功能过程包含多个独立触发事件或业务结果，需要拆为多个功能过程。\n");
         builder.append("- ADD_MISSING_MOVEMENT：当前功能过程遗漏了有明确依据的 E/R/W/X 数据移动。\n");
@@ -485,8 +487,12 @@ public class DeepSplitAiService {
         builder.append("5. 每个功能过程必须由 E 开始，并以 W 或 X 形成业务结果；R/W 只用于持久化数据组，X 必须跨软件边界输出。\n");
         builder.append("6. sourceReferences 只能填写下方实际提供的 REQ-Bxxxx 或 EXCEL-ROW-x 编号；evidence 简要写明依据。\n");
         builder.append("7. 如果证据不足，宁可不输出建议，不要猜测。\n");
+        builder.append("8. 禁止输出只改变名称、描述、措辞、模块归类或顺序的建议；必须改变功能边界、数据移动结构、重复计量或 CFP 才能输出。\n");
+        builder.append("9. 对同一功能过程，不要把已经可计量的 E/R/W/X 继续拆成更碎颗粒；只有存在独立触发事件、独立业务目的或独立业务结果时才允许拆分。\n");
         if (!state.isSourceAvailable()) {
-            builder.append("8. 当前没有原始需求文档。不得新增表中没有体现的业务功能；只能依据 EXCEL-ROW 现有字段修正功能边界、重复项或明显缺失的数据移动。\n");
+            builder.append("10. 当前没有原始需求文档。不得新增表中没有体现的业务功能；只能依据 EXCEL-ROW 现有字段修正功能边界、重复项或明显缺失的数据移动。\n");
+        } else {
+            builder.append("10. 当前存在原始需求证据。涉及新增、拆分、补充数据移动的建议，sourceReferences 必须至少包含一个 REQ-Bxxxx 证据编号，不能只依据 EXCEL-ROW。\n");
         }
         builder.append("输出严格 JSON 数组，不要 Markdown。元素格式：\n");
         builder.append("{\"operation\":\"SPLIT_FUNCTION\",\"title\":\"\",\"reason\":\"\",\"evidence\":\"\",\"sourceReferences\":[\"REQ-B0001\"],\"confidence\":0.0,\"targetRowNumbers\":[1],\"replacementRows\":[{...}]}\n\n");
@@ -609,6 +615,9 @@ public class DeepSplitAiService {
             if (references.isEmpty() || !StringUtils.hasText(suggestion.getEvidence()) || !StringUtils.hasText(suggestion.getReason())) {
                 continue;
             }
+            if (state.isSourceAvailable() && !hasRequirementReference(references)) {
+                continue;
+            }
             FunctionSplitRow base = state.getOriginalRows().get(targets.get(0) - 1);
             List<FunctionSplitRow> replacements = normalizeReplacementRows(suggestion.getReplacementRows(), base);
             if (replacements.isEmpty()) {
@@ -623,10 +632,17 @@ public class DeepSplitAiService {
             if ("MERGE_DUPLICATE".equals(suggestion.getOperation()) && targets.size() < 2) {
                 continue;
             }
+            double confidence = Math.max(0, Math.min(1, suggestion.getConfidence()));
+            if (confidence < MIN_ACCEPTED_CONFIDENCE) {
+                continue;
+            }
+            if (!hasMaterialChange(state.getOriginalRows(), targets, replacements)) {
+                continue;
+            }
             suggestion.setTargetRowNumbers(targets);
             suggestion.setSourceReferences(references);
             suggestion.setReplacementRows(replacements);
-            suggestion.setConfidence(Math.max(0, Math.min(1, suggestion.getConfidence())));
+            suggestion.setConfidence(confidence);
             suggestion.setCfpBefore(cfpForTargets(state.getOriginalRows(), targets));
             suggestion.setCfpAfter(cfpForRows(replacements));
             suggestion.setId(state.getJobId() + "-" + chunk.getId() + "-S" + (++index));
@@ -663,6 +679,18 @@ public class DeepSplitAiService {
             }
         }
         return result;
+    }
+
+    private boolean hasRequirementReference(List<String> references) {
+        if (references == null) {
+            return false;
+        }
+        for (String reference : references) {
+            if (text(reference).toUpperCase(Locale.ROOT).startsWith("REQ-B")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private List<FunctionSplitRow> normalizeReplacementRows(List<FunctionSplitRow> values, FunctionSplitRow base) {
@@ -705,6 +733,32 @@ public class DeepSplitAiService {
             values.add(text(row.getFunctionProcess()));
         }
         return values.size();
+    }
+
+    private boolean hasMaterialChange(List<FunctionSplitRow> originalRows,
+                                      List<Integer> targetNumbers,
+                                      List<FunctionSplitRow> replacementRows) {
+        List<String> before = new ArrayList<String>();
+        for (Integer number : targetNumbers) {
+            if (number != null && number >= 1 && number <= originalRows.size()) {
+                before.add(materialSignature(originalRows.get(number - 1)));
+            }
+        }
+        List<String> after = new ArrayList<String>();
+        for (FunctionSplitRow row : replacementRows) {
+            after.add(materialSignature(row));
+        }
+        Collections.sort(before);
+        Collections.sort(after);
+        return !before.equals(after);
+    }
+
+    private String materialSignature(FunctionSplitRow row) {
+        return text(row.getMovementType()).toUpperCase(Locale.ROOT) + "|"
+                + text(row.getDataGroup()) + "|"
+                + text(row.getDataAttributes()) + "|"
+                + normalizeReuse(row.getReuseDegree()) + "|"
+                + cfpByReuse(normalizeReuse(row.getReuseDegree()));
     }
 
     private void mergeSuggestions(List<DeepSplitSuggestion> existing, List<DeepSplitSuggestion> additions) {
@@ -907,16 +961,21 @@ public class DeepSplitAiService {
         response.setSourceType(state.getSourceType());
         response.setSourceAvailable(state.isSourceAvailable());
         response.setTotalChunks(state.getChunks().size());
+        response.setChunkParallelism(chunkParallelism);
         int completed = 0;
+        int running = 0;
         int failed = 0;
         for (DeepSplitChunk chunk : state.getChunks()) {
             if ("COMPLETED".equals(chunk.getStatus())) {
                 completed++;
+            } else if ("RUNNING".equals(chunk.getStatus())) {
+                running++;
             } else if ("FAILED".equals(chunk.getStatus())) {
                 failed++;
             }
         }
         response.setCompletedChunks(completed);
+        response.setRunningChunks(running);
         response.setFailedChunks(failed);
         int finished = completed + failed;
         response.setProgressPercent(state.getChunks().isEmpty() ? 0

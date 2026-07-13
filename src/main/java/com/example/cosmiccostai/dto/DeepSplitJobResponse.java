@@ -13,7 +13,9 @@ public class DeepSplitJobResponse {
     private boolean sourceAvailable;
     private int totalChunks;
     private int completedChunks;
+    private int runningChunks;
     private int failedChunks;
+    private int chunkParallelism;
     private int progressPercent;
     private String createdAt;
     private String updatedAt;
@@ -84,12 +86,28 @@ public class DeepSplitJobResponse {
         this.completedChunks = completedChunks;
     }
 
+    public int getRunningChunks() {
+        return runningChunks;
+    }
+
+    public void setRunningChunks(int runningChunks) {
+        this.runningChunks = runningChunks;
+    }
+
     public int getFailedChunks() {
         return failedChunks;
     }
 
     public void setFailedChunks(int failedChunks) {
         this.failedChunks = failedChunks;
+    }
+
+    public int getChunkParallelism() {
+        return chunkParallelism;
+    }
+
+    public void setChunkParallelism(int chunkParallelism) {
+        this.chunkParallelism = chunkParallelism;
     }
 
     public int getProgressPercent() {

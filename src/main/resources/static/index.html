@@ -523,6 +523,7 @@
     let deepSplitRowsSnapshot = null;
     let deepSplitRowOrigins = [];
     let deepSplitBulkApplying = false;
+    let reviewTableLockedState = false;
     let requirementCoverageData = null;
     let documentChapterSelectionData = null;
     let exportedMaterialInfos = null;
@@ -1850,6 +1851,7 @@
       deepSplitRowsSnapshot = null;
       deepSplitRowOrigins = [];
       deepSplitBulkApplying = false;
+      reviewTableLockedState = false;
       const panel = $("deepSplitPanel");
       if (panel) {
         panel.classList.add("hidden");
@@ -1864,6 +1866,22 @@
       return status === "COMPLETED" || status === "PARTIAL" || status === "FAILED";
     }
 
+    function deepSplitRunning() {
+      return !!(currentDeepSplitJob && (currentDeepSplitJob.status === "QUEUED" || currentDeepSplitJob.status === "RUNNING"));
+    }
+
+    function isReviewTableLocked() {
+      return deepSplitRunning();
+    }
+
+    function blockReviewTableEditIfLocked() {
+      if (!isReviewTableLocked()) {
+        return false;
+      }
+      showDialog("深度审校运行中", "AI 深度审校正在按当前审核表分批处理。为避免建议失效，运行期间审核表已锁定，完成后会自动恢复编辑。");
+      return true;
+    }
+
     function deepSplitRowsChanged() {
       return !!(deepSplitRowsSnapshot && deepSplitRowsSnapshot !== JSON.stringify(splitRows.map(rowForSubmit)));
     }
@@ -1873,8 +1891,11 @@
       if (!panel) {
         return;
       }
+      currentDeepSplitJob = job || currentDeepSplitJob;
       panel.classList.remove("hidden");
       const running = job && (job.status === "QUEUED" || job.status === "RUNNING");
+      const wasLocked = reviewTableLockedState;
+      reviewTableLockedState = !!running;
       const button = $("deepSplitBtn");
       if (button) {
         button.disabled = !!running;
@@ -1884,16 +1905,20 @@
       $("deepSplitProgressBar").style.width = Math.max(0, Math.min(100, Number(job && job.progressPercent) || 0)) + "%";
       const total = Number(job && job.totalChunks) || 0;
       const completed = Number(job && job.completedChunks) || 0;
+      const runningChunks = Number(job && job.runningChunks) || 0;
       const failed = Number(job && job.failedChunks) || 0;
+      const chunkParallelism = Number(job && job.chunkParallelism) || 0;
       const sourceLabel = job && job.sourceAvailable ? "原始需求证据" : "仅审核表证据";
       $("deepSplitMeta").textContent = "批次：" + completed + "/" + total
+        + (runningChunks ? "，运行中 " + runningChunks : "")
         + (failed ? "，失败 " + failed : "") + "；依据：" + sourceLabel
+        + "；并发：" + (chunkParallelism || "-")
         + "；模型：" + textOr(job && job.model, "-");
       const warnings = ((job && job.warnings) || []).slice();
       if (deepSplitRowsChanged()) {
         warnings.unshift("当前审核表已被手动修改：本次深度审校建议仍可查看和定位，但不能采纳或一键全部采纳；请重新执行 AI 深度审校获取可采纳建议。");
       } else if (running) {
-        warnings.unshift("深度审校运行期间请尽量不要手动修改下方审核表；修改后，本次建议会按旧表失效，不能再采纳。");
+        warnings.unshift("深度审校运行期间审核表已锁定，完成后会自动恢复编辑。");
       }
       $("deepSplitWarnings").innerHTML = warnings.map(function (warning) {
         return "<div>• " + escapeHtml(warning) + "</div>";
@@ -1917,6 +1942,12 @@
         applyAllButton.textContent = deepSplitBulkApplying ? "正在批量采纳..." : "一键采纳可用建议";
       }
       renderDeepSplitSuggestions(suggestions, running, job && job.status);
+      if (wasLocked !== reviewTableLockedState) {
+        closeCellEditor();
+        renderTable();
+      } else {
+        updateReviewEditControls();
+      }
     }
 
     function renderDeepSplitSuggestions(suggestions, running, status) {
@@ -2322,6 +2353,7 @@
     function renderTable() {
       const body = $("reviewBody");
       body.innerHTML = "";
+      updateReviewEditControls();
       syncSelectedRows();
       updateReviewFilterOptions();
       const visibleRows = filteredRowEntries();
@@ -2454,6 +2486,7 @@
     function addTextCell(tr, row, index, field) {
       const td = document.createElement("td");
       td.className = "field-" + field;
+      const locked = isReviewTableLocked();
       if (compactTextFields[field]) {
         const preview = document.createElement("div");
         preview.className = "cell-preview";
@@ -2463,6 +2496,7 @@
         editButton.type = "button";
         editButton.className = "ghost mini edit-cell-btn";
         editButton.textContent = "编辑";
+        editButton.disabled = locked;
         editButton.onclick = function () {
           openCellEditor(index, field);
         };
@@ -2475,6 +2509,7 @@
       input.value = row[field] || "";
       input.dataset.index = index;
       input.dataset.field = field;
+      input.disabled = locked;
       input.addEventListener("input", onCellChange);
       td.appendChild(input);
       tr.appendChild(td);
@@ -2527,6 +2562,7 @@
     function addSelectCell(tr, row, index, field, options) {
       const td = document.createElement("td");
       td.className = "field-" + field;
+      const locked = isReviewTableLocked();
       const select = document.createElement("select");
       options.forEach(function (item) {
         const option = document.createElement("option");
@@ -2537,6 +2573,7 @@
       select.value = row[field] || options[0];
       select.dataset.index = index;
       select.dataset.field = field;
+      select.disabled = locked;
       select.addEventListener("change", onCellChange);
       td.appendChild(select);
       tr.appendChild(td);
@@ -2710,6 +2747,9 @@
     }
 
     function openCellEditor(index, field) {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       cellEditorState = { index: index, field: field };
       $("cell-editor-title").textContent = compactTextFields[field] || "编辑内容";
       $("cell-editor-text").value = splitRows[index][field] || "";
@@ -2729,6 +2769,9 @@
     }
 
     function saveCellEditor() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       if (!cellEditorState) {
         return;
       }
@@ -2745,10 +2788,12 @@
     function addActionCell(tr, index) {
       const td = document.createElement("td");
       td.className = "row-actions";
+      const locked = isReviewTableLocked();
       const copyButton = document.createElement("button");
       copyButton.type = "button";
       copyButton.className = "ghost mini";
       copyButton.textContent = "复制";
+      copyButton.disabled = locked;
       copyButton.onclick = function () {
         copyRow(index);
       };
@@ -2756,6 +2801,7 @@
       deleteButton.type = "button";
       deleteButton.className = "ghost mini danger";
       deleteButton.textContent = "删除";
+      deleteButton.disabled = locked;
       deleteButton.onclick = function () {
         deleteRow(index);
       };
@@ -2764,7 +2810,32 @@
       tr.appendChild(td);
     }
 
+    function updateReviewEditControls() {
+      const locked = isReviewTableLocked();
+      [
+        "batchField",
+        "batchValue",
+        "batchSelectValue"
+      ].forEach(function (id) {
+        const el = $(id);
+        if (el) {
+          el.disabled = locked;
+        }
+      });
+      document.querySelectorAll("#reviewPanel .review-actions button, #reviewPanel .batch-tools button").forEach(function (button) {
+        if (button.id === "deepSplitBtn" || button.id === "densityBtn") {
+          return;
+        }
+        button.disabled = locked;
+      });
+    }
+
     function onCellChange(event) {
+      if (isReviewTableLocked()) {
+        event.preventDefault();
+        renderTable();
+        return;
+      }
       const target = event.target;
       const index = Number(target.dataset.index);
       const field = target.dataset.field;
@@ -2855,6 +2926,9 @@
     }
 
     function insertReviewRow(position) {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       const indexes = selectedRowIndexes();
       if (indexes.length !== 1) {
         showDialog("请选择一行", "请先勾选一行作为插入位置，再选择“上方插入”或“下方插入”。");
@@ -2871,6 +2945,9 @@
     }
 
     function copyRow(index) {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       if (index < 0 || index >= splitRows.length) {
         return;
       }
@@ -2882,6 +2959,9 @@
     }
 
     function deleteRow(index) {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       if (index < 0 || index >= splitRows.length) {
         return;
       }
@@ -2930,6 +3010,9 @@
     }
 
     function copySelectedRows() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       const indexes = selectedRowIndexes();
       if (!indexes.length) {
         showDialog("请选择行", "请先勾选需要复制的拆分行。");
@@ -2948,6 +3031,9 @@
     }
 
     function deleteSelectedRows() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       const indexes = selectedRowIndexes();
       if (!indexes.length) {
         showDialog("请选择行", "请先勾选需要删除的拆分行。");
@@ -2998,6 +3084,9 @@
     }
 
     function applyBatchChange() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       const indexes = selectedRowIndexes();
       if (!indexes.length) {
         showDialog("请选择行", "请先勾选需要批量修改的拆分行。");
@@ -3219,6 +3308,9 @@
     }
 
     async function saveReview() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       await withBusy(async function () {
         setMessage("正在保存审核修改...");
         const response = await request("/api/projects/" + currentProjectId + "/review", {
@@ -3305,6 +3397,9 @@
     }
 
     async function exportReviewMaterials() {
+      if (blockReviewTableEditIfLocked()) {
+        return;
+      }
       if (!currentProjectId || !splitRows.length) {
         showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
         return;

@@ -70,7 +70,7 @@ cosmic:
       # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
       worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:1}
       # AI 深度审核单个分批调用超时时间，单位秒；避免某一批长时间卡死
-      chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:360}
+      chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:720}
       # AI 深度审核单批提示词最大字符数；越大单批上下文越多，但越容易超时
       chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
       # AI 深度审核每批检索原始需求证据的最大字符数；用于控制原文证据长度和调用成本
