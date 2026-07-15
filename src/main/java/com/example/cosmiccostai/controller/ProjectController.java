@@ -170,10 +170,10 @@ public class ProjectController {
 
     @Operation(summary = "Save edited AI requirement input", description = "Persist a user-corrected requirement input and use it for subsequent AI extraction.")
     @PutMapping("/{projectId}/requirement-input")
-    public ApiResponse<RequirementCoverageResponse> saveRequirementInput(@PathVariable String projectId,
-                                                                           @RequestBody RequirementInputRequest request) {
+    public ApiResponse<Void> saveRequirementInput(@PathVariable String projectId,
+                                                   @RequestBody RequirementInputRequest request) {
         requirementInputService.saveManualInput(projectId, request == null ? "" : request.getContent());
-        return ApiResponse.ok(requirementCoverageService.getCoverage(projectId));
+        return ApiResponse.ok(null);
     }
 
     @Operation(summary = "AI 结构化提取", description = "只将 document-text.txt 中的“需求细则”章节发送给 AI，输出 module/function/description。")

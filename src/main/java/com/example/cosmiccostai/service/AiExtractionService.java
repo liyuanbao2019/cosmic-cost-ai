@@ -48,7 +48,6 @@ public class AiExtractionService {
     private final long timeoutSeconds;
     private final int maxRetries;
     private final SplitRuleConfigService splitRuleConfigService;
-    private final RequirementCoverageService requirementCoverageService;
     private final RequirementInputService requirementInputService;
 
     @Autowired
@@ -59,7 +58,6 @@ public class AiExtractionService {
                                @Value("${cosmic.ai.timeout-seconds:360}") long timeoutSeconds,
                                @Value("${cosmic.ai.max-retries:2}") int maxRetries,
                                SplitRuleConfigService splitRuleConfigService,
-                               RequirementCoverageService requirementCoverageService,
                                RequirementInputService requirementInputService) {
         this.fileStorageService = fileStorageService;
         this.baseUrl = baseUrl;
@@ -68,7 +66,6 @@ public class AiExtractionService {
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
         this.splitRuleConfigService = splitRuleConfigService;
-        this.requirementCoverageService = requirementCoverageService;
         this.requirementInputService = requirementInputService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
@@ -83,12 +80,10 @@ public class AiExtractionService {
                                String splitRulesPath) {
         this(fileStorageService, baseUrl, apiKey, model, timeoutSeconds, maxRetries,
                 new SplitRuleConfigService("target/test-config/split-check-rules.md"),
-                new RequirementCoverageService(fileStorageService),
                 new RequirementInputService(fileStorageService));
     }
 
     public ExtractResponse extract(String projectId) {
-        requirementCoverageService.ensureReadyForExtraction(projectId);
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
@@ -106,7 +101,6 @@ public class AiExtractionService {
         if (!StringUtils.hasText(prompt)) {
             throw new BusinessException("AI提示词不能为空");
         }
-        requirementCoverageService.ensureReadyForExtraction(projectId);
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 

@@ -300,7 +300,8 @@
           <span id="parsePreviewHint" class="parse-preview-hint"></span>
         </div>
         <div class="parse-editor-actions">
-          <button id="saveRequirementInputBtn" type="button" onclick="saveEditedRequirementInput()">保存并重新校验</button>
+          <button id="saveRequirementInputBtn" type="button" class="secondary" onclick="saveEditedRequirementInput()">保存修改</button>
+          <button id="continueAfterInputReviewBtn" type="button" onclick="continueAfterInputReview()">开始 AI 拆分</button>
           <button type="button" class="ghost" onclick="toggleParsePreview()">收起</button>
         </div>
       </div>
@@ -308,26 +309,6 @@
         AI 拆分内容 <span>可直接编辑，发现遗漏可粘贴补充</span>
       </label>
       <textarea id="preview" class="preview preview-editor" spellcheck="false" placeholder="解析内容会显示在这里。发现遗漏时，可直接粘贴或修改后保存。"></textarea>
-    </section>
-
-    <section id="requirementCoveragePanel" class="panel hidden">
-      <div class="panel-header">
-        <div class="panel-title-row">
-          <h2>拆分前解析完整性校验</h2>
-          <span id="requirementCoverageSummary" class="coverage-summary"></span>
-        </div>
-      </div>
-      <p class="coverage-intro">系统从所选业务章节识别功能模块，并与上方实际 AI 输入逐项比对；这里展示的是模块覆盖情况，不是另一份解析内容。</p>
-      <div class="coverage-table-wrap">
-        <table class="coverage-table">
-          <thead><tr><th>处理</th><th>原文功能模块</th><th>原文内容</th><th>AI 输入状态</th></tr></thead>
-          <tbody id="requirementCoverageRows"></tbody>
-        </table>
-      </div>
-      <div class="coverage-actions">
-        <button id="includeCoverageModulesBtn" type="button" class="secondary" onclick="includeSelectedCoverageModules()">将选中缺失模块纳入 AI 输入</button>
-        <button id="continueAfterCoverageBtn" type="button" onclick="continueAfterCoverageCheck()">确认覆盖，开始 AI 拆分</button>
-      </div>
     </section>
 
     <section id="reviewPanel" class="panel hidden">
@@ -525,7 +506,6 @@
     let deepSplitRowOrigins = [];
     let deepSplitBulkApplying = false;
     let reviewTableLockedState = false;
-    let requirementCoverageData = null;
     let documentChapterSelectionData = null;
     let exportedMaterialInfos = null;
     let exportProgressPollTimer = null;
@@ -679,7 +659,6 @@
       if (splitMode === "excel") {
         $("parsePanel").classList.add("hidden");
         $("chapterSelectionPanel").classList.add("hidden");
-        $("requirementCoveragePanel").classList.add("hidden");
       }
       if (!keepFiles) {
         $("fileInput").value = "";
@@ -1024,7 +1003,6 @@
       validationIssuesByRow = {};
       lastValidationResult = null;
       currentDeepSplitJob = null;
-      requirementCoverageData = null;
       documentChapterSelectionData = null;
       deepSplitRowOrigins = [];
       resetDeepSplitPanel();
@@ -1054,7 +1032,6 @@
       $("projectBadge").className = "badge muted";
       $("parsePanel").classList.add("hidden");
       $("chapterSelectionPanel").classList.add("hidden");
-      $("requirementCoveragePanel").classList.add("hidden");
       $("reviewPanel").classList.add("hidden");
       $("outputPanel").classList.add("hidden");
       $("outputList").innerHTML = "";
@@ -1111,16 +1088,8 @@
         markDone("parse");
         $("parsePanel").classList.remove("hidden");
         await loadDocumentChapters(true);
-        await loadRequirementCoverage();
-        setMessage("请先确认“拆分前解析完整性校验”；确认覆盖后才会调用 AI 拆分。", "success");
+        setMessage("章节已生成 AI 输入；确认内容后可直接开始 AI 拆分。", "success");
       });
-    }
-
-    async function loadRequirementCoverage() {
-      const response = await request("/api/projects/" + currentProjectId + "/requirement-coverage");
-      requirementCoverageData = response.data || {};
-      renderRequirementCoverage(requirementCoverageData);
-      $("requirementCoveragePanel").classList.remove("hidden");
     }
 
     async function loadDocumentChapters(applyInitialSelection) {
@@ -1217,8 +1186,7 @@
           $("preview").scrollTop = 0;
           $("parsePreviewHint").textContent = "已按章节生成 AI 输入，共 "
             + Number((documentChapterSelectionData.aiInput || "").length).toLocaleString() + " 字。";
-          await loadRequirementCoverage();
-          setMessage("章节选择已应用，请确认 AI 输入和完整性校验。", "success");
+          setMessage("章节选择已应用；确认上方 AI 输入后可直接开始拆分。", "success");
         } finally {
           button.disabled = false;
         }
@@ -1240,79 +1208,36 @@
         button.disabled = true;
         button.textContent = "保存中...";
         try {
-          setMessage("正在保存人工修订的 AI 输入，并重新执行完整性校验...");
-          const response = await request("/api/projects/" + currentProjectId + "/requirement-input", {
+          setMessage("正在保存人工修订的 AI 输入...");
+          await request("/api/projects/" + currentProjectId + "/requirement-input", {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ content: content })
           });
-          requirementCoverageData = response.data || {};
-          renderRequirementCoverage(requirementCoverageData);
-          $("requirementCoveragePanel").classList.remove("hidden");
           $("parsePreviewHint").textContent = "已保存人工修订内容，共 " + content.length.toLocaleString()
             + " 字；后续 AI 拆分将使用此版本。";
           setMessage("人工修订内容已保存，将作为实际 AI 输入。", "success");
         } finally {
           button.disabled = false;
-          button.textContent = "保存修改并重新校验";
+          button.textContent = "保存修改";
         }
       });
     }
 
-    function renderRequirementCoverage(data) {
-      const total = Number(data.sourceModuleCount || 0);
-      const included = Number(data.includedModuleCount || 0);
-      const missing = Number(data.missingModuleCount || 0);
-      $("requirementCoverageSummary").textContent = total
-        ? "当前 AI 输入 " + Number(data.aiInputLength || 0).toLocaleString() + " 字；识别 " + total
-          + " 个功能模块，已覆盖 " + included + " 个，缺失 " + missing + " 个"
-        : "当前 AI 输入 " + Number(data.aiInputLength || 0).toLocaleString()
-          + " 字；未识别到可逐项核对的功能模块";
-      const rows = data.modules || [];
-      $("requirementCoverageRows").innerHTML = rows.map(function (module) {
-        const missingModule = !module.included;
-        const displayNumber = /^OUTLINE/.test(module.number || "") ? "" : (module.number || "");
-        return "<tr class=\"" + (missingModule ? "coverage-missing" : "coverage-included") + "\">"
-          + "<td>" + (missingModule ? "<label><input type=\"checkbox\" class=\"coverage-module-check\" value=\"" + escapeHtml(module.number) + "\" checked> 纳入</label>" : "—") + "</td>"
-          + "<td>" + (displayNumber ? "<b>" + escapeHtml(displayNumber) + "</b> " : "") + escapeHtml(module.title) + "</td>"
-          + "<td>" + Number(module.sourceLength || 0).toLocaleString() + " 字</td>"
-          + "<td><span class=\"coverage-status " + (missingModule ? "missing" : "included") + "\">" + (missingModule ? "缺失，未送入 AI" : "已纳入 AI 输入") + "</span></td>"
-          + "</tr>";
-      }).join("") || "<tr><td colspan=\"4\">未识别到可核对的功能模块，可直接继续拆分。</td></tr>";
-      $("includeCoverageModulesBtn").style.display = missing > 0 ? "" : "none";
-      $("continueAfterCoverageBtn").disabled = missing > 0;
-      $("continueAfterCoverageBtn").textContent = missing > 0 ? "请先补入缺失模块" : "确认覆盖，开始 AI 拆分";
-    }
-
-    async function includeSelectedCoverageModules() {
-      const moduleNumbers = Array.prototype.slice.call(document.querySelectorAll(".coverage-module-check:checked"))
-        .map(function (element) { return element.value; });
-      if (!moduleNumbers.length) {
-        showDialog("请选择模块", "请勾选要补入 AI 输入的缺失功能模块。");
+    async function continueAfterInputReview() {
+      const content = ($("preview").value || "").trim();
+      if (!content) {
+        showDialog("内容为空", "请至少选择一个章节，或补充需要送给 AI 拆分的内容。");
         return;
       }
       await withBusy(async function () {
-        setMessage("正在将选中的原文功能模块补入 AI 输入...");
-        const response = await request("/api/projects/" + currentProjectId + "/requirement-coverage/include", {
-          method: "POST",
+        await request("/api/projects/" + currentProjectId + "/requirement-input", {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ moduleNumbers: moduleNumbers })
+          body: JSON.stringify({ content: content })
         });
-        requirementCoverageData = response.data || {};
-        renderRequirementCoverage(requirementCoverageData);
-        setMessage("已补入原文模块，请确认覆盖结果后开始 AI 拆分。", "success");
-      });
-    }
-
-    async function continueAfterCoverageCheck() {
-      if (!requirementCoverageData || !requirementCoverageData.readyForExtraction) {
-        showDialog("尚有缺失模块", "请先将缺失模块纳入 AI 输入，避免拆分遗漏功能点。");
-        return;
-      }
-      await withBusy(async function () {
-        $("requirementCoveragePanel").classList.add("hidden");
         markActive("ai");
-        setMessage("完整性校验已通过，正在调用 AI 拆分需求细则，请稍等...");
+        setMessage("正在调用 AI 拆分已确认的章节内容，请稍等...");
         await request("/api/projects/" + currentProjectId + "/extract", { method: "POST" });
         markDone("ai");
 
@@ -1357,7 +1282,6 @@
           $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n可在审核表上方点击“规则初审”，按 COSMIC 拆分规则检查需要人工调整的项。";
           $("parsePanel").classList.add("hidden");
           $("chapterSelectionPanel").classList.add("hidden");
-          $("requirementCoveragePanel").classList.add("hidden");
           markDone("cosmic");
           await loadReview();
           markActive("precheck");
