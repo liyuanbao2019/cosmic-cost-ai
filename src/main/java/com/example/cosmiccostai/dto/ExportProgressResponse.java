@@ -7,6 +7,7 @@ public class ExportProgressResponse {
     private boolean running;
     private int total;
     private int completed;
+    private int processing;
     private String message;
 
     public String getProjectId() {
@@ -47,6 +48,14 @@ public class ExportProgressResponse {
 
     public void setCompleted(int completed) {
         this.completed = completed;
+    }
+
+    public int getProcessing() {
+        return processing;
+    }
+
+    public void setProcessing(int processing) {
+        this.processing = processing;
     }
 
     public String getMessage() {

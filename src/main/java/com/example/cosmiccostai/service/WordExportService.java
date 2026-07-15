@@ -307,6 +307,11 @@ public class WordExportService {
                         }
 
                         @Override
+                        public void onBatchStarted(int groupCount) {
+                            exportProgressService.beginFunctionDescriptionBatch(metadata.getId(), groupCount);
+                        }
+
+                        @Override
                         public void onBatchCompleted(int completedIncrement) {
                             exportProgressService.advanceFunctionDescription(metadata.getId(), completedIncrement);
                         }

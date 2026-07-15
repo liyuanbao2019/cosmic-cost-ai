@@ -106,6 +106,7 @@ public class FunctionDescriptionAiService {
                                                                  ProgressCallback progressCallback) {
         Map<String, String> result = new LinkedHashMap<String, String>();
         for (Map<String, List<FunctionSplitRow>> batch : batches) {
+            notifyBatchStarted(progressCallback, batch.size());
             result.putAll(generateDescriptionsBatch(batch).descriptions);
             notifyBatchCompleted(progressCallback, batch.size());
         }
@@ -120,6 +121,7 @@ public class FunctionDescriptionAiService {
             completionService.submit(new Callable<BatchResult>() {
                 @Override
                 public BatchResult call() {
+                    notifyBatchStarted(progressCallback, batch.size());
                     return generateDescriptionsBatch(batch);
                 }
             });
@@ -171,6 +173,12 @@ public class FunctionDescriptionAiService {
     private void notifyBatchCompleted(ProgressCallback progressCallback, int groupCount) {
         if (progressCallback != null) {
             progressCallback.onBatchCompleted(groupCount);
+        }
+    }
+
+    private void notifyBatchStarted(ProgressCallback progressCallback, int groupCount) {
+        if (progressCallback != null) {
+            progressCallback.onBatchStarted(groupCount);
         }
     }
 
@@ -291,6 +299,8 @@ public class FunctionDescriptionAiService {
 
     public interface ProgressCallback {
         void onStart(int total);
+
+        void onBatchStarted(int groupCount);
 
         void onBatchCompleted(int completedIncrement);
     }

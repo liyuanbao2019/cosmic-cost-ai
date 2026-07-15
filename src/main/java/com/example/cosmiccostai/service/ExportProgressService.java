@@ -19,8 +19,21 @@ public class ExportProgressService {
         response.setRunning(true);
         response.setTotal(Math.max(total, 0));
         response.setCompleted(0);
+        response.setProcessing(0);
         response.setMessage(buildMessage(0, total, true));
         progressByProject.put(projectId, response);
+    }
+
+    public void beginFunctionDescriptionBatch(String projectId, int batchSize) {
+        ExportProgressResponse response = progressByProject.get(projectId);
+        if (response == null) {
+            return;
+        }
+        synchronized (response) {
+            int remaining = Math.max(0, response.getTotal() - response.getCompleted());
+            response.setProcessing(Math.min(remaining,
+                    response.getProcessing() + Math.max(batchSize, 0)));
+        }
     }
 
     public void advanceFunctionDescription(String projectId, int increment) {
@@ -31,6 +44,7 @@ public class ExportProgressService {
         synchronized (response) {
             int completed = Math.min(response.getTotal(), response.getCompleted() + Math.max(increment, 0));
             response.setCompleted(completed);
+            response.setProcessing(Math.max(0, response.getProcessing() - Math.max(increment, 0)));
             response.setMessage(buildMessage(completed, response.getTotal(), true));
         }
     }
@@ -42,6 +56,7 @@ public class ExportProgressService {
         }
         synchronized (response) {
             response.setCompleted(response.getTotal());
+            response.setProcessing(0);
             response.setRunning(false);
             response.setMessage(buildMessage(response.getCompleted(), response.getTotal(), false));
         }
@@ -56,6 +71,7 @@ public class ExportProgressService {
             empty.setRunning(false);
             empty.setTotal(0);
             empty.setCompleted(0);
+            empty.setProcessing(0);
             empty.setMessage("");
             return empty;
         }
@@ -66,6 +82,7 @@ public class ExportProgressService {
             copy.setRunning(current.isRunning());
             copy.setTotal(current.getTotal());
             copy.setCompleted(current.getCompleted());
+            copy.setProcessing(current.getProcessing());
             copy.setMessage(current.getMessage());
             return copy;
         }

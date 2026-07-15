@@ -128,6 +128,7 @@
             <option value="26年运维管理">26年运维管理</option>
             <option value="26年共享采集">26年共享采集</option>
             <option value="26年家客运维">26年家客运维</option>
+            <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
           </select>
         </div>
         <div class="upload-field split-mode-field">
@@ -626,13 +627,18 @@
         const response = await request("/api/projects/" + currentProjectId + "/export/word/progress");
         const progress = response.data || {};
         if (progress.total > 0) {
-          const message = (progress.message || "正在调用大模型生成功能描述")
-            + "（批次并发，完成数按功能过程累计）";
-          setExportProgressHint(message);
-          setExportStep("word", progress.completed + "/" + progress.total, "running");
-        }
-        if (progress.total > 0 && !progress.running && progress.completed >= progress.total) {
-          stopExportProgressPolling();
+          if (progress.running) {
+            let message = "正在调用大模型生成功能描述：已完成 "
+              + progress.completed + "/" + progress.total;
+            if (progress.processing > 0) {
+              message += "，当前批次正在处理 " + progress.processing + " 个";
+            }
+            message += "（模型按批次返回，因此完成数会按批次更新）";
+            setExportProgressHint(message);
+            setExportStep("word", progress.completed + "/" + progress.total, "running");
+          } else if (progress.completed >= progress.total) {
+            setExportProgressHint("");
+          }
         }
       } catch (error) {
         // 进度查询失败不影响正在进行的导出请求。
@@ -3437,6 +3443,7 @@
           }
           const wordResponse = await request("/api/projects/" + currentProjectId + "/export/word", { method: "POST" });
           stopExportProgressPolling();
+          setExportProgressHint("");
           const wordInfo = await getExportInfo("word", wordResponse.data.wordOutputPath);
           setExportStep("word", "已完成", "done");
 
@@ -3458,6 +3465,7 @@
           setMessage("送审材料已导出并完成 ZIP 打包。", "success");
         } catch (error) {
           stopExportProgressPolling();
+          setExportProgressHint("");
           markRunningExportFailed();
           setMessage(error.message || "导出送审材料失败。", "error");
           throw error;
