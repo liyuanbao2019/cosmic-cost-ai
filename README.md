@@ -121,7 +121,7 @@ cosmic-cost-ai
 |-- src
 |   `-- main
 |       |-- java
-|       |   `-- com/example/cosmiccostai
+|       |   `-- com/li/jc/cosmiccostai
 |       |       |-- common
 |       |       |-- controller
 |       |       |-- dto

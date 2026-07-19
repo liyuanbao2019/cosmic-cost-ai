@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.example</groupId>
+    <groupId>com.li.jc</groupId>
     <artifactId>cosmic-cost-ai</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <name>cosmic-cost-ai</name>

@@ -2,7 +2,7 @@
 
 ```text
 cosmic-cost-ai
-├── src/main/java/com/example/cosmiccostai
+├── src/main/java/com/li/jc/cosmiccostai
 │   ├── CosmicCostAiApplication.java
 │   ├── common
 │   │   └── package-info.java
