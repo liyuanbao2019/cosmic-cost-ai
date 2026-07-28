@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260711-export-hint-1">
+  <link rel="stylesheet" href="/app.css?v=20260728-flow-help-2">
 </head>
 
 <body>
@@ -91,6 +91,50 @@
     </div>
   </div>
 
+  <div id="review-stage-dialog-overlay" class="dialog-overlay hidden" onclick="closeReviewStageDialogOnOverlay(event)">
+    <div class="dialog review-stage-dialog" role="dialog" aria-modal="true" aria-labelledby="review-stage-dialog-title">
+      <div class="review-stage-dialog-header">
+        <div>
+          <h3 id="review-stage-dialog-title" class="dialog-title">三个拆分环节，分别在做什么？</h3>
+          <p id="reviewStageSubtitle">先出第一版 → 再查基础错误 → 最后对照原文复盘</p>
+        </div>
+        <button type="button" class="review-stage-dialog-close" onclick="closeReviewStageDialog()" aria-label="关闭环节说明" title="关闭">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="review-stage-grid">
+        <article>
+          <span class="review-stage-index">1</span>
+          <div>
+            <b id="stageAiSplitTitle">AI 拆分：先把 Word 变成第一版表格</b>
+            <p id="stageAiSplitText">把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
+          </div>
+        </article>
+        <article>
+          <span class="review-stage-index">2</span>
+          <div>
+            <b>规则初审：用固定清单查基础错误</b>
+            <p>只看当前表格，逐行检查有没有漏填、E/R/W/X 写错、没有 E、没有 W/X、连续两个 E 等明显问题。它像格式检查，快，但不会回头读完整 Word 找漏功能。</p>
+          </div>
+        </article>
+        <article class="deep-review-stage">
+          <span class="review-stage-index">3</span>
+          <div>
+            <b id="stageDeepReviewTitle">AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
+            <p id="stageDeepReviewText">把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
+          </div>
+        </article>
+      </div>
+      <div class="review-stage-note">
+        <b>一句话区分：</b><span id="reviewStageNoteText">AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。</span>
+        规则初审显示“无问题”，不等于没有漏拆或错拆。
+      </div>
+    </div>
+  </div>
+
   <div id="cell-editor-overlay" class="dialog-overlay hidden" onclick="closeCellEditorOnOverlay(event)">
     <div class="dialog cell-editor-dialog">
       <div class="cell-editor-header">
@@ -127,7 +171,7 @@
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
             <option value="26年运维管理">26年运维管理</option>
             <option value="26年共享采集">26年共享采集</option>
-            <option value="26年家客运维">26年家客运维</option>
+            <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
             <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
           </select>
         </div>
@@ -170,7 +214,18 @@
     <section class="panel">
       <div class="panel-header">
         <div class="panel-title-row">
-          <h2>处理流程</h2>
+          <div class="flow-title">
+            <h2>处理流程</h2>
+            <button id="flowHelpBtn" type="button" class="flow-help-btn" onclick="openReviewStageDialog()"
+              aria-label="查看三个拆分环节的区别" aria-haspopup="dialog" aria-controls="review-stage-dialog-overlay"
+              aria-expanded="false" title="查看三个拆分环节的区别">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M9.8 9a2.3 2.3 0 1 1 3.7 1.8c-.9.6-1.5 1.1-1.5 2.2"></path>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+            </button>
+          </div>
           <button type="button" class="flow-rule-config-btn" onclick="openRuleConfigDialog()">初审规则管理</button>
         </div>
       </div>
@@ -322,40 +377,6 @@
           </div>
         </div>
       </div>
-
-      <details class="review-stage-guide" open>
-        <summary>
-          <span>三个拆分环节，分别在做什么？</span>
-          <small id="reviewStageSubtitle">先出第一版 → 再查基础错误 → 最后对照原文复盘</small>
-        </summary>
-        <div class="review-stage-grid">
-          <article>
-            <span class="review-stage-index">1</span>
-            <div>
-              <b id="stageAiSplitTitle">AI 拆分：先把 Word 变成第一版表格</b>
-              <p id="stageAiSplitText">把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
-            </div>
-          </article>
-          <article>
-            <span class="review-stage-index">2</span>
-            <div>
-              <b>规则初审：用固定清单查基础错误</b>
-              <p>只看当前表格，逐行检查有没有漏填、E/R/W/X 写错、没有 E、没有 W/X、连续两个 E 等明显问题。它像格式检查，快，但不会回头读完整 Word 找漏功能。</p>
-            </div>
-          </article>
-          <article class="deep-review-stage">
-            <span class="review-stage-index">3</span>
-            <div>
-              <b id="stageDeepReviewTitle">AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
-              <p id="stageDeepReviewText">把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
-            </div>
-          </article>
-        </div>
-        <div class="review-stage-note">
-          <b>一句话区分：</b><span id="reviewStageNoteText">AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。</span>
-          规则初审显示“无问题”，不等于没有漏拆或错拆。
-        </div>
-      </details>
 
       <div id="ruleValidationPanel" class="rewrite-progress hidden">
         <div class="rewrite-progress-head">
@@ -538,6 +559,36 @@
 
     function closeDialog() {
       $("dialog-overlay").classList.add("hidden");
+    }
+
+    function openReviewStageDialog() {
+      updateReviewStageGuide();
+      $("review-stage-dialog-overlay").classList.remove("hidden");
+      $("flowHelpBtn").setAttribute("aria-expanded", "true");
+      document.body.classList.add("review-stage-dialog-open");
+      const closeButton = document.querySelector(".review-stage-dialog-close");
+      if (closeButton) {
+        closeButton.focus();
+      }
+    }
+
+    function closeReviewStageDialog() {
+      const overlay = $("review-stage-dialog-overlay");
+      const wasOpen = overlay && !overlay.classList.contains("hidden");
+      if (overlay) {
+        overlay.classList.add("hidden");
+      }
+      $("flowHelpBtn").setAttribute("aria-expanded", "false");
+      document.body.classList.remove("review-stage-dialog-open");
+      if (wasOpen) {
+        $("flowHelpBtn").focus();
+      }
+    }
+
+    function closeReviewStageDialogOnOverlay(event) {
+      if (event.target === $("review-stage-dialog-overlay")) {
+        closeReviewStageDialog();
+      }
     }
 
     function openExportDialog() {
@@ -3542,6 +3593,7 @@
     window.addEventListener("keydown", function (event) {
       if (event.key === "Escape") {
         closeAiPromptDialog();
+        closeReviewStageDialog();
       }
     });
   </script>

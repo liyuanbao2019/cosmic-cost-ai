@@ -11,12 +11,13 @@ public class AiTaskConfig {
 
     @Bean(name = "deepSplitExecutor")
     public TaskExecutor deepSplitExecutor(
-            @Value("${cosmic.ai.deep-split.worker-count:2}") int workerCount) {
+            @Value("${cosmic.ai.deep-split.worker-count:32}") int workerCount,
+            @Value("${cosmic.ai.deep-split.queue-capacity:50}") int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         int size = Math.max(1, workerCount);
         executor.setCorePoolSize(size);
         executor.setMaxPoolSize(size);
-        executor.setQueueCapacity(20);
+        executor.setQueueCapacity(Math.max(1, queueCapacity));
         executor.setThreadNamePrefix("deep-split-");
         executor.setWaitForTasksToCompleteOnShutdown(false);
         executor.initialize();

@@ -94,11 +94,11 @@ public class DeepSplitAiService {
                               @Value("${cosmic.ai.api-key:}") String apiKey,
                               @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
                               @Value("${cosmic.ai.deep-split.chunk-timeout-seconds:180}") long chunkTimeoutSeconds,
-                              @Value("${cosmic.ai.max-retries:2}") int maxRetries,
+                              @Value("${cosmic.ai.deep-split.max-retries:${cosmic.ai.max-retries:1}}") int maxRetries,
                               @Value("${cosmic.ai.deep-split.chunk-prompt-chars:9000}") int chunkPromptChars,
                               @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars,
                               @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows,
-                              @Value("${cosmic.ai.deep-split.chunk-parallelism:2}") int chunkParallelism) {
+                              @Value("${cosmic.ai.deep-split.chunk-parallelism:10}") int chunkParallelism) {
         this.fileStorageService = fileStorageService;
         this.taskExecutor = taskExecutor;
         this.baseUrl = baseUrl;

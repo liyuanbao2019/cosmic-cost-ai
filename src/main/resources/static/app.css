@@ -410,6 +410,50 @@ main {
 }
 
 /* ========== Flow Container ========== */
+.flow-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+button.flow-help-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: #64748b;
+  box-shadow: none;
+  line-height: 1;
+}
+
+button.flow-help-btn svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+button.flow-help-btn:hover,
+button.flow-help-btn:focus-visible {
+  border-color: #bae6fd;
+  background: #e0f2fe;
+  color: #0284c7;
+  box-shadow: none;
+  outline: 2px solid rgba(14, 165, 233, 0.28);
+  outline-offset: 2px;
+}
+
 .flow-wrapper {
   position: relative;
   padding: 20px 0 10px;
@@ -1847,6 +1891,79 @@ td textarea {
   line-height: 1.55;
 }
 
+.dialog.review-stage-dialog {
+  width: min(1120px, calc(100vw - 48px));
+  max-width: none;
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  overflow: auto;
+  text-align: left;
+}
+
+.review-stage-dialog-header {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 22px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.review-stage-dialog-header .dialog-title {
+  margin: 0;
+}
+
+.review-stage-dialog-header p {
+  margin: 7px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.review-stage-dialog .review-stage-grid {
+  padding: 18px 20px 12px;
+}
+
+.review-stage-dialog .review-stage-note {
+  margin: 0 20px 20px;
+}
+
+.review-stage-dialog-close {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  box-shadow: none;
+}
+
+.review-stage-dialog-close svg {
+  width: 17px;
+  height: 17px;
+}
+
+.review-stage-dialog-close:hover,
+.review-stage-dialog-close:focus-visible {
+  border-color: #bae6fd;
+  background: #e0f2fe;
+  color: #0284c7;
+  box-shadow: none;
+  outline: 2px solid rgba(14, 165, 233, 0.28);
+  outline-offset: 2px;
+}
+
+body.review-stage-dialog-open {
+  overflow: hidden;
+}
+
 .rewrite-progress {
   margin-top: 14px;
   border: 1px solid var(--line);
@@ -2752,7 +2869,7 @@ button.deep-split-row-link:hover {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1050px) {
   .review-stage-guide summary {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -2766,6 +2883,26 @@ button.deep-split-row-link:hover {
   .review-stage-grid {
     grid-template-columns: 1fr;
   }
+
+  .dialog.review-stage-dialog {
+    width: min(720px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+  }
+
+  .review-stage-dialog-header {
+    padding: 16px;
+  }
+
+  .review-stage-dialog .review-stage-grid {
+    padding: 14px 14px 10px;
+  }
+
+  .review-stage-dialog .review-stage-note {
+    margin: 0 14px 14px;
+  }
+}
+
+@media (max-width: 900px) {
 
   .upload-row {
     flex-direction: column;

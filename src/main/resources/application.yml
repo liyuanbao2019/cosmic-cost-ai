@@ -68,9 +68,13 @@ cosmic:
     max-retries: ${OPENAI_MAX_RETRIES:2}
     deep-split:
       # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
-      worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:1}
+      worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:32}
+      # 后台任务等待队列容量；超过容量时立即提示系统繁忙，避免无限积压
+      queue-capacity: ${COSMIC_DEEP_SPLIT_QUEUE_CAPACITY:50}
       # AI 深度审核单个分批调用超时时间，单位秒；避免某一批长时间卡死
-      chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:720}
+      chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:500}
+      # 深度审核单批失败后的重试次数；独立配置，避免慢请求长时间堵塞其他项目
+      max-retries: ${COSMIC_DEEP_SPLIT_MAX_RETRIES:1}
       # AI 深度审核单批提示词最大字符数；越大单批上下文越多，但越容易超时
       chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
       # AI 深度审核每批检索原始需求证据的最大字符数；用于控制原文证据长度和调用成本

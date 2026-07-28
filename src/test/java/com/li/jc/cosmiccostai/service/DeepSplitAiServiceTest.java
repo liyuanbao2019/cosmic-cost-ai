@@ -55,7 +55,7 @@ class DeepSplitAiServiceTest {
                 promptChars,
                 evidenceChars,
                 10000,
-                2);
+                10);
     }
 
     private FunctionSplitRow row(String process, String description) {
