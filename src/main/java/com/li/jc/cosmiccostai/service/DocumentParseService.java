@@ -7,6 +7,7 @@ import org.apache.poi.EmptyFileException;
 import org.apache.poi.OldFileFormatException;
 import org.apache.poi.hwpf.HWPFDocument;
 import org.apache.poi.hwpf.extractor.WordExtractor;
+import org.apache.poi.openxml4j.util.ZipSecureFile;
 import org.apache.poi.poifs.filesystem.FileMagic;
 import org.apache.poi.poifs.filesystem.OfficeXmlFileException;
 import org.apache.poi.poifs.filesystem.POIFSFileSystem;
@@ -37,6 +38,8 @@ import java.util.List;
 public class DocumentParseService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final Object DOCX_PARSE_LOCK = new Object();
+    private static final double DOCX_MIN_INFLATE_RATIO = 0.005D;
     private final FileStorageService fileStorageService;
     private final RequirementInputService requirementInputService;
 
@@ -133,19 +136,32 @@ public class DocumentParseService {
     }
 
     private ParsedDocument parseDocx(InputStream inputStream, Path sourceFile) {
-        StringBuilder text = new StringBuilder();
-        int paragraphCount = 0;
-        int tableCount = 0;
-
-        try (XWPFDocument document = new XWPFDocument(inputStream)) {
-            DocxParseCounter counter = new DocxParseCounter();
-            appendDocxBodyElements(text, document.getBodyElements(), document.getStyles(), counter);
-            paragraphCount = counter.paragraphCount;
-            tableCount = counter.tableCount;
-            return new ParsedDocument(text.toString().trim(), paragraphCount, tableCount, counter.headings);
-        } catch (IOException ex) {
-            throw new BusinessException("解析 docx 文件失败，请确认文件是由 Word/WPS 正常另存为的 .docx 文件。", ex);
+        // Word/WPS may embed highly-compressible fonts whose ratio is only
+        // slightly below POI's default 1% threshold. Use a still-bounded 0.5%
+        // threshold while parsing, then restore POI's global value immediately.
+        synchronized (DOCX_PARSE_LOCK) {
+            double originalMinInflateRatio = ZipSecureFile.getMinInflateRatio();
+            ZipSecureFile.setMinInflateRatio(Math.min(originalMinInflateRatio, DOCX_MIN_INFLATE_RATIO));
+            try (XWPFDocument document = new XWPFDocument(inputStream)) {
+                StringBuilder text = new StringBuilder();
+                DocxParseCounter counter = new DocxParseCounter();
+                appendDocxBodyElements(text, document.getBodyElements(), document.getStyles(), counter);
+                return new ParsedDocument(text.toString().trim(), counter.paragraphCount,
+                        counter.tableCount, counter.headings);
+            } catch (IOException ex) {
+                throw new BusinessException(docxParseFailureMessage(ex), ex);
+            } finally {
+                ZipSecureFile.setMinInflateRatio(originalMinInflateRatio);
+            }
         }
+    }
+
+    private String docxParseFailureMessage(IOException ex) {
+        String message = ex.getMessage() == null ? "" : ex.getMessage();
+        if (message.contains("Zip bomb detected")) {
+            return "DOCX 中存在压缩率异常的内嵌资源，系统已拒绝解析；请在 Word/WPS 中取消嵌入字体后重新保存。";
+        }
+        return "解析 docx 文件失败，请确认文件未损坏，并使用 Word/WPS 重新另存为 .docx。";
     }
 
     /**
@@ -301,7 +317,7 @@ public class DocumentParseService {
         if (!StringUtils.hasText(requirementDetail)) {
             return new RequirementDiagnosis(false,
                 "未识别到有效的需求内容。",
-                "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。");
+                "系统将展示已解析出的全部章节，请人工勾选需要送给 AI 的章节；也可使用“需求内容”“需求细则”“业务功能”“功能描述”或“需求方案 word 描述”等标题。");
         }
         return new RequirementDiagnosis(true, "", "");
     }

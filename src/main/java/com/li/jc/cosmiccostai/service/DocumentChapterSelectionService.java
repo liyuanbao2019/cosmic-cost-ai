@@ -264,7 +264,8 @@ public class DocumentChapterSelectionService {
 
     private boolean isRecommended(String title) {
         String text = title == null ? "" : title;
-        return containsAny(text, "业务功能", "功能需求", "需求细则", "需求内容", "业务需求", "流程", "数据填报", "数据汇总");
+        return containsAny(text, "业务功能", "功能需求", "需求细则", "需求内容", "业务需求",
+                "方案说明", "需求方案", "流程", "数据填报", "数据汇总");
     }
 
     private boolean isPresentInInput(String input, ChapterBlock chapter) {

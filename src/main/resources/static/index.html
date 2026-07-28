@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260728-flow-help-2">
+  <link rel="stylesheet" href="/app.css?v=20260728-flow-ui-compact">
 </head>
 
 <body>
@@ -169,7 +169,7 @@
           <select id="projectName">
             <option value="">-- 请选择 --</option>
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
-            <option value="26年运维管理">26年运维管理</option>
+            <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
             <option value="26年共享采集">26年共享采集</option>
             <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
             <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
@@ -238,12 +238,12 @@
           <div class="flow-step-wrap">
             <div id="step-upload" class="flow-step active" onclick="handleStepClick('upload')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="17 8 12 3 7 8" />
-                  <line x1="12" y1="3" x2="12" y2="15" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+                  <path d="M12 12v9" />
+                  <path d="m16 16-4-4-4 4" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
@@ -253,13 +253,14 @@
           <div class="flow-step-wrap">
             <div id="step-parse" class="flow-step" onclick="handleStepClick('parse')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="16" y1="13" x2="8" y2="13" />
-                  <line x1="16" y1="17" x2="8" y2="17" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                  <path d="M14 2v4a1 1 0 0 0 1 1h4" />
+                  <path d="M10 12h4" />
+                  <path d="M8 16h8" />
+                  <path d="M8 8h1" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
@@ -269,56 +270,57 @@
           <div class="flow-step-wrap">
             <div id="step-ai" class="flow-step" onclick="handleStepClick('ai')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path
-                    d="M12 2a4 4 0 0 1 4 4c0 1.1-.4 2.1-1.1 2.9l.7.7a4 4 0 0 1-1.3 6.4 4 4 0 0 1-6.6-1.3l-.7.7A4 4 0 1 1 12 2z" />
-                  <circle cx="12" cy="12" r="3" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" />
+                  <path d="M5 3v4" />
+                  <path d="M19 17v4" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
             </div>
-            <span class="step-label">AI 拆分</span>
+            <span class="step-label">AI 识别功能</span>
           </div>
           <div class="flow-step-wrap">
             <div id="step-cosmic" class="flow-step" onclick="handleStepClick('cosmic')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                  <line x1="3" y1="9" x2="21" y2="9" />
-                  <line x1="9" y1="21" x2="9" y2="9" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect width="18" height="18" x="3" y="3" rx="3" />
+                  <path d="M3 9h18" />
+                  <path d="M3 15h18" />
+                  <path d="M9 3v18" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
             </div>
-            <span id="stepCosmicLabel" class="step-label">COSMIC</span>
+            <span id="stepCosmicLabel" class="step-label">COSMIC 拆分</span>
           </div>
           <div class="flow-step-wrap">
             <div id="step-precheck" class="flow-step" onclick="handleStepClick('precheck')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M9 11l2 2 4-4" />
-                  <path d="M21 12a9 9 0 1 1-3-6.7" />
-                  <path d="M17 3h4v4" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" />
+                  <path d="m9 12 2 2 4-4" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
             </div>
-            <span class="step-label">&#x89c4;&#x5219;&#x521d;&#x5ba1;</span>
+            <span class="step-label">规则初审</span>
           </div>
           <div class="flow-step-wrap">
             <div id="step-review" class="flow-step" onclick="handleStepClick('review')">
               <div class="step-circle">
-                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-                  <polyline points="22 4 12 14.01 9 11.01" />
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+                  <path d="m3.3 7 8.7 5 8.7-5" />
+                  <path d="M12 22V12" />
                 </svg>
-                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               </div>
@@ -705,7 +707,7 @@
       $("documentUploadField").classList.toggle("hidden", splitMode !== "document");
       $("excelUploadField").classList.toggle("hidden", splitMode !== "excel");
       if ($("stepCosmicLabel")) {
-        $("stepCosmicLabel").textContent = splitMode === "excel" ? "解析功能拆分表" : "COSMIC";
+        $("stepCosmicLabel").textContent = splitMode === "excel" ? "解析功能拆分表" : "COSMIC 拆分";
       }
       if (splitMode === "excel") {
         $("parsePanel").classList.add("hidden");
@@ -1131,15 +1133,14 @@
         $("parsePreviewHint").textContent = requirementDetailLength > 0
           ? "已提取完整业务功能章节，共 " + requirementDetailLength.toLocaleString() + " 字（下方可滚动查看，不会截断）"
           : "下方为已提取的业务功能章节";
-        if (showRequirementParseWarning(parsed.data || {})) {
-          $("parsePanel").classList.remove("hidden");
-          setMessage("未识别到需求内容，请按提示修改文档后重新上传。", "error");
-          return;
-        }
+        const requirementParseWarning = showRequirementParseWarning(parsed.data || {});
         markDone("parse");
         $("parsePanel").classList.remove("hidden");
         await loadDocumentChapters(true);
-        setMessage("章节已生成 AI 输入；确认内容后可直接开始 AI 拆分。", "success");
+        setMessage(requirementParseWarning
+          ? "未自动定位到需求正文，已列出全部章节；请人工勾选后点击“应用章节选择”。"
+          : "章节已生成 AI 输入；可调整勾选范围，确认后开始 AI 识别功能。",
+          requirementParseWarning ? "error" : "success");
       });
     }
 
@@ -2267,7 +2268,7 @@
         return false;
       }
       const warning = data.requirementWarning || "未识别到有效的需求内容。";
-      const suggestion = data.requirementSuggestion || "请在需求正文前增加清晰大标题，例如“需求内容”“需求细则”“业务功能”或“功能描述”，并将具体业务规则放在该标题之后。";
+      const suggestion = data.requirementSuggestion || "系统已展示解析出的全部章节，请人工勾选需要送给 AI 的章节；也可使用“需求内容”“需求细则”“业务功能”“功能描述”或“需求方案 word 描述”等标题。";
       showDialog("需求内容识别提示", warning + "\n\n解决方案：\n" + suggestion);
       return true;
     }
@@ -2286,8 +2287,18 @@
           const validationResponse = await runRuleValidationRequest();
           renderRuleValidation(validationResponse.data || {});
         }
-        markCurrentFlowComplete();
-        await refreshExportedMaterialsState();
+        const steps = flowStepsForCurrentMode();
+        steps.forEach(function (name) {
+          if (name !== "review") {
+            markDone(name);
+          }
+        });
+        const infos = await refreshExportedMaterialsState();
+        if (infos && (infos.archive || (infos.excel && infos.business && infos.word))) {
+          markDone("review");
+        } else {
+          markActive("review");
+        }
         setMessage("\u5df2\u52a0\u8f7d\u9879\u76ee\u5ba1\u6838\u6570\u636e\uff0c\u53ef\u7ee7\u7eed\u7f16\u8f91\u3001\u89c4\u5219\u521d\u5ba1\u6216 AI \u590d\u6838\u3002", "success");
       });
     }
@@ -2327,7 +2338,7 @@
       updateReviewStageGuide();
       renderTable();
       updateStats();
-      markDone("review");
+      markActive("review");
       setMaterialActionExported(false);
     }
 
@@ -3436,6 +3447,7 @@
             archive: archiveInfo
           };
           setMaterialActionExported(true);
+          markDone("review");
           $("outputPanel").classList.add("hidden");
           setMessage("送审材料已导出并完成 ZIP 打包。", "success");
         } catch (error) {

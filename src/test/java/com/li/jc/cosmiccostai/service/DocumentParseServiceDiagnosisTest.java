@@ -24,9 +24,12 @@ class DocumentParseServiceDiagnosisTest {
 
     private Object diagnose(String text) throws Exception {
         DocumentParseService service = new DocumentParseService(new FileStorageService("storage"));
+        Method extract = DocumentParseService.class.getDeclaredMethod("extractRequirementDetailPreview", String.class);
+        extract.setAccessible(true);
+        String requirementDetail = (String) extract.invoke(service, text);
         Method method = DocumentParseService.class.getDeclaredMethod("diagnoseRequirementSection", String.class);
         method.setAccessible(true);
-        return method.invoke(service, text);
+        return method.invoke(service, requirementDetail);
     }
 
     private Object field(Object target, String name) throws Exception {

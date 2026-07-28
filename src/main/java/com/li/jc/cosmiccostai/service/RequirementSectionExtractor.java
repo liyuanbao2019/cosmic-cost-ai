@@ -102,6 +102,7 @@ final class RequirementSectionExtractor {
         }
         if ("非功能性需求".equals(normalized)
                 || "非功能需求".equals(normalized)
+                || "非功能建设需求".equals(normalized)
                 || "附加值调整因子说明".equals(normalized)
                 || "调整因子情况说明".equals(normalized)) {
             return true;
@@ -140,6 +141,7 @@ final class RequirementSectionExtractor {
                 || "业务需求".equals(normalized)
                 || "功能需求".equals(normalized)
                 || "功能性需求".equals(normalized)
+                || "需求方案word描述".equalsIgnoreCase(normalized)
                 || isFunctionDescriptionSection(line);
     }
 
@@ -157,6 +159,9 @@ final class RequirementSectionExtractor {
             return 0;
         }
         String value = line.trim();
+        if (value.matches("^\\d+[、]\\s*\\S.{0,100}$") && isRequirementSection(value)) {
+            return 1;
+        }
         Matcher matcher = NUMBERED_HEADING_PATTERN.matcher(value);
         if (matcher.matches()) {
             String prefix = matcher.group(1).replace('．', '.');

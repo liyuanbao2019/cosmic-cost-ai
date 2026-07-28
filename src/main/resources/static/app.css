@@ -409,7 +409,7 @@ main {
   box-shadow: 0 6px 16px rgba(234, 88, 12, 0.34);
 }
 
-/* ========== Flow Container ========== */
+/* ========== Flow Container (高级掌控板卡片底衬) ========== */
 .flow-title {
   display: inline-flex;
   align-items: center;
@@ -456,33 +456,45 @@ button.flow-help-btn:focus-visible {
 
 .flow-wrapper {
   position: relative;
-  padding: 20px 0 10px;
+  padding: 22px 14px 8px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  border-radius: var(--radius-lg);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.03);
+  margin-top: 4px;
 }
 
 button.flow-rule-config-btn {
-  min-width: 112px;
-  padding: 7px 12px;
+  min-width: 100px;
+  padding: 5px 12px;
   border: 1px solid #bae6fd;
-  background: #f0f9ff;
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
   color: #0369a1;
-  box-shadow: none;
+  box-shadow: 0 1px 3px rgba(14, 165, 233, 0.1);
+  font-weight: 600;
+  font-size: 12px;
+  border-radius: 16px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 button.flow-rule-config-btn:hover {
   border-color: var(--primary-light);
-  background: #e0f2fe;
-  box-shadow: 0 3px 10px rgba(8, 145, 178, 0.12);
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  color: #0284c7;
+  box-shadow: 0 3px 8px rgba(8, 145, 178, 0.18);
+  transform: translateY(-1px);
 }
 
 .flow-track {
   position: absolute;
-  top: 42px;
-  left: 60px;
-  right: 60px;
-  height: 3px;
-  background: var(--line-light);
-  border-radius: 3px;
+  top: 39px;
+  left: 52px;
+  right: 52px;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 8px;
   z-index: 0;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .flow-progress {
@@ -491,10 +503,23 @@ button.flow-rule-config-btn:hover {
   left: 0;
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, var(--primary) 0%, var(--primary-light) 50%, var(--success) 100%);
-  border-radius: 3px;
+  background: linear-gradient(90deg, #0891b2 0%, #06b6d4 50%, #10b981 100%);
+  border-radius: 8px;
   transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 0 8px var(--primary-light);
+  box-shadow: 0 0 8px rgba(8, 145, 178, 0.4);
+  overflow: hidden;
+}
+
+/* 进度条流动水光特效 */
+.flow-progress::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.7) 50%, transparent 100%);
+  animation: flowShimmer 2.2s infinite;
 }
 
 .flow-steps {
@@ -508,7 +533,7 @@ button.flow-rule-config-btn:hover {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .flow-step {
@@ -517,24 +542,25 @@ button.flow-rule-config-btn:hover {
   transition: transform 0.3s ease;
 }
 
+/* 节点圆形基础框（紧凑型 36px） */
 .step-circle {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: var(--panel);
-  border: 2.5px solid var(--line);
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+  transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 .step-icon {
   width: 16px;
   height: 16px;
-  color: var(--muted);
+  color: #64748b;
   transition: all 0.3s ease;
 }
 
@@ -543,57 +569,119 @@ button.flow-rule-config-btn:hover {
   width: 18px;
   height: 18px;
   color: #ffffff;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.2));
 }
 
+/* 环节文字色块胶囊贴 */
 .step-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
   transition: all 0.3s ease;
   text-align: center;
+  padding: 1px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
-/* ---------- Pending State ---------- */
+/* ---------- Pending State (等待中) ---------- */
 .flow-step.pending .step-circle {
-  background: var(--soft);
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 4px rgba(148, 163, 184, 0.1);
 }
 
 .flow-step.pending .step-icon {
-  color: var(--muted);
+  color: #94a3b8;
 }
 
 .flow-step.pending .step-label {
-  color: var(--text-light);
+  color: #64748b;
+  background: #f8fafc;
+  border-color: #e2e8f0;
 }
 
-/* ---------- Active State ---------- */
+/* ---------- Active State (进行中 - 紧凑型亮彩胶囊与环影) ---------- */
+.flow-step.active {
+  z-index: 3;
+}
+
+/* 顶端悬浮“进行中”提示胶囊 */
+.flow-step.active::before {
+  content: "进行中";
+  position: absolute;
+  top: -21px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 6px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(8, 145, 178, 0.35);
+  animation: badgeBounce 2s ease-in-out infinite;
+}
+
+/* 活跃节点立体核心 */
 .flow-step.active .step-circle {
-  border-color: var(--primary);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-  transform: scale(1.1);
+  border-color: transparent;
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 50%, #0e7490 100%);
+  transform: scale(1.12);
   box-shadow: 
-    0 0 0 4px rgba(8, 145, 178, 0.12),
-    0 3px 12px var(--primary-glow);
-  animation: breathe 2s ease-in-out infinite;
+    inset 0 1px 2px rgba(255, 255, 255, 0.4),
+    0 0 0 3px rgba(8, 145, 178, 0.2),
+    0 6px 14px rgba(8, 145, 178, 0.38);
+}
+
+/* 旋转科技光环 */
+.flow-step.active .step-circle::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1.5px dashed #22d3ee;
+  animation: spinRing 4.5s linear infinite;
+  pointer-events: none;
+}
+
+/* 波纹扩散特效 */
+.flow-step.active .step-circle::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 1.5px solid #06b6d4;
+  animation: activeRipple 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+  pointer-events: none;
 }
 
 .flow-step.active .step-icon {
   color: #ffffff;
-  animation: fadeIn 0.3s ease;
+  animation: activeIconPulse 1.8s ease-in-out infinite alternate;
 }
 
+/* 活跃环节标签色块：淡水蓝亮质感 */
 .flow-step.active .step-label {
-  color: var(--primary-dark);
-  font-weight: 600;
+  color: #0284c7;
+  font-weight: 700;
+  background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+  border-color: #7dd3fc;
+  box-shadow: 0 2px 6px rgba(14, 165, 233, 0.15);
 }
 
-/* ---------- Done State ---------- */
+/* ---------- Done State (已完成 - 翡翠质感与绿意色块) ---------- */
 .flow-step.done .step-circle {
-  border-color: var(--success);
-  background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+  border-color: transparent;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   box-shadow: 
-    0 0 0 3px rgba(16, 185, 129, 0.12),
-    0 3px 10px rgba(16, 185, 129, 0.25);
+    inset 0 1px 2px rgba(255, 255, 255, 0.35),
+    0 0 0 2.5px rgba(16, 185, 129, 0.16),
+    0 4px 10px rgba(16, 185, 129, 0.25);
 }
 
 .flow-step.done .step-icon {
@@ -605,9 +693,13 @@ button.flow-rule-config-btn:hover {
   animation: scalePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
+/* 已完成环节标签色块：淡翡翠绿 */
 .flow-step.done .step-label {
-  color: var(--success);
+  color: #047857;
   font-weight: 600;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #a7f3d0;
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.08);
 }
 
 .flow-step.done.clickable {
@@ -615,23 +707,60 @@ button.flow-rule-config-btn:hover {
 }
 
 .flow-step.done.clickable:hover .step-circle {
-  transform: scale(1.08);
+  transform: scale(1.1);
   box-shadow: 
-    0 0 0 5px rgba(16, 185, 129, 0.15),
-    0 4px 14px rgba(16, 185, 129, 0.35);
+    inset 0 1px 2px rgba(255, 255, 255, 0.45),
+    0 0 0 4px rgba(16, 185, 129, 0.22),
+    0 6px 14px rgba(16, 185, 129, 0.32);
 }
 
-/* ---------- Animations ---------- */
-@keyframes breathe {
+/* ---------- 动态动画定义 ---------- */
+@keyframes spinRing {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes activeRipple {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes activeIconPulse {
+  0% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.6));
+  }
+  100% {
+    transform: scale(1.15);
+    filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.95));
+  }
+}
+
+@keyframes badgeBounce {
   0%, 100% {
-    box-shadow: 
-      0 0 0 6px rgba(8, 145, 178, 0.15),
-      0 4px 16px var(--primary-glow);
+    transform: translateX(-50%) translateY(0);
   }
   50% {
-    box-shadow: 
-      0 0 0 10px rgba(8, 145, 178, 0.1),
-      0 4px 24px var(--primary-glow);
+    transform: translateX(-50%) translateY(-3px);
+  }
+}
+
+@keyframes flowShimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
   }
 }
 
@@ -640,8 +769,8 @@ button.flow-rule-config-btn:hover {
     transform: scale(0);
     opacity: 0;
   }
-  50% {
-    transform: scale(1.3);
+  60% {
+    transform: scale(1.25);
   }
   100% {
     transform: scale(1);

@@ -45,6 +45,28 @@ class DocumentParsePreviewTest {
     }
 
     @Test
+    void previewRecognizesRequirementPlanWordDescriptionAndStopsBeforeNonFunctionalNeeds() throws Exception {
+        DocumentParseService service = new DocumentParseService(new FileStorageService("storage"));
+        Method method = DocumentParseService.class.getDeclaredMethod("extractRequirementDetailPreview", String.class);
+        method.setAccessible(true);
+
+        String text = "四、方案说明\n"
+                + "1、需求方案 word 描述\n"
+                + "1.1.操作日志的采集\n"
+                + "采集网管操作日志并保存日志记录。\n"
+                + "1.2.操作日志数据汇总并同步至集团平台\n"
+                + "汇总日志数据并发送至集团平台。\n"
+                + "1.5.非功能建设需求\n"
+                + "1.5.1.质量特性-分布式\n";
+
+        String preview = (String) method.invoke(service, text);
+
+        assertTrue(preview.contains("操作日志的采集"), preview);
+        assertTrue(preview.contains("同步至集团平台"), preview);
+        assertFalse(preview.contains("质量特性-分布式"), preview);
+    }
+
+    @Test
     void previewDoesNotTruncateLongRequirementContent() throws Exception {
         DocumentParseService service = new DocumentParseService(new FileStorageService("storage"));
         Method method = DocumentParseService.class.getDeclaredMethod("buildPreview", String.class);
