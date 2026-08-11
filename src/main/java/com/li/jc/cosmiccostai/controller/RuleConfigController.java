@@ -29,6 +29,7 @@ public class RuleConfigController {
         SplitRuleConfigResponse response = new SplitRuleConfigResponse();
         response.setContent(splitRuleConfigService.getRules());
         response.setPath(splitRuleConfigService.getRulePath());
+        response.setRuleVersion(splitRuleConfigService.getRuleVersion());
         return ApiResponse.ok(response);
     }
 
@@ -39,6 +40,7 @@ public class RuleConfigController {
         SplitRuleConfigResponse response = new SplitRuleConfigResponse();
         response.setContent(content);
         response.setPath(splitRuleConfigService.getRulePath());
+        response.setRuleVersion(splitRuleConfigService.getRuleVersion());
         return ApiResponse.ok(response);
     }
 }

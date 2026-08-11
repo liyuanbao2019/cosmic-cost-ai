@@ -1,9 +1,13 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.li.jc.cosmiccostai.model.CosmicMovement;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AiExtractionPromptRulesTest {
@@ -18,12 +22,85 @@ class AiExtractionPromptRulesTest {
         String prompt = (String) method.invoke(service, "用户提交规则校验需求");
 
         assertTrue(prompt.contains("【内部拆分校验与可计量改写规则】"));
-        assertTrue(prompt.contains("只认可开发功能且具备明确数据移动"));
+        assertTrue(prompt.contains("COSMIC 软件造价拆分基础规则 v2.0（设计院评审沉淀版）"));
         assertTrue(prompt.contains("规则校验"));
-        assertTrue(prompt.contains("所有功能、数据移动、数据组和数据属性都必须能够定位到需求原文"));
-        assertTrue(prompt.contains("只能标记为“待确认”"));
-        assertTrue(prompt.contains("不以增加 CFP、增加子过程数量、降低复用率或提高表面完整度为目标"));
-        assertTrue(prompt.contains("不得因为常见系统通常具有编号、状态、时间、操作人、结果说明等字段"));
+        assertTrue(prompt.contains("所有功能过程、子过程、数据组、数据属性必须能从需求原文"));
+        assertTrue(prompt.contains("需求信息不足时，应输出“待确认事项”"));
+        assertTrue(prompt.contains("绝不为了增加功能点而过度拆分"));
+        assertTrue(prompt.contains("不得新增无业务依据的时间、枚举值或属性"));
+        assertTrue(prompt.contains("用户查询 E-R-X；新增/删除 E-W-X；修改和导入 E-R-W-X"));
+        assertTrue(prompt.contains("临时生成且下载后删除为 E-R-X，写入服务器并保留为 E-R-W-X"));
+        assertTrue(prompt.contains("被调用查询 E-R-X，被调用接收同步数据 E-W-X"));
+        assertTrue(prompt.contains("E 已携带查询所需参数并直接通过 X 发出请求"));
+        assertTrue(prompt.contains("响应进入本系统可再次记 E"));
+        assertTrue(prompt.contains("不得只根据“同步、导出、采集、发送”等名称机械禁止或补充 R/W/X"));
+        assertTrue(prompt.contains("异步业务回调必须区分"));
+        assertTrue(prompt.contains("禁止用“接收+功能过程名+请求”的机械拼接方式"));
+        assertTrue(prompt.contains("用户/UI 主动操作写“发起XXX查询"));
+        assertTrue(prompt.contains("外部平台上报、回调才写"));
+        assertTrue(prompt.contains("ReturnCode/ReturnMessage 是本系统向调用方返回的 X"));
+        assertTrue(prompt.contains("\"movements\""));
+        assertTrue(prompt.contains("正文中的“六级地址、故障原因、ret、P01、U13”"));
+        assertTrue(prompt.contains("相同数据组传递同一批数据时"));
+        assertTrue(prompt.contains("无载荷的定时/时钟触发 E 填“无业务数据”"));
+        assertTrue(prompt.contains("禁止“字段名（待确认）”混写"));
+        assertTrue(prompt.contains("至少输出 2 个 movements"));
+        assertTrue(prompt.contains("最后一个必须是 W 或 X"));
+        assertTrue(prompt.contains("不同功能过程中"));
+        assertTrue(prompt.contains("三要素全部相同且没有跨层/跨边界"));
+        assertTrue(prompt.contains("子过程数量不再设置“最多 4 行”硬限制"));
+        assertTrue(prompt.contains("多外部系统调用、多个独立持久数据组读写可自然超过 4 条"));
+        assertFalse(prompt.contains("2—4 个 movements"));
+        assertTrue(prompt.contains("翻页、勾选/取消勾选、图层切换"));
+        assertTrue(prompt.contains("校验、计算、解析、匹配、过滤、排序是数据操作"));
+        assertFalse(prompt.contains("至少 6 个数据属性"));
+        assertTrue(prompt.contains("禁止虚构字段"));
+        assertTrue(prompt.contains("N/NM/数字行号/O/OLD/UIUE/C/NR/算法/需求文档不涉及"));
+        assertTrue(prompt.contains("读取XXX相关数据"));
         assertTrue(prompt.contains("【需求细则】"));
+        assertTrue(prompt.contains("[REQ-L0001] 用户提交规则校验需求"));
+        assertTrue(prompt.contains("\"sourceReferences\":[\"REQ-L0001\"]"));
+    }
+
+    @Test
+    void deepSeekPromptUsesDedicatedProtocolAndTheSameCompleteRuleSource() throws Exception {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "https://api.deepseek.com/v1", "", "deepseek-v4-pro", 1, 0,
+                "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class);
+        method.setAccessible(true);
+
+        String prompt = (String) method.invoke(service, "用户提交规则校验需求");
+        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.0（设计院评审沉淀版）";
+
+        assertTrue(prompt.contains("DeepSeek 专项执行协议"));
+        assertTrue(prompt.contains("deepseek-cosmic-v1"));
+        assertTrue(prompt.contains("唯一规则源：SplitRuleConfigService 当前生效完整规则"));
+        assertTrue(prompt.contains("顶层只能包含 functions 数组"));
+        assertTrue(prompt.contains("{\"functions\":[]}"));
+        assertTrue(prompt.indexOf(ruleTitle) >= 0);
+        assertTrue(prompt.indexOf(ruleTitle) == prompt.lastIndexOf(ruleTitle));
+        assertFalse(prompt.contains("输出必须是严格JSON数组"));
+    }
+
+    @Test
+    void attachesStableRequirementReferencesToFunctionsAndMovements() {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        ExtractedFunction function = new ExtractedFunction("订单管理", "查询订单状态", "读取并返回订单状态");
+        CosmicMovement movement = new CosmicMovement();
+        movement.setType("R");
+        movement.setDescription("读取订单状态");
+        movement.setDataGroup("订单表");
+        movement.setDataAttributes("订单编号、订单状态");
+        function.setMovements(Arrays.asList(movement));
+
+        service.attachRequirementEvidence(Arrays.asList(function),
+                "公告管理支持新增公告。\n订单管理支持按订单编号查询订单状态并返回结果。");
+
+        assertTrue(function.getSourceReferences().contains("REQ-L0002"));
+        assertTrue(function.getEvidence().contains("查询订单状态"));
+        assertTrue(movement.getSourceReferences().contains("REQ-L0002"));
+        assertTrue(movement.getEvidence().contains("订单编号"));
     }
 }

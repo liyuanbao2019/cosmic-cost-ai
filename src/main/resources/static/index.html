@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260728-flow-ui-compact">
+  <link rel="stylesheet" href="/app.css?v=20260806-validation-filter-layout-1">
 </head>
 
 <body>
@@ -67,7 +67,10 @@
           <button type="button" class="ghost" onclick="closeAiPromptDialog()">关闭</button>
         </div>
       </div>
-      <div class="ai-prompt-meta">模型名称：<b id="aiPromptModel">-</b></div>
+      <div class="ai-prompt-meta">
+        <span>模型名称：<b id="aiPromptModel">-</b></span>
+        <span id="aiPromptRunningHint" class="ai-prompt-running-hint hidden"></span>
+      </div>
       <textarea id="aiPromptText" class="ai-prompt-text" spellcheck="false"></textarea>
     </div>
   </div>
@@ -95,8 +98,8 @@
     <div class="dialog review-stage-dialog" role="dialog" aria-modal="true" aria-labelledby="review-stage-dialog-title">
       <div class="review-stage-dialog-header">
         <div>
-          <h3 id="review-stage-dialog-title" class="dialog-title">三个拆分环节，分别在做什么？</h3>
-          <p id="reviewStageSubtitle">先出第一版 → 再查基础错误 → 最后对照原文复盘</p>
+          <h3 id="review-stage-dialog-title" class="dialog-title">四个拆分环节，分别在做什么？</h3>
+          <p id="reviewStageSubtitle">先出第一版 → 全表调整复用度 → 再查基础错误 → 最后对照原文复盘</p>
         </div>
         <button type="button" class="review-stage-dialog-close" onclick="closeReviewStageDialog()" aria-label="关闭环节说明" title="关闭">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -116,12 +119,19 @@
         <article>
           <span class="review-stage-index">2</span>
           <div>
+            <b>复用度 AI 调整：按全表证据统一校准</b>
+            <p>在拆分结果生成后整体比较功能目标、业务边界和审核三要素，只修改证据充分的新增/复用/利旧结论。目标是降低送审核减率，不是单向压低 CFP。</p>
+          </div>
+        </article>
+        <article>
+          <span class="review-stage-index">3</span>
+          <div>
             <b>规则初审：用固定清单查基础错误</b>
             <p>只看当前表格，逐行检查有没有漏填、E/R/W/X 写错、没有 E、没有 W/X、连续两个 E 等明显问题。它像格式检查，快，但不会回头读完整 Word 找漏功能。</p>
           </div>
         </article>
         <article class="deep-review-stage">
-          <span class="review-stage-index">3</span>
+          <span class="review-stage-index">4</span>
           <div>
             <b id="stageDeepReviewTitle">AI 深度审校：拿“第一版表格 + 原始 Word”重新复盘</b>
             <p id="stageDeepReviewText">把第一版拆分表和原始需求文档一起交给 AI 对照审查：有没有漏功能、拆粗了还是拆碎了、是否重复计量、E/R/W/X 是否漏了。它只给出“为什么改、改哪几行、改完 CFP 怎么变”的建议；你采纳后才会改表。</p>
@@ -129,7 +139,7 @@
         </article>
       </div>
       <div class="review-stage-note">
-        <b>一句话区分：</b><span id="reviewStageNoteText">AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。</span>
+        <b>一句话区分：</b><span id="reviewStageNoteText">AI 拆分负责“先写草稿”，复用度 AI 调整负责“全表统一判新增/复用/利旧”，规则初审负责“查明显错误”，AI 深度审校负责“拿结果对照原文做复盘”。</span>
         规则初审显示“无问题”，不等于没有漏拆或错拆。
       </div>
     </div>
@@ -155,6 +165,7 @@
         <div class="panel-title-row">
           <h2>上传需求文档</h2>
           <div class="panel-title-actions">
+            <button type="button" class="project-list-entry" onclick="location.href='/models.html'">大模型管理</button>
             <button type="button" class="project-list-entry" onclick="location.href='/projects.html'">项目列表</button>
             <span id="projectBadge" class="badge muted">未上传</span>
           </div>
@@ -251,7 +262,7 @@
             <span class="step-label">上传</span>
           </div>
           <div class="flow-step-wrap">
-            <div id="step-parse" class="flow-step" onclick="handleStepClick('parse')">
+            <div id="step-parse" class="flow-step" onclick="handleStepClick('parse')" aria-expanded="false">
               <div class="step-circle">
                 <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
@@ -297,6 +308,22 @@
               </div>
             </div>
             <span id="stepCosmicLabel" class="step-label">COSMIC 拆分</span>
+          </div>
+          <div class="flow-step-wrap">
+            <div id="step-reuse" class="flow-step" onclick="handleStepClick('reuse')" title="拆分完成后，使用 AI 对整张表统一调整新增、复用和利旧">
+              <div class="step-circle">
+                <svg class="step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 7h8a4 4 0 0 1 4 4v1" />
+                  <path d="m17 9 3 3 3-3" />
+                  <path d="M16 17H8a4 4 0 0 1-4-4v-1" />
+                  <path d="m7 15-3-3-3 3" />
+                </svg>
+                <svg class="step-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+            </div>
+            <span class="step-label">复用度 AI 调整</span>
           </div>
           <div class="flow-step-wrap">
             <div id="step-precheck" class="flow-step" onclick="handleStepClick('precheck')">
@@ -359,7 +386,7 @@
         <div class="parse-editor-actions">
           <button id="saveRequirementInputBtn" type="button" class="secondary" onclick="saveEditedRequirementInput()">保存修改</button>
           <button id="continueAfterInputReviewBtn" type="button" onclick="continueAfterInputReview()">开始 AI 拆分</button>
-          <button type="button" class="ghost" onclick="toggleParsePreview()">收起</button>
+          <button id="parsePanelsToggleBtn" type="button" class="ghost" onclick="toggleParseInputPanels()">收起选择与修订</button>
         </div>
       </div>
       <label class="parse-editor-label" for="preview">
@@ -470,7 +497,8 @@
         <select id="filterValidation" onchange="onReviewFilterChange()">
           <option value="">&#x5168;&#x90e8;&#x521d;&#x5ba1;&#x7ed3;&#x679c;</option>
           <option value="ERROR">&#x53ea;&#x770b;&#x9519;&#x8bef;</option>
-          <option value="RISK">&#x53ea;&#x770b;&#x7ed3;&#x6784;&#x98ce;&#x9669;</option>
+          <option value="RISK">&#x53ea;&#x770b;&#x5168;&#x90e8;&#x98ce;&#x9669;</option>
+          <option value="STRUCTURE_RISK">&#x53ea;&#x770b;&#x7ed3;&#x6784;&#x98ce;&#x9669;</option>
           <option value="OK">&#x53ea;&#x770b;&#x65e0;&#x95ee;&#x9898;</option>
         </select>
         <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
@@ -522,6 +550,7 @@
     let currentProjectSourceType = "";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
+    let lastReuseAdjustmentResult = null;
     let lastAiValidationResult = null;
     let currentDeepSplitJob = null;
     let deepSplitPollTimer = null;
@@ -532,6 +561,10 @@
     let documentChapterSelectionData = null;
     let exportedMaterialInfos = null;
     let exportProgressPollTimer = null;
+    let aiCosmicSplitRunning = false;
+    let aiCosmicSplitStage = "";
+    let aiCosmicRecoveryTimer = null;
+    let aiCosmicRecoveryRequestInFlight = false;
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -683,6 +716,184 @@
       document.body.classList.toggle("busy", busy);
     }
 
+    function aiCosmicSplitStorageKey(projectId) {
+      return "cosmic-ai-split-lock:" + (projectId || "");
+    }
+
+    function aiCosmicStageText(stage) {
+      return stage === "cosmic" ? "COSMIC 拆分中..." : "AI 拆分中...";
+    }
+
+    function updateAiCosmicSplitControls() {
+      const runningText = aiCosmicStageText(aiCosmicSplitStage);
+      const continueButton = $("continueAfterInputReviewBtn");
+      if (continueButton) {
+        continueButton.disabled = aiCosmicSplitRunning;
+        continueButton.textContent = aiCosmicSplitRunning ? runningText : "开始 AI 拆分";
+        continueButton.setAttribute("aria-busy", aiCosmicSplitRunning ? "true" : "false");
+        continueButton.title = aiCosmicSplitRunning
+          ? "AI 识别和 COSMIC 拆分尚未完成，暂不可重复执行。"
+          : "";
+      }
+      const resendButton = $("resendAiPromptBtn");
+      if (resendButton) {
+        resendButton.disabled = aiCosmicSplitRunning;
+        resendButton.textContent = aiCosmicSplitRunning ? "当前任务进行中" : "重新发送 AI 拆分";
+        resendButton.setAttribute("aria-busy", aiCosmicSplitRunning ? "true" : "false");
+        resendButton.title = aiCosmicSplitRunning
+          ? "可继续查看和修改提示词；当前任务完成后即可重新发送。"
+          : "使用当前编辑后的提示词重新执行 AI 识别和 COSMIC 拆分。";
+      }
+      const runningHint = $("aiPromptRunningHint");
+      if (runningHint) {
+        runningHint.textContent = runningText + " 可查看和修改提示词，当前任务完成后即可重新发送。";
+        runningHint.classList.toggle("hidden", !aiCosmicSplitRunning);
+      }
+      const aiStep = $("step-ai");
+      if (aiStep) {
+        aiStep.removeAttribute("aria-disabled");
+        aiStep.setAttribute("aria-busy", aiCosmicSplitRunning ? "true" : "false");
+        aiStep.title = aiCosmicSplitRunning
+          ? "当前拆分正在进行；点击仍可查看和修改本次 AI 提示词。"
+          : "查看、修改并重新发送 AI 提示词。";
+      }
+    }
+
+    function setAiCosmicSplitRunning(running, stage, persist) {
+      aiCosmicSplitRunning = !!running;
+      aiCosmicSplitStage = aiCosmicSplitRunning ? (stage === "cosmic" ? "cosmic" : "ai") : "";
+      updateAiCosmicSplitControls();
+      if (!currentProjectId) {
+        return;
+      }
+      const key = aiCosmicSplitStorageKey(currentProjectId);
+      if (aiCosmicSplitRunning && persist !== false) {
+        let startedAt = Date.now();
+        try {
+          const previous = JSON.parse(sessionStorage.getItem(key) || "{}");
+          startedAt = Number(previous.startedAt) || startedAt;
+        } catch (error) {
+          startedAt = Date.now();
+        }
+        sessionStorage.setItem(key, JSON.stringify({
+          projectId: currentProjectId,
+          stage: aiCosmicSplitStage,
+          startedAt: startedAt
+        }));
+      } else if (!aiCosmicSplitRunning) {
+        sessionStorage.removeItem(key);
+        stopAiCosmicRecoveryPolling();
+      }
+    }
+
+    function beginAiCosmicSplit(stage) {
+      if (aiCosmicSplitRunning) {
+        showDialog("拆分正在进行", "AI 识别和 COSMIC 拆分尚未完成，请等待当前流程结束后再试。");
+        return false;
+      }
+      setAiCosmicSplitRunning(true, stage || "ai");
+      return true;
+    }
+
+    function stopAiCosmicRecoveryPolling() {
+      if (aiCosmicRecoveryTimer) {
+        window.clearInterval(aiCosmicRecoveryTimer);
+        aiCosmicRecoveryTimer = null;
+      }
+      aiCosmicRecoveryRequestInFlight = false;
+    }
+
+    function restoreAiCosmicSplitState(projectId) {
+      if (!projectId) {
+        return;
+      }
+      const key = aiCosmicSplitStorageKey(projectId);
+      let saved = null;
+      try {
+        saved = JSON.parse(sessionStorage.getItem(key) || "null");
+      } catch (error) {
+        saved = null;
+      }
+      if (!saved || saved.projectId !== projectId) {
+        return;
+      }
+      const age = Date.now() - Number(saved.startedAt || 0);
+      if (!Number.isFinite(age) || age > 30 * 60 * 1000) {
+        sessionStorage.removeItem(key);
+        return;
+      }
+      setAiCosmicSplitRunning(true, saved.stage || "ai", false);
+      startAiCosmicRecoveryPolling();
+    }
+
+    function startAiCosmicRecoveryPolling() {
+      if (aiCosmicRecoveryTimer) {
+        return;
+      }
+      pollAiCosmicSplitStatus();
+      aiCosmicRecoveryTimer = window.setInterval(pollAiCosmicSplitStatus, 1500);
+    }
+
+    async function detectAiCosmicSplitState(projectId) {
+      if (!projectId || aiCosmicSplitRunning) {
+        return;
+      }
+      try {
+        const response = await request("/api/projects");
+        const projects = response.data && response.data.projects || [];
+        const project = projects.find(function (item) {
+          return item.projectId === projectId;
+        });
+        const status = project && project.status || "";
+        if (status === "AI_SPLITTING" || status === "EXTRACTED" || status === "COSMIC_SPLITTING") {
+          setAiCosmicSplitRunning(true, status === "AI_SPLITTING" ? "ai" : "cosmic");
+          startAiCosmicRecoveryPolling();
+        }
+      } catch (error) {
+        // 状态探测失败不影响页面的其他恢复逻辑。
+      }
+    }
+
+    async function pollAiCosmicSplitStatus() {
+      if (!aiCosmicSplitRunning || !currentProjectId || aiCosmicRecoveryRequestInFlight) {
+        return;
+      }
+      aiCosmicRecoveryRequestInFlight = true;
+      try {
+        const response = await request("/api/projects");
+        const projects = response.data && response.data.projects || [];
+        const project = projects.find(function (item) {
+          return item.projectId === currentProjectId;
+        });
+        const status = project && project.status || "";
+        if (status === "AI_SPLITTING") {
+          setAiCosmicSplitRunning(true, "ai", false);
+        } else if (status === "EXTRACTED") {
+          setAiCosmicSplitRunning(true, "cosmic");
+          setMessage("AI 识别及结构自检已通过，正在恢复 COSMIC 拆分...");
+          await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
+          setAiCosmicSplitRunning(false);
+          await loadReview();
+          setParseInputPanelsExpanded(false, false);
+          setMessage("COSMIC 拆分已完成，可以继续审核。", "success");
+        } else if (status === "COSMIC_SPLITTING") {
+          setAiCosmicSplitRunning(true, "cosmic", false);
+        } else if (status === "ANALYZED" || status === "REVIEWED" || status === "EXCEL_IMPORTED") {
+          setAiCosmicSplitRunning(false);
+          await loadReview();
+          setParseInputPanelsExpanded(false, false);
+          setMessage("COSMIC 拆分已完成，可以继续审核。", "success");
+        } else if (status === "AI_FAILED" || status === "COSMIC_FAILED") {
+          setAiCosmicSplitRunning(false);
+          setMessage(status === "AI_FAILED" ? "AI 拆分失败，请重试。" : "COSMIC 拆分失败，请重试。", "error");
+        }
+      } catch (error) {
+        // 网络瞬断时保持锁定，下次轮询继续确认后端状态。
+      } finally {
+        aiCosmicRecoveryRequestInFlight = false;
+      }
+    }
+
     function onSplitModeChange() {
       const mode = $("splitMode").value || "document";
       currentProjectSourceType = mode === "excel" ? "EXCEL" : "DOCUMENT";
@@ -728,8 +939,8 @@
       const excelMode = isCurrentProjectExcelMode();
       if ($("reviewStageSubtitle")) {
         $("reviewStageSubtitle").textContent = excelMode
-          ? "导入已有表格 → 再查基础错误 → 最后复核表格结构"
-          : "先出第一版 → 再查基础错误 → 最后对照原文复盘";
+          ? "导入已有表格 → 全表调整复用度 → 再查基础错误 → 最后复核表格结构"
+          : "先出第一版 → 全表调整复用度 → 再查基础错误 → 最后对照原文复盘";
       }
       if ($("stageAiSplitTitle")) {
         $("stageAiSplitTitle").textContent = excelMode
@@ -753,8 +964,8 @@
       }
       if ($("reviewStageNoteText")) {
         $("reviewStageNoteText").textContent = excelMode
-          ? "Excel 导入负责“载入已有表格”，规则初审负责“查明显错误”，AI 深度审校负责“在没有原文的前提下复核表格结构”。"
-          : "AI 拆分负责“先写草稿”，规则初审负责“查明显错误”，AI 深度审校负责“拿草稿对照原文做复盘”。";
+          ? "Excel 导入负责“载入已有表格”，复用度 AI 调整负责“全表统一校准”，规则初审负责“查明显错误”，AI 深度审校负责“在没有原文的前提下复核表格结构”。"
+          : "AI 拆分负责“先写草稿”，复用度 AI 调整负责“全表统一判新增/复用/利旧”，规则初审负责“查明显错误”，AI 深度审校负责“拿结果对照原文做复盘”。";
       }
       if ($("deepSplitBtn")) {
         $("deepSplitBtn").title = excelMode
@@ -764,12 +975,12 @@
     }
 
     function flowStepsForCurrentMode() {
-      return splitMode === "excel" ? ["cosmic", "precheck", "review"] : ["upload", "parse", "ai", "cosmic", "precheck", "review"];
+      return splitMode === "excel" ? ["cosmic", "reuse", "precheck", "review"] : ["upload", "parse", "ai", "cosmic", "reuse", "precheck", "review"];
     }
 
     function resetFlowStateForMode() {
       const visibleSteps = flowStepsForCurrentMode();
-      ["upload", "parse", "ai", "cosmic", "precheck", "review"].forEach(function (name) {
+      ["upload", "parse", "ai", "cosmic", "reuse", "precheck", "review"].forEach(function (name) {
         const step = $("step-" + name);
         if (step) {
           step.className = "flow-step pending";
@@ -782,7 +993,7 @@
 
     function applyFlowMode() {
       const visibleSteps = flowStepsForCurrentMode();
-      ["upload", "parse", "ai", "cosmic", "precheck", "review"].forEach(function (name) {
+      ["upload", "parse", "ai", "cosmic", "reuse", "precheck", "review"].forEach(function (name) {
         const step = $("step-" + name);
         if (!step) return;
         const wrap = step.closest(".flow-step-wrap");
@@ -827,18 +1038,62 @@
       }
       el.classList.add("done");
       el.classList.remove("active");
-      if (step === "parse" || step === "ai" || step === "precheck") {
+      if (step === "parse" || step === "ai" || step === "reuse" || step === "precheck") {
         el.classList.add("clickable");
       }
       updateFlowProgress();
     }
 
-    function toggleParsePreview() {
-      const panel = $("parsePanel");
+    function setParseInputPanelsExpanded(expanded, scrollToPanels) {
+      const chapterPanel = $("chapterSelectionPanel");
+      const parsePanel = $("parsePanel");
       const step = $("step-parse");
-      if (step.classList.contains("done")) {
-        panel.classList.toggle("hidden");
+      if (!chapterPanel || !parsePanel || !step) {
+        return;
       }
+      chapterPanel.classList.toggle("hidden", !expanded);
+      parsePanel.classList.toggle("hidden", !expanded);
+      step.setAttribute("aria-expanded", expanded ? "true" : "false");
+      step.title = expanded
+        ? "点击收起章节选择和人工修订"
+        : "点击展开章节选择和人工修订";
+      const toggleButton = $("parsePanelsToggleBtn");
+      if (toggleButton) {
+        toggleButton.textContent = "收起选择与修订";
+      }
+      if (expanded && scrollToPanels) {
+        chapterPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+
+    async function toggleParseInputPanels() {
+      const step = $("step-parse");
+      const chapterPanel = $("chapterSelectionPanel");
+      const parsePanel = $("parsePanel");
+      if (!step || !chapterPanel || !parsePanel || !step.classList.contains("done") || isCurrentProjectExcelMode()) {
+        return;
+      }
+      const expanded = !chapterPanel.classList.contains("hidden") || !parsePanel.classList.contains("hidden");
+      if (expanded) {
+        setParseInputPanelsExpanded(false, false);
+        return;
+      }
+      if (!documentChapterSelectionData && currentProjectId) {
+        try {
+          await loadDocumentChapters(false);
+          if (!$("preview").value.trim()) {
+            $("preview").value = documentChapterSelectionData && documentChapterSelectionData.aiInput || "";
+          }
+        } catch (error) {
+          showDialog("暂无法展开解析内容", error.message || "章节和人工修订内容加载失败，请稍后重试。");
+          return;
+        }
+      }
+      setParseInputPanelsExpanded(true, true);
+    }
+
+    function toggleParsePreview() {
+      return toggleParseInputPanels();
     }
 
     function handleStepClick(stepName) {
@@ -846,6 +1101,8 @@
         toggleParsePreview();
       } else if (stepName === "ai") {
         showAiPrompt();
+      } else if (stepName === "reuse") {
+        rerunReuseDegreeAdjustment();
       } else if (stepName === "precheck") {
         showRuleValidationPanel();
       }
@@ -873,7 +1130,9 @@
         const data = response.data || {};
         $("aiPromptModel").textContent = data.modelName || "-";
         $("aiPromptText").value = data.prompt || "";
+        updateAiCosmicSplitControls();
         $("ai-prompt-dialog-overlay").classList.remove("hidden");
+        $("aiPromptText").focus();
       } catch (error) {
         showDialog("暂无法查看 AI 提示词", error.message || "请先完成文档解析后再查看。");
       }
@@ -935,7 +1194,7 @@
         const response = await request("/api/rules/split");
         const data = response.data || {};
         $("ruleConfigText").value = data.content || "";
-        $("ruleConfigPath").textContent = data.path || "-";
+        $("ruleConfigPath").textContent = (data.path || "-") + (data.ruleVersion ? "　规则版本：" + data.ruleVersion : "");
         $("ruleConfigText").disabled = false;
         $("ruleConfigText").focus();
       } catch (error) {
@@ -987,13 +1246,11 @@
         showDialog("提示词为空", "请先填写 AI 拆分提示词，再重新发送。");
         return;
       }
-      const btn = $("resendAiPromptBtn");
-      await withBusy(async function () {
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = "发送中...";
-        }
-        try {
+      if (!beginAiCosmicSplit("ai")) {
+        return;
+      }
+      try {
+        await withBusy(async function () {
           markActive("ai");
           setMessage("正在使用修改后的提示词重新调用 AI 拆分...");
           await request("/api/projects/" + currentProjectId + "/ai-prompt/extract", {
@@ -1004,21 +1261,22 @@
           markDone("ai");
 
           markActive("cosmic");
-          setMessage("正在基于新的 AI 拆分结果重新生成 COSMIC 数据...");
+          setAiCosmicSplitRunning(true, "cosmic");
+          setMessage("AI 拆分结构自检已通过，正在重新生成 COSMIC 数据...");
           await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
           markDone("cosmic");
+          setAiCosmicSplitRunning(false);
+          setParseInputPanelsExpanded(false, false);
 
           await loadReview();
+          await executeReuseDegreeAdjustment();
           markActive("precheck");
           closeAiPromptDialog();
-          setMessage("已按修改后的提示词重新完成 AI 拆分，请先执行规则初审。", "success");
-        } finally {
-          if (btn) {
-            btn.disabled = false;
-            btn.textContent = "重新发送 AI 拆分";
-          }
-        }
-      });
+          setMessage(reuseAdjustmentSummary(lastReuseAdjustmentResult) + " 请继续执行规则初审。", "success");
+        });
+      } finally {
+        setAiCosmicSplitRunning(false);
+      }
     }
 
     function updateFlowProgress() {
@@ -1047,6 +1305,7 @@
 
     function resetPage() {
       clearDeepSplitPolling();
+      setAiCosmicSplitRunning(false);
       currentProjectId = "";
       splitRows = [];
       selectedRows = {};
@@ -1055,6 +1314,7 @@
       currentProjectSourceType = "";
       validationIssuesByRow = {};
       lastValidationResult = null;
+      lastReuseAdjustmentResult = null;
       currentDeepSplitJob = null;
       documentChapterSelectionData = null;
       deepSplitRowOrigins = [];
@@ -1137,6 +1397,7 @@
         markDone("parse");
         $("parsePanel").classList.remove("hidden");
         await loadDocumentChapters(true);
+        setParseInputPanelsExpanded(true, false);
         setMessage(requirementParseWarning
           ? "未自动定位到需求正文，已列出全部章节；请人工勾选后点击“应用章节选择”。"
           : "章节已生成 AI 输入；可调整勾选范围，确认后开始 AI 识别功能。",
@@ -1282,30 +1543,41 @@
         showDialog("内容为空", "请至少选择一个章节，或补充需要送给 AI 拆分的内容。");
         return;
       }
-      await withBusy(async function () {
-        await request("/api/projects/" + currentProjectId + "/requirement-input", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: content })
+      if (!beginAiCosmicSplit("ai")) {
+        return;
+      }
+      try {
+        await withBusy(async function () {
+          await request("/api/projects/" + currentProjectId + "/requirement-input", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content: content })
+          });
+          markActive("ai");
+          setMessage("正在调用 AI 拆分已确认的章节内容，请稍等...");
+          await request("/api/projects/" + currentProjectId + "/extract", { method: "POST" });
+          markDone("ai");
+
+          markActive("cosmic");
+          setAiCosmicSplitRunning(true, "cosmic");
+          setMessage("AI 拆分结构自检已通过，正在生成 COSMIC 功能点拆分数据...");
+          await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
+          markDone("cosmic");
+          setAiCosmicSplitRunning(false);
+          setParseInputPanelsExpanded(false, false);
+
+          await loadReview();
+          await executeReuseDegreeAdjustment();
+          markActive("precheck");
+          setMessage("COSMIC 数据已生成，正在自动执行规则初审...");
+          const validationResponse = await runRuleValidationRequest();
+          renderRuleValidation(validationResponse.data || {});
+          markDone("precheck");
+          markActive("review");
         });
-        markActive("ai");
-        setMessage("正在调用 AI 拆分已确认的章节内容，请稍等...");
-        await request("/api/projects/" + currentProjectId + "/extract", { method: "POST" });
-        markDone("ai");
-
-        markActive("cosmic");
-        setMessage("正在生成 COSMIC 功能点拆分数据...");
-        await request("/api/projects/" + currentProjectId + "/cosmic", { method: "POST" });
-        markDone("cosmic");
-
-        await loadReview();
-        markActive("precheck");
-        setMessage("COSMIC 数据已生成，正在自动执行规则初审...");
-        const validationResponse = await runRuleValidationRequest();
-        renderRuleValidation(validationResponse.data || {});
-        markDone("precheck");
-        markActive("review");
-      });
+      } finally {
+        setAiCosmicSplitRunning(false);
+      }
     }
 
     async function importSplitExcel() {
@@ -1336,16 +1608,76 @@
           $("chapterSelectionPanel").classList.add("hidden");
           markDone("cosmic");
           await loadReview();
+          await executeReuseDegreeAdjustment();
           markActive("precheck");
           window.setTimeout(function () {
             validateReviewRules();
           }, 0);
-          setMessage("已导入 Excel，请点击“规则初审”检查风险项，再人工审核导出。", "success");
+          setMessage(reuseAdjustmentSummary(lastReuseAdjustmentResult) + " 正在继续执行规则初审。", "success");
         });
       } catch (error) {
         markActive("cosmic");
         showDialog("导入已拆分 Excel 失败", buildSplitExcelImportError(error));
       }
+    }
+
+    async function executeReuseDegreeAdjustment() {
+      if (!currentProjectId || !splitRows.length) {
+        throw new Error("复用度 AI 调整前必须先生成或导入完整拆分结果。");
+      }
+      markActive("reuse");
+      setMessage("正在执行复用度 AI 调整：DeepSeek 将整张拆分表作为一个判断范围，请稍等...");
+      const response = await request("/api/projects/" + currentProjectId + "/reuse-degree/adjust", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rows: splitRows.map(rowForSubmit) })
+      });
+      const result = response.data || {};
+      splitRows = (result.rows || splitRows).map(normalizeRow);
+      lastReuseAdjustmentResult = result;
+      validationIssuesByRow = {};
+      lastValidationResult = null;
+      lastAiValidationResult = null;
+      $("statusText").textContent = "REUSE_ADJUSTED";
+      renderTable();
+      updateStats();
+      markDone("reuse");
+      setMessage(reuseAdjustmentSummary(result), "success");
+      return result;
+    }
+
+    async function rerunReuseDegreeAdjustment() {
+      if (!currentProjectId || !splitRows.length) {
+        showDialog("无法调整复用度", "请先生成或导入完整拆分结果。");
+        return;
+      }
+      try {
+        await withBusy(async function () {
+          const result = await executeReuseDegreeAdjustment();
+          markActive("precheck");
+          const validationResponse = await runRuleValidationRequest();
+          renderRuleValidation(validationResponse.data || {});
+          markDone("precheck");
+          markActive("review");
+          showDialog("复用度 AI 调整完成", reuseAdjustmentSummary(result));
+        });
+      } catch (error) {
+        markActive("reuse");
+        showDialog("复用度 AI 调整失败", error.message || "请稍后重新点击该流程节点执行。");
+      }
+    }
+
+    function reuseAdjustmentSummary(result) {
+      const data = result || {};
+      const adjusted = Number(data.adjustedRows || 0);
+      const ruleAdjusted = Number(data.ruleAdjustedRows || 0);
+      const modelApplied = Math.max(0, adjusted - ruleAdjusted);
+      return "复用度 AI 调整完成：整体判断 " + Number(data.totalRows || splitRows.length || 0)
+        + " 行，模型提出 " + Number(data.modelDecisionCount || 0)
+        + " 项变更，模型证据闸门采纳 " + modelApplied
+        + " 项、模块默认规则调整 " + ruleAdjusted
+        + " 项、拦截 " + Number(data.skippedDecisions || 0)
+        + " 项；CFP " + formatCfp(data.cfpBefore) + " → " + formatCfp(data.cfpAfter) + "。";
     }
 
     async function validateReviewRules() {
@@ -1384,7 +1716,12 @@
       validationIssuesByRow = buildValidationIssueMap(issues);
       box.classList.remove("hidden");
       const total = Math.max(1, result.totalRows || splitRows.length || 1);
-      const okRows = Math.max(0, total - issues.length);
+      const affectedRows = validationIssueRowCount(issues);
+      const riskRows = validationIssueRowCount(issues, function (issue) {
+        return issue.severity === "RISK";
+      });
+      const structureRiskRows = validationIssueRowCount(issues, isStructureRiskIssue);
+      const okRows = Math.max(0, total - affectedRows);
       const percent = Math.max(0, Math.min(100, Math.round(okRows * 100 / total)));
       $("ruleValidationBar").style.width = percent + "%";
       const title = issues.length
@@ -1395,7 +1732,8 @@
       if (issues.length) {
         const level = result.errorCount ? "error" : ((result.riskCount || 0) > 0 ? "" : "success");
         setMessage("\u89c4\u5219\u521d\u5ba1\u5b8c\u6210\uff1a\u5fc5\u987b\u4fee\u6b63 " + (result.errorCount || 0)
-          + "\uff0c\u7ed3\u6784\u98ce\u9669 " + (result.structureRiskCount || result.riskCount || 0) + "\u3002", level);
+          + "\uff1b\u98ce\u9669\u63d0\u793a " + (result.riskCount || 0) + " \u6761\uff0c\u6d89\u53ca " + riskRows + " \u884c"
+          + "\uff1b\u5176\u4e2d\u7ed3\u6784\u98ce\u9669 " + (result.structureRiskCount || 0) + " \u6761\uff0c\u6d89\u53ca " + structureRiskRows + " \u884c\u3002", level);
       } else {
         setMessage("\u89c4\u5219\u521d\u5ba1\u901a\u8fc7\uff0c\u672a\u53d1\u73b0\u660e\u663e\u95ee\u9898\u3002", "success");
       }
@@ -1412,11 +1750,22 @@
         return;
       }
       summary.innerHTML = "";
+      const issues = result.issues || [];
+      const riskRows = validationIssueRowCount(issues, function (issue) {
+        return issue.severity === "RISK";
+      });
+      const structureRiskRows = validationIssueRowCount(issues, isStructureRiskIssue);
       [
         { label: "\u521d\u5ba1\u5feb\u7167\u884c\u6570", value: result.totalRows || 0, className: "neutral" },
         { label: "\u5f53\u524d\u8868\u683c\u884c\u6570", value: splitRows.length, className: "neutral" },
         { label: "\u9519\u8bef", value: result.errorCount || 0, className: "error" },
-        { label: "\u7ed3\u6784\u98ce\u9669", value: result.structureRiskCount || result.riskCount || 0, className: "risk" }
+        { label: "\u98ce\u9669\u63d0\u793a\uff08\u6761\uff09", value: result.riskCount || 0, className: "risk" },
+        { label: "\u98ce\u9669\u5f71\u54cd\u884c", value: riskRows, className: "risk" },
+        {
+          label: "\u7ed3\u6784\u98ce\u9669\uff08\u6761 / \u5f71\u54cd\u884c\uff09",
+          value: (result.structureRiskCount || 0) + " / " + structureRiskRows,
+          className: "suggestion"
+        }
       ].forEach(function (item) {
         const card = document.createElement("div");
         card.className = "validation-summary-card " + item.className;
@@ -1455,7 +1804,7 @@
             rowIndex: index + 1,
             row: normalizeRow(splitRows[index]),
             issues: validationIssuesByRow[index] || [],
-            contextRows: sameFunctionProcessContextRows(index)
+            contextRows: reviewValidationContextRows(index)
           };
         })
       };
@@ -1497,15 +1846,36 @@
       panel.innerHTML = "<div class=\"ai-validation-loading\"><b>AI \u590d\u6838\u8fdb\u884c\u4e2d</b><span>\u5df2\u63d0\u4ea4 " + escapeHtml(count) + " \u884c\u98ce\u9669\u9879\uff0c\u8bf7\u7a0d\u5019...</span></div>";
     }
 
-    function sameFunctionProcessContextRows(index) {
+    function reviewValidationContextRows(index) {
       const current = normalizeRow(splitRows[index] || {});
-      const process = textOr(current.functionProcess, "");
+      const processKey = functionProcessKey(current);
+      const indexes = {};
+      splitRows.forEach(function (row, rowIndex) {
+        if (functionProcessKey(normalizeRow(row)) === processKey) {
+          indexes[rowIndex] = true;
+        }
+      });
+      (validationIssuesByRow[index] || []).forEach(function (issue) {
+        const structuredReference = Number(issue.referenceRowIndex || 0) - 1;
+        if (structuredReference >= 0 && structuredReference < splitRows.length) {
+          indexes[structuredReference] = true;
+        }
+        const source = textOr(issue.message, "") + " " + textOr(issue.suggestion, "");
+        const pattern = /第\s*(\d+)\s*行/g;
+        let match;
+        while ((match = pattern.exec(source)) !== null) {
+          const referencedIndex = Number(match[1]) - 1;
+          if (referencedIndex >= 0 && referencedIndex < splitRows.length) {
+            indexes[referencedIndex] = true;
+          }
+        }
+      });
       return splitRows
         .map(function (row, rowIndex) {
           return { row: normalizeRow(row), rowIndex: rowIndex };
         })
         .filter(function (entry) {
-          return textOr(entry.row.functionProcess, "") === process;
+          return !!indexes[entry.rowIndex];
         })
         .map(function (entry) {
           return {
@@ -1514,6 +1884,14 @@
             issues: validationIssuesByRow[entry.rowIndex] || []
           };
         });
+    }
+
+    function functionProcessKey(row) {
+      const value = normalizeRow(row || {});
+      return [value.level1Module, value.level2Module, value.level3Module,
+        value.functionalUser, value.triggerEvent, value.functionProcess]
+        .map(function (item) { return textOr(item, "").trim(); })
+        .join("\u001f");
     }
 
     function renderAiValidationResult(result) {
@@ -1563,6 +1941,10 @@
         }
         if (item.suggestedDataAttributes) {
           suggestionParts.push("\u6570\u636e\u5c5e\u6027\uff1a" + item.suggestedDataAttributes);
+        }
+        if (item.suggestedReuseDegree) {
+          suggestionParts.push("复用度：" + item.suggestedReuseDegree);
+          suggestionParts.push("CFP：" + formatCfp(item.suggestedCfp));
         }
         const suggestionText = aiSuggestionText(item, suggestionParts);
         card.innerHTML =
@@ -1616,7 +1998,8 @@
       return !!(textOr(item.suggestedFunctionProcess, "")
         || textOr(item.suggestedSubProcessDescription, "")
         || textOr(item.suggestedDataGroup, "")
-        || textOr(item.suggestedDataAttributes, ""));
+        || textOr(item.suggestedDataAttributes, "")
+        || reuseOptions.indexOf(textOr(item.suggestedReuseDegree, "")) >= 0);
     }
 
     async function applyOneAiValidationSuggestion(item) {
@@ -2080,6 +2463,23 @@
           nextOrigins.push(deepSplitRowOrigins[index] || []);
         }
       });
+      const suggestedReuse = textOr(item.suggestedReuseDegree, "");
+      if (reuseOptions.indexOf(suggestedReuse) >= 0 && row.reuseDegree !== suggestedReuse) {
+        row.reuseDegree = suggestedReuse;
+        changedFields.push("复用度/CFP");
+      }
+      const gateResponse = await request("/api/projects/" + currentProjectId + "/review/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextRows.map(rowForSubmit))
+      });
+      const gate = gateResponse.data || {};
+      if ((gate.errorCount || 0) > 0 || (gate.structureRiskCount || 0) > 0) {
+        showDialog("无法采纳深度审核建议",
+          "替换结果未通过当前统一规则门禁：错误 " + (gate.errorCount || 0)
+          + " 条，结构风险 " + (gate.structureRiskCount || 0) + " 条。请重新执行 AI 深度审核。");
+        return;
+      }
       splitRows = nextRows;
       deepSplitRowOrigins = nextOrigins;
       selectedRows = {};
@@ -2192,7 +2592,9 @@
     function deepSplitOperationText(operation) {
       if (operation === "SPLIT_FUNCTION") return "拆分功能过程";
       if (operation === "ADD_MISSING_MOVEMENT") return "补充数据移动";
-      if (operation === "MERGE_DUPLICATE") return "合并重复功能";
+      if (operation === "REMOVE_UNSUPPORTED_MOVEMENT") return "删除无依据数据移动";
+      if (operation === "ADJUST_MOVEMENT_STRUCTURE") return "调整数据移动结构";
+      if (operation === "ADJUST_REUSE_CLASSIFICATION") return "调整复用与 CFP";
       return "结构调整";
     }
 
@@ -2299,7 +2701,7 @@
         } else {
           markActive("review");
         }
-        setMessage("\u5df2\u52a0\u8f7d\u9879\u76ee\u5ba1\u6838\u6570\u636e\uff0c\u53ef\u7ee7\u7eed\u7f16\u8f91\u3001\u89c4\u5219\u521d\u5ba1\u6216 AI \u590d\u6838\u3002", "success");
+        setMessage("已加载项目审核数据，可继续编辑、规则初审或重新执行复用度 AI 调整。", "success");
       });
     }
 
@@ -2334,6 +2736,9 @@
         }
       }
       $("statusText").textContent = data.status || "ANALYZED";
+      if (aiCosmicSplitRunning && data.status !== "AI_SPLITTING" && data.status !== "COSMIC_SPLITTING") {
+        setAiCosmicSplitRunning(false);
+      }
       $("reviewPanel").classList.remove("hidden");
       updateReviewStageGuide();
       renderTable();
@@ -2637,7 +3042,31 @@
       if (!issues.length) {
         return false;
       }
+      if (validation === "STRUCTURE_RISK") {
+        return issues.some(isStructureRiskIssue);
+      }
       return highestValidationSeverity(issues) === validation;
+    }
+
+    function isStructureRiskIssue(issue) {
+      if (!issue || issue.severity !== "RISK") {
+        return false;
+      }
+      return ["\u529f\u80fd\u8fc7\u7a0b", "\u6570\u636e\u79fb\u52a8\u7ed3\u6784", "\u6570\u636e\u79fb\u52a8\u7ec4\u5408"].indexOf(issue.field) >= 0;
+    }
+
+    function validationIssueRowCount(issues, predicate) {
+      const rows = {};
+      (issues || []).forEach(function (issue) {
+        if (!issue || (predicate && !predicate(issue))) {
+          return;
+        }
+        const rowIndex = Number(issue.rowIndex || 0);
+        if (rowIndex > 0) {
+          rows[rowIndex] = true;
+        }
+      });
+      return Object.keys(rows).length;
     }
 
     function highestValidationSeverity(issues) {
@@ -3177,10 +3606,7 @@
           return { row: normalizeRow(row), rowIndex: rowIndex };
         })
         .filter(function (entry) {
-          return entry.row.level1Module === current.level1Module
-            && entry.row.level2Module === current.level2Module
-            && entry.row.level3Module === current.level3Module
-            && entry.row.functionProcess === current.functionProcess;
+          return functionProcessKey(entry.row) === functionProcessKey(current);
         });
       let changed = false;
       groupIndexes.forEach(function (entry) {
@@ -3257,7 +3683,7 @@
         return "UI->后台服务";
       }
       if (movementType === "W") {
-        return "后台服务->UI";
+        return "后台服务->后台服务";
       }
       if (movementType === "X") {
         return "后台服务->UI";
@@ -3394,6 +3820,20 @@
       }
       if (!currentProjectId || !splitRows.length) {
         showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
+        return;
+      }
+      try {
+        const validationResponse = await runRuleValidationRequest();
+        const validation = validationResponse.data || {};
+        renderRuleValidation(validation);
+        if ((validation.errorCount || 0) > 0 || (validation.structureRiskCount || 0) > 0) {
+          showDialog("无法导出送审材料",
+            "当前拆分结果仍有 " + (validation.errorCount || 0) + " 条确定性错误、"
+              + (validation.structureRiskCount || 0) + " 条结构风险。请按初审结果修正后再导出。");
+          return;
+        }
+      } catch (error) {
+        showDialog("导出前校验失败", error.message || "无法执行统一规则校验，请稍后重试。");
         return;
       }
       openExportDialog();
@@ -3596,6 +4036,8 @@
         currentProjectId = projectId;
         $("projectBadge").textContent = projectId;
         $("projectBadge").className = "badge";
+        restoreAiCosmicSplitState(projectId);
+        detectAiCosmicSplitState(projectId);
         loadReviewFromProjectId().catch(function () {
           setMessage("当前项目尚未生成审核数据，请上传或继续执行处理流程。", "error");
         });

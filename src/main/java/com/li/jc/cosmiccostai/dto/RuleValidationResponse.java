@@ -12,6 +12,7 @@ public class RuleValidationResponse {
     private int suggestionCount;
     private int structureRiskCount;
     private int expressionConfirmCount;
+    private String ruleVersion;
     private List<RuleValidationIssue> issues = new ArrayList<RuleValidationIssue>();
 
     public int getTotalRows() {
@@ -68,6 +69,14 @@ public class RuleValidationResponse {
 
     public void setExpressionConfirmCount(int expressionConfirmCount) {
         this.expressionConfirmCount = expressionConfirmCount;
+    }
+
+    public String getRuleVersion() {
+        return ruleVersion;
+    }
+
+    public void setRuleVersion(String ruleVersion) {
+        this.ruleVersion = ruleVersion;
     }
 
     public List<RuleValidationIssue> getIssues() {

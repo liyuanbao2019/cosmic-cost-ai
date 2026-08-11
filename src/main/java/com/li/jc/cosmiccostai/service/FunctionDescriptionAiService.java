@@ -1,6 +1,7 @@
 package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
+import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -41,9 +42,15 @@ public class FunctionDescriptionAiService {
     private final long timeoutSeconds;
     private final int maxRetries;
     private final int chunkParallelism;
+    private final AiModelConfigService aiModelConfigService;
 
     public FunctionDescriptionAiService() {
         this("", "", "", 180, 2, 2);
+    }
+
+    public FunctionDescriptionAiService(String baseUrl, String apiKey, String model,
+                                        long timeoutSeconds, int maxRetries, int chunkParallelism) {
+        this(baseUrl, apiKey, model, timeoutSeconds, maxRetries, chunkParallelism, null);
     }
 
     @Autowired
@@ -52,13 +59,15 @@ public class FunctionDescriptionAiService {
                                          @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
                                          @Value("${cosmic.ai.timeout-seconds:180}") long timeoutSeconds,
                                          @Value("${cosmic.ai.max-retries:2}") int maxRetries,
-                                         @Value("${cosmic.ai.deep-split.chunk-parallelism:2}") int chunkParallelism) {
+                                         @Value("${cosmic.ai.deep-split.chunk-parallelism:2}") int chunkParallelism,
+                                         AiModelConfigService aiModelConfigService) {
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
         this.model = model;
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
         this.chunkParallelism = Math.max(1, chunkParallelism);
+        this.aiModelConfigService = aiModelConfigService;
     }
 
     public Map<String, String> generateDescriptions(Map<String, List<FunctionSplitRow>> groups) {
@@ -66,7 +75,7 @@ public class FunctionDescriptionAiService {
     }
 
     public Map<String, String> generateDescriptions(Map<String, List<FunctionSplitRow>> groups, ProgressCallback progressCallback) {
-        if (groups == null || groups.isEmpty() || !StringUtils.hasText(baseUrl) || !StringUtils.hasText(resolveApiKey())) {
+        if (groups == null || groups.isEmpty() || !isConfigured()) {
             log.info("Skip AI function description generation. groups={}, baseUrlConfigured={}, apiKeyConfigured={}",
                     groups == null ? 0 : groups.size(), StringUtils.hasText(baseUrl), StringUtils.hasText(resolveApiKey()));
             return Collections.emptyMap();
@@ -78,7 +87,7 @@ public class FunctionDescriptionAiService {
         if (progressCallback != null) {
             progressCallback.onStart(groups.size());
         }
-        Map<String, String> result = chunkParallelism <= 1 || batches.size() <= 1
+        Map<String, String> result = activeParallelism() <= 1 || batches.size() <= 1
                 ? generateDescriptionsSequentially(batches, progressCallback)
                 : generateDescriptionsConcurrently(batches, progressCallback);
         log.info("AI function description generation completed. groups={}, batches={}, generated={}, elapsedMs={}",
@@ -115,7 +124,7 @@ public class FunctionDescriptionAiService {
 
     private Map<String, String> generateDescriptionsConcurrently(List<Map<String, List<FunctionSplitRow>>> batches,
                                                                  ProgressCallback progressCallback) {
-        ExecutorService executor = Executors.newFixedThreadPool(Math.min(chunkParallelism, batches.size()));
+        ExecutorService executor = Executors.newFixedThreadPool(Math.min(activeParallelism(), batches.size()));
         CompletionService<BatchResult> completionService = new ExecutorCompletionService<BatchResult>(executor);
         for (final Map<String, List<FunctionSplitRow>> batch : batches) {
             completionService.submit(new Callable<BatchResult>() {
@@ -238,6 +247,19 @@ public class FunctionDescriptionAiService {
     }
 
     private String callAi(String prompt) {
+        if (aiModelConfigService != null) {
+            return aiModelConfigService.generateForTask(
+                    prompt, AiPromptTask.FUNCTION_DESCRIPTION, false);
+        }
+        if (DeepSeekPromptProfile.matches("", baseUrl, model)) {
+            AiModelProfile profile = new AiModelProfile();
+            profile.setProvider("deepseek");
+            profile.setBaseUrl(baseUrl);
+            profile.setModel(model);
+            return new DeepSeekChatClient(objectMapper).generate(
+                    profile, resolveApiKey(), AiPromptTask.FUNCTION_DESCRIPTION,
+                    prompt, timeoutSeconds, maxRetries);
+        }
         ChatLanguageModel chatModel = OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
                 .apiKey(resolveApiKey())
@@ -247,6 +269,20 @@ public class FunctionDescriptionAiService {
                 .maxRetries(maxRetries)
                 .build();
         return chatModel.generate(prompt);
+    }
+
+    private boolean isConfigured() {
+        if (aiModelConfigService != null) {
+            AiModelProfile profile = aiModelConfigService.getActiveProfile();
+            return StringUtils.hasText(profile.getBaseUrl()) && StringUtils.hasText(profile.getApiKey())
+                    || StringUtils.hasText(resolveApiKey());
+        }
+        return StringUtils.hasText(baseUrl) && StringUtils.hasText(resolveApiKey());
+    }
+
+    private int activeParallelism() {
+        return aiModelConfigService == null ? chunkParallelism
+                : Math.max(1, aiModelConfigService.getActiveProfile().getChunkParallelism());
     }
 
     private Map<String, String> parseDescriptions(String aiText) {

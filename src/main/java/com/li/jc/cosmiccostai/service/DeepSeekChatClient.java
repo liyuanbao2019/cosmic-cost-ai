@@ -1,0 +1,166 @@
+package com.li.jc.cosmiccostai.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.li.jc.cosmiccostai.common.BusinessException;
+import com.li.jc.cosmiccostai.dto.AiModelProfile;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/** DeepSeek OpenAI-compatible transport with provider-specific structured-output controls. */
+final class DeepSeekChatClient {
+
+    private final ObjectMapper objectMapper;
+
+    DeepSeekChatClient(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
+    String generate(AiModelProfile profile,
+                    String apiKey,
+                    AiPromptTask task,
+                    String prompt,
+                    long timeoutSeconds,
+                    int maxRetries) {
+        RuntimeException last = null;
+        int attempts = Math.max(0, maxRetries) + 1;
+        for (int attempt = 1; attempt <= attempts; attempt++) {
+            try {
+                return execute(profile, apiKey, task, prompt, timeoutSeconds);
+            } catch (RuntimeException ex) {
+                last = ex;
+                if (attempt < attempts) {
+                    waitBeforeRetry(attempt);
+                }
+            }
+        }
+        throw last == null ? new BusinessException("DeepSeek 调用失败。") : last;
+    }
+
+    private String execute(AiModelProfile profile,
+                           String apiKey,
+                           AiPromptTask task,
+                           String prompt,
+                           long timeoutSeconds) {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(chatCompletionsUrl(profile.getBaseUrl())).openConnection();
+            int timeoutMillis = timeoutMillis(timeoutSeconds);
+            connection.setConnectTimeout(timeoutMillis);
+            connection.setReadTimeout(timeoutMillis);
+            connection.setRequestMethod("POST");
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Authorization", "Bearer " + apiKey);
+            connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            connection.setRequestProperty("Accept", "application/json");
+
+            byte[] requestBytes = objectMapper.writeValueAsBytes(requestBody(profile, task, prompt));
+            connection.setFixedLengthStreamingMode(requestBytes.length);
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(requestBytes);
+            }
+
+            int status = connection.getResponseCode();
+            String responseText = readFully(status >= 200 && status < 300
+                    ? connection.getInputStream() : connection.getErrorStream());
+            if (status < 200 || status >= 300) {
+                throw new BusinessException("DeepSeek API 调用失败（HTTP " + status + "）：" + compact(responseText));
+            }
+            JsonNode root = objectMapper.readTree(responseText);
+            JsonNode content = root.path("choices").path(0).path("message").path("content");
+            if (!content.isTextual() || content.asText().trim().isEmpty()) {
+                throw new BusinessException("DeepSeek 返回了空的结构化结果，请重试。");
+            }
+            return content.asText();
+        } catch (IOException ex) {
+            throw new BusinessException("DeepSeek API 调用或结果解析失败：" + ex.getMessage(), ex);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private Map<String, Object> requestBody(AiModelProfile profile, AiPromptTask task, String prompt) {
+        Map<String, Object> body = new LinkedHashMap<String, Object>();
+        body.put("model", profile.getModel());
+        body.put("stream", false);
+        body.put("response_format", singleton("type", "json_object"));
+
+        body.put("thinking", singleton("type", "enabled"));
+        body.put("reasoning_effort", "max");
+
+        List<Map<String, String>> messages = new ArrayList<Map<String, String>>();
+        messages.add(message("system", DeepSeekPromptProfile.systemPrompt(task)));
+        messages.add(message("user", prompt));
+        body.put("messages", messages);
+        return body;
+    }
+
+    private Map<String, Object> singleton(String key, Object value) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put(key, value);
+        return result;
+    }
+
+    private Map<String, String> message(String role, String content) {
+        Map<String, String> message = new LinkedHashMap<String, String>();
+        message.put("role", role);
+        message.put("content", content == null ? "" : content);
+        return message;
+    }
+
+    private String chatCompletionsUrl(String baseUrl) {
+        String value = baseUrl == null ? "" : baseUrl.trim();
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (value.endsWith("/chat/completions")) {
+            return value;
+        }
+        return value + "/chat/completions";
+    }
+
+    private int timeoutMillis(long timeoutSeconds) {
+        long millis = Math.max(5L, timeoutSeconds) * 1000L;
+        return (int) Math.min(Integer.MAX_VALUE, millis);
+    }
+
+    private String readFully(InputStream input) throws IOException {
+        if (input == null) {
+            return "";
+        }
+        try (InputStream stream = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = stream.read(buffer)) >= 0) {
+                output.write(buffer, 0, read);
+            }
+            return new String(output.toByteArray(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private String compact(String value) {
+        String text = value == null ? "" : value.replaceAll("\\s+", " ").trim();
+        return text.length() <= 500 ? text : text.substring(0, 500) + "...";
+    }
+
+    private void waitBeforeRetry(int completedAttempt) {
+        try {
+            Thread.sleep(Math.min(2000L, completedAttempt * 500L));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("等待重试 DeepSeek 调用时任务被中断。", ex);
+        }
+    }
+}

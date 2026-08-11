@@ -1631,11 +1631,17 @@ td {
   text-overflow: ellipsis;
 }
 
+#reviewTable th,
+#reviewTable td {
+  box-sizing: border-box;
+}
+
 td textarea,
 td select {
   white-space: normal;
+  width: 100%;
   max-width: 100%;
-  overflow: visible;
+  box-sizing: border-box;
 }
 
 th {
@@ -1679,8 +1685,9 @@ td select {
 }
 
 td textarea {
-  overflow: visible;
+  overflow: auto;
   min-height: 36px;
+  resize: vertical;
 }
 
 .field-level1Module,
@@ -1698,9 +1705,15 @@ td textarea {
 
 .cell-preview {
   display: -webkit-box;
+  width: 100%;
   min-height: 38px;
   max-height: 58px;
+  box-sizing: border-box;
   overflow: hidden;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
   color: var(--text);
   font-size: 12px;
   line-height: 1.55;
@@ -1763,18 +1776,9 @@ td textarea {
   z-index: 4;
 }
 
-#reviewTable th:nth-child(6),
-#reviewTable td:nth-child(6) {
-  position: sticky;
-  left: 230px;
-  z-index: 4;
-  box-shadow: 8px 0 12px rgba(15, 23, 42, 0.06);
-}
-
 #reviewTable th:nth-child(1),
 #reviewTable th:nth-child(2),
-#reviewTable th:nth-child(3),
-#reviewTable th:nth-child(6) {
+#reviewTable th:nth-child(3) {
   z-index: 8;
 }
 
@@ -1958,7 +1962,7 @@ td textarea {
 
 .review-stage-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 0 12px 12px;
 }
@@ -2389,6 +2393,10 @@ tbody tr.validation-suggestion .cell-preview {
 }
 
 .ai-prompt-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin: 14px 18px 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -2401,6 +2409,12 @@ tbody tr.validation-suggestion .cell-preview {
 
 .ai-prompt-meta b {
   color: var(--primary-dark);
+}
+
+.ai-prompt-running-hint {
+  color: #a16207;
+  font-weight: 600;
+  text-align: right;
 }
 
 .ai-prompt-text {
@@ -2892,6 +2906,14 @@ tbody tr.validation-suggestion .cell-preview {
 
 .deep-split-card.operation-add_missing_movement {
   border-left-color: #168b6c;
+}
+
+.deep-split-card.operation-remove_unsupported_movement {
+  border-left-color: #dc5a47;
+}
+
+.deep-split-card.operation-adjust_movement_structure {
+  border-left-color: #2563eb;
 }
 
 .deep-split-card.operation-merge_duplicate {

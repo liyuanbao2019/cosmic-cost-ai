@@ -4,6 +4,7 @@ import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.DeepSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DeepSplitRequest;
 import com.li.jc.cosmiccostai.dto.DeepSplitSuggestion;
+import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -65,13 +66,16 @@ public class DeepSplitAiService {
     private static final int EVIDENCE_BLOCK_CHARS = 900;
     private static final int MAX_EVIDENCE_BLOCKS = 10;
     private static final int MAX_GROUPS_PER_CHUNK = 6;
+    private static final int MAX_GLOBAL_DUPLICATE_CANDIDATE_ROWS = 24;
     private static final int STATE_SAVE_RETRIES = 6;
     private static final long STATE_SAVE_RETRY_MILLIS = 250L;
 
     static {
         OPERATIONS.add("SPLIT_FUNCTION");
         OPERATIONS.add("ADD_MISSING_MOVEMENT");
-        OPERATIONS.add("MERGE_DUPLICATE");
+        OPERATIONS.add("REMOVE_UNSUPPORTED_MOVEMENT");
+        OPERATIONS.add("ADJUST_MOVEMENT_STRUCTURE");
+        OPERATIONS.add("ADJUST_REUSE_CLASSIFICATION");
     }
 
     private final FileStorageService fileStorageService;
@@ -86,6 +90,19 @@ public class DeepSplitAiService {
     private final int evidenceChars;
     private final int maxRequestRows;
     private final int chunkParallelism;
+    private final AiModelConfigService aiModelConfigService;
+    private final RuleValidationService ruleValidationService;
+    private final SplitRuleConfigService splitRuleConfigService;
+
+    public DeepSplitAiService(FileStorageService fileStorageService, TaskExecutor taskExecutor,
+                              String baseUrl, String apiKey, String model, long chunkTimeoutSeconds,
+                              int maxRetries, int chunkPromptChars, int evidenceChars,
+                              int maxRequestRows, int chunkParallelism) {
+        this(fileStorageService, taskExecutor, baseUrl, apiKey, model, chunkTimeoutSeconds,
+                maxRetries, chunkPromptChars, evidenceChars, maxRequestRows, chunkParallelism, null,
+                new RuleValidationService(),
+                new SplitRuleConfigService("target/deep-split-test-config/split-check-rules.md"));
+    }
 
     @Autowired
     public DeepSplitAiService(FileStorageService fileStorageService,
@@ -97,8 +114,11 @@ public class DeepSplitAiService {
                               @Value("${cosmic.ai.deep-split.max-retries:${cosmic.ai.max-retries:1}}") int maxRetries,
                               @Value("${cosmic.ai.deep-split.chunk-prompt-chars:9000}") int chunkPromptChars,
                               @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars,
-                              @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows,
-                              @Value("${cosmic.ai.deep-split.chunk-parallelism:10}") int chunkParallelism) {
+                               @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows,
+                               @Value("${cosmic.ai.deep-split.chunk-parallelism:10}") int chunkParallelism,
+                               AiModelConfigService aiModelConfigService,
+                               RuleValidationService ruleValidationService,
+                               SplitRuleConfigService splitRuleConfigService) {
         this.fileStorageService = fileStorageService;
         this.taskExecutor = taskExecutor;
         this.baseUrl = baseUrl;
@@ -110,6 +130,9 @@ public class DeepSplitAiService {
         this.evidenceChars = Math.max(2000, evidenceChars);
         this.maxRequestRows = Math.max(MIN_REQUEST_ROWS_LIMIT, maxRequestRows);
         this.chunkParallelism = Math.max(1, chunkParallelism);
+        this.aiModelConfigService = aiModelConfigService;
+        this.ruleValidationService = ruleValidationService;
+        this.splitRuleConfigService = splitRuleConfigService;
         this.objectMapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
                 .enable(SerializationFeature.INDENT_OUTPUT);
@@ -121,15 +144,16 @@ public class DeepSplitAiService {
         if (rows == null || rows.isEmpty()) {
             throw new BusinessException("请先生成或导入功能点拆分数据，再执行 AI 深度审校。");
         }
-        if (rows.size() > maxRequestRows) {
-            throw new BusinessException("单个深度审校任务最多支持 " + maxRequestRows
+        if (rows.size() > currentMaxRequestRows()) {
+            throw new BusinessException("单个深度审校任务最多支持 " + currentMaxRequestRows()
                     + " 行，请按项目或模块拆分后处理，或调大 cosmic.ai.deep-split.max-request-rows。");
         }
-        if (!StringUtils.hasText(resolveApiKey())) {
+        if (!hasConfiguredApiKey()) {
             throw new BusinessException("AI api key is not configured. Please set OPENAI_API_KEY.");
         }
         log.info("AI deep split start requested. projectId={}, rows={}, maxRequestRows={}, model={}, chunkPromptChars={}, evidenceChars={}, timeoutSeconds={}, chunkParallelism={}",
-                projectId, rows.size(), maxRequestRows, model, chunkPromptChars, evidenceChars, chunkTimeoutSeconds, chunkParallelism);
+                projectId, rows.size(), currentMaxRequestRows(), currentModel(), currentChunkPromptChars(),
+                currentEvidenceChars(), currentChunkTimeoutSeconds(), currentChunkParallelism());
 
         String jobId = "DS" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.ROOT);
@@ -137,7 +161,7 @@ public class DeepSplitAiService {
         state.setJobId(jobId);
         state.setProjectId(projectId);
         state.setStatus("QUEUED");
-        state.setModel(model);
+        state.setModel(currentModel());
         state.setOriginalRows(copyRows(rows));
         state.setChunks(buildChunks(rows));
         state.setCreatedAt(now());
@@ -230,7 +254,7 @@ public class DeepSplitAiService {
                 pendingChunks.add(chunk);
             }
         }
-        int parallelism = Math.min(chunkParallelism, pendingChunks.size());
+        int parallelism = Math.min(currentChunkParallelism(), pendingChunks.size());
         log.info("Deep split job chunks prepared. projectId={}, jobId={}, pendingChunks={}, chunkParallelism={}",
                 projectId, jobId, pendingChunks.size(), parallelism);
         if (parallelism <= 1) {
@@ -352,8 +376,7 @@ public class DeepSplitAiService {
         Map<String, List<Integer>> groups = new LinkedHashMap<String, List<Integer>>();
         for (int i = 0; i < rows.size(); i++) {
             FunctionSplitRow row = rows.get(i);
-            String key = text(row.getLevel1Module()) + "\u001f" + text(row.getLevel2Module()) + "\u001f"
-                    + text(row.getLevel3Module()) + "\u001f" + text(row.getFunctionProcess());
+            String key = FunctionProcessKey.of(row);
             List<Integer> numbers = groups.get(key);
             if (numbers == null) {
                 numbers = new ArrayList<Integer>();
@@ -379,7 +402,7 @@ public class DeepSplitAiService {
             List<Integer> group = entry.getValue();
             int groupChars = estimateRowsChars(rows, group);
             if (!current.getRowNumbers().isEmpty()
-                    && (estimatedChars + groupChars > chunkPromptChars || groupCount >= MAX_GROUPS_PER_CHUNK)) {
+                    && (estimatedChars + groupChars > currentChunkPromptChars() || groupCount >= MAX_GROUPS_PER_CHUNK)) {
                 chunks.add(current);
                 current = new DeepSplitChunk();
                 estimatedChars = 0;
@@ -407,8 +430,7 @@ public class DeepSplitAiService {
                 continue;
             }
             FunctionSplitRow row = rows.get(number - 1);
-            String key = text(row.getLevel1Module()) + "\u001f" + text(row.getLevel2Module()) + "\u001f"
-                    + text(row.getLevel3Module()) + "\u001f" + text(row.getFunctionProcess());
+            String key = FunctionProcessKey.of(row);
             List<Integer> group = groups.get(key);
             if (group == null) {
                 group = new ArrayList<Integer>();
@@ -419,7 +441,7 @@ public class DeepSplitAiService {
 
         List<DeepSplitChunk> result = new ArrayList<DeepSplitChunk>();
         DeepSplitChunk current = new DeepSplitChunk();
-        int retryPromptBudget = Math.max(4000, chunkPromptChars / 2);
+        int retryPromptBudget = Math.max(4000, currentChunkPromptChars() / 2);
         int estimatedChars = 0;
         int groupCount = 0;
         int part = 1;
@@ -452,8 +474,7 @@ public class DeepSplitAiService {
     }
 
     private String groupProcess(String key) {
-        int separator = key == null ? -1 : key.lastIndexOf('\u001f');
-        return separator >= 0 ? key.substring(separator + 1) : text(key);
+        return FunctionProcessKey.process(key);
     }
 
     private int estimateRowsChars(List<FunctionSplitRow> rows, List<Integer> rowNumbers) {
@@ -470,31 +491,160 @@ public class DeepSplitAiService {
         return count;
     }
 
-    private String buildPrompt(DeepSplitJobState state, DeepSplitChunk chunk, List<EvidenceBlock> evidence) {
+    List<Integer> selectGlobalDuplicateCandidateRows(List<FunctionSplitRow> rows,
+                                                     List<Integer> currentRowNumbers) {
+        if (rows == null || rows.isEmpty() || currentRowNumbers == null || currentRowNumbers.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Set<Integer> current = new HashSet<Integer>(currentRowNumbers);
+        Map<String, List<Integer>> outsideGroups = new LinkedHashMap<String, List<Integer>>();
+        for (int i = 0; i < rows.size(); i++) {
+            int number = i + 1;
+            if (current.contains(number)) {
+                continue;
+            }
+            String key = FunctionProcessKey.of(rows.get(i));
+            List<Integer> numbers = outsideGroups.get(key);
+            if (numbers == null) {
+                numbers = new ArrayList<Integer>();
+                outsideGroups.put(key, numbers);
+            }
+            numbers.add(number);
+        }
+        List<DuplicateCandidateGroup> ranked = new ArrayList<DuplicateCandidateGroup>();
+        for (Map.Entry<String, List<Integer>> entry : outsideGroups.entrySet()) {
+            int best = 0;
+            for (Integer candidateNumber : entry.getValue()) {
+                FunctionSplitRow candidate = rows.get(candidateNumber - 1);
+                for (Integer currentNumber : currentRowNumbers) {
+                    if (currentNumber == null || currentNumber < 1 || currentNumber > rows.size()) {
+                        continue;
+                    }
+                    best = Math.max(best, duplicateCandidateScore(rows.get(currentNumber - 1), candidate));
+                }
+            }
+            if (best >= 12) {
+                ranked.add(new DuplicateCandidateGroup(entry.getValue(), best));
+            }
+        }
+        Collections.sort(ranked, new Comparator<DuplicateCandidateGroup>() {
+            @Override
+            public int compare(DuplicateCandidateGroup left, DuplicateCandidateGroup right) {
+                int score = Integer.compare(right.score, left.score);
+                return score != 0 ? score : Integer.compare(left.rowNumbers.get(0), right.rowNumbers.get(0));
+            }
+        });
+        List<Integer> result = new ArrayList<Integer>();
+        for (DuplicateCandidateGroup candidate : ranked) {
+            for (Integer number : candidate.rowNumbers) {
+                if (result.size() >= MAX_GLOBAL_DUPLICATE_CANDIDATE_ROWS) {
+                    return result;
+                }
+                result.add(number);
+            }
+        }
+        return result;
+    }
+
+    private int duplicateCandidateScore(FunctionSplitRow left, FunctionSplitRow right) {
+        int score = 0;
+        if (sameNonBlank(left.getMovementType(), right.getMovementType())) {
+            score += 5;
+        }
+        if (sameNonBlank(left.getSubProcessDescription(), right.getSubProcessDescription())) {
+            score += 8;
+        }
+        if (sameNonBlank(left.getDataGroup(), right.getDataGroup())) {
+            score += 5;
+        }
+        if (sameNonBlank(normalizeAttributes(left.getDataAttributes()), normalizeAttributes(right.getDataAttributes()))) {
+            score += 8;
+        }
+        int processOverlap = overlap(grams(text(left.getFunctionProcess())), grams(text(right.getFunctionProcess())));
+        score += Math.min(6, processOverlap);
+        if (sameNonBlank(left.getLevel1Module(), right.getLevel1Module())
+                && sameNonBlank(left.getFunctionalUser(), right.getFunctionalUser())) {
+            score += 2;
+        }
+        return score;
+    }
+
+    private boolean sameNonBlank(String left, String right) {
+        String leftValue = comparableForDuplicate(left);
+        String rightValue = comparableForDuplicate(right);
+        return StringUtils.hasText(leftValue) && leftValue.equals(rightValue);
+    }
+
+    private String comparableForDuplicate(String value) {
+        return text(value).toLowerCase(Locale.ROOT)
+                .replaceAll("[\\s\\p{Punct}，。、；：“”‘’]+", "");
+    }
+
+    private String normalizeAttributes(String value) {
+        List<String> attributes = new ArrayList<String>();
+        for (String part : text(value).split("[、,，;；|/\\s]+")) {
+            String attribute = comparableForDuplicate(part);
+            if (StringUtils.hasText(attribute) && !attributes.contains(attribute)) {
+                attributes.add(attribute);
+            }
+        }
+        Collections.sort(attributes);
+        return String.join("|", attributes);
+    }
+
+    String buildPrompt(DeepSplitJobState state, DeepSplitChunk chunk, List<EvidenceBlock> evidence) {
+        boolean deepSeekPrompt = usesDeepSeekPrompt();
         StringBuilder builder = new StringBuilder();
         builder.append("你是资深 COSMIC 功能点分析专家。请对当前批次的完整功能过程进行结构化二次审校。\n");
         builder.append("只输出确有必要且可以直接采纳的变更建议；正确内容不要输出建议。\n");
         builder.append("这是送审前终审，不是文字润色。已经满足 COSMIC 基本规则的功能过程视为收敛，不要为了“更细一点/更完整一点/表达更顺一点”反复提出建议。\n");
-        builder.append("允许的 operation 只有 SPLIT_FUNCTION、ADD_MISSING_MOVEMENT、MERGE_DUPLICATE。\n");
+        builder.append("允许的 operation 只有 SPLIT_FUNCTION、ADD_MISSING_MOVEMENT、REMOVE_UNSUPPORTED_MOVEMENT、ADJUST_MOVEMENT_STRUCTURE、ADJUST_REUSE_CLASSIFICATION。\n");
         builder.append("- SPLIT_FUNCTION：一个功能过程包含多个独立触发事件或业务结果，需要拆为多个功能过程。\n");
         builder.append("- ADD_MISSING_MOVEMENT：当前功能过程遗漏了有明确依据的 E/R/W/X 数据移动。\n");
-        builder.append("- MERGE_DUPLICATE：多个功能过程的触发、业务对象和数据移动实质重复，应合并或按复用处理。\n");
+        builder.append("- REMOVE_UNSUPPORTED_MOVEMENT：当前功能过程包含与业务动作不符且没有原文依据的多余数据移动；targetRowNumbers 必须包含该功能过程需要整体替换的全部原行，replacementRows 给出删除多余行后的完整剩余行。\n");
+        builder.append("- ADJUST_MOVEMENT_STRUCTURE：当前功能过程需要在不增加行数的情况下替换错误的数据移动类型或数据组；targetRowNumbers 必须包含整体替换的全部原行，replacementRows 给出调整后的完整行。\n");
+        builder.append("- ADJUST_REUSE_CLASSIFICATION：根据历史判例或全表语义查重，调整功能级重复/子过程级复用的 reuseDegree 与 CFP；功能级重复或包含为利旧/0，用户目标不同但数据移动复用为复用/0.33。\n");
         builder.append("重要约束：\n");
         builder.append("1. 不得为了增加 CFP 凭空创造功能、数据组或属性。\n");
         builder.append("2. replacementRows 必须给出采纳建议后的完整替换行，而不是只给变化字段。\n");
         builder.append("3. targetRowNumbers 必须使用输入中的 rowNumber，采用 1 开始的原表行号。\n");
-        builder.append("4. 每个 replacementRows 元素必须包含 projectName,level1Module,level2Module,level3Module,functionalUser,triggerEvent,functionProcess,functionDescription,subProcessDescription,movementType,dataGroup,dataAttributes,sequenceDiagram,reuseDegree,cfp。\n");
-        builder.append("5. 每个功能过程必须由 E 开始，并以 W 或 X 形成业务结果；R/W 只用于持久化数据组，X 必须跨软件边界输出。\n");
+        builder.append("4. 每个 replacementRows 元素必须包含 projectName,level1Module,level2Module,level3Module,functionalUser,triggerEvent,functionProcess,functionDescription,subProcessDescription,movementType,dataGroup,dataAttributes,sequenceDiagram,reuseDegree,cfp,evidence,sourceReferences。\n");
+        builder.append("5. 每个功能过程必须由初始触发 E 开始，并以 W 或 X 形成业务结果；R/W 只用于持久化数据组，X 必须跨软件边界输出。后续 E 只允许表示本系统发出外部请求 X 后、同一业务目标内返回的同步响应。\n");
         builder.append("6. sourceReferences 只能填写下方实际提供的 REQ-Bxxxx 或 EXCEL-ROW-x 编号；evidence 简要写明依据。\n");
         builder.append("7. 如果证据不足，宁可不输出建议，不要猜测。\n");
         builder.append("8. 禁止输出只改变名称、描述、措辞、模块归类或顺序的建议；必须改变功能边界、数据移动结构、重复计量或 CFP 才能输出。\n");
         builder.append("9. 对同一功能过程，不要把已经可计量的 E/R/W/X 继续拆成更碎颗粒；只有存在独立触发事件、独立业务目的或独立业务结果时才允许拆分。\n");
-        if (!state.isSourceAvailable()) {
-            builder.append("10. 当前没有原始需求文档。不得新增表中没有体现的业务功能；只能依据 EXCEL-ROW 现有字段修正功能边界、重复项或明显缺失的数据移动。\n");
+        builder.append("9.1 每个功能过程至少包含 2 行，首行必须是初始触发 E，末行必须是 W 或 X；允许有依据的 X-E 外部同步往返，禁止无依据的连续 E；不设置最多 4 行限制，5、6、12 行等长链路按真实性逐行判断。\n");
+        builder.append("9.2 校验、计算、解析、匹配、过滤、排序和格式转换是数据操作，不单独计数据移动；只有真实跨边界输入输出或持久化 R/W 才计量。\n");
+        builder.append("9.3 功能过程名称必须是“动作+业务对象”。翻页、勾选/取消勾选、图层切换、自动填充、高亮渲染等纯前端动作不独立计量；如有后台交互，应审查真实数据组后合并或改写。\n");
+        builder.append("9.4 保存/记录/删除技术日志通常不独立计量；日志查询或日志管理只有在原文明示独立功能用户、触发和数据移动时才保留。“暂存”只有进入持久性存储才计 W。\n");
+        builder.append("9.5 数据属性应先检索表格字段、接口/报文参数、正文明确业务数据项和同一功能过程上下文；正文中的“六级地址、故障原因、ret、P01、U13”等可直接作为属性。同一数据组传递同一批数据时完整复用已知属性；无载荷定时/时钟触发 E 填“无业务数据”。只有仍无法识别任何属性时才整格填“待确认”，禁止“字段名（待确认）”混写、虚构字段或使用“同上/见上”。\n");
+        builder.append("9.6 必须做全表语义查重。复用判定三要素为子过程描述、数据移动类型、数据属性：同一或不同功能过程中，三项完全相同且无跨层/跨边界依据按利旧/0 或合并，两项相同且无跨层/跨边界依据按复用/0.33 核实。先判断功能级重复/包含，再判断子过程级复用；不能因功能名不同全部判新增，也不能因一行复用把整个新用户目标判 0。统一映射为新增=1、复用=0.33、利旧=0。\n");
+        builder.append("9.7 同一数据表、接口或业务对象不得按单字段、单统计维度、正反前端操作或同一文件的不同下载环节过度拆分。查询与展示同一对象通常合并为一个 E-R-X，独立触发/数据组/输出结果除外。\n");
+        builder.append("9.8 历史评审批注优先于通用模板：N/NM/UIUE/C/NR/算法本体/需求文档不涉及通常为 0；OLD、功能重复、包含在、合并为通常是功能级 0；数字行号、明确复用及通用能力通常进入 0.33 候选。上传、下载、导入导出、短信、日志、常见查询、配置权限必须先查历史。\n");
+        builder.append("9.9 严禁机械补“读取XXX相关数据”“保存XXX处理结果”“返回XXX处理结果”，也不得使用请求编号/操作人/请求时间、业务编号/状态/内容、记录编号/处理状态/时间、结果编号/状态/提示信息等泛化属性制造差异。\n");
+        builder.append("10. 按统一动作规则检查组合，但必须同时看功能用户、触发事件、系统边界、数据组和结果是否留存，不能只看功能过程名称：\n");
+        builder.append("- 本系统向外部平台发送请求 X 后，对方在同一调用链、同一用户目标内同步返回业务数据时，响应进入本系统可再次记 E，可形成 E-X-E-W-X 或多组 X-E。"
+                + "若外部平台稍后再调用本系统回调/上报接口，则属于新的独立触发，必须用 SPLIT_FUNCTION 拆分；被调用接口的 ReturnCode/ReturnMessage 是第二个功能过程的 X。\n");
+        builder.append("- E 必须描述真实进入本系统的数据或事件，并按真实发起方使用自然业务语言：用户/UI 主动触发写“发起XXX查询，提交具体查询条件”或“提交XXX业务信息”；"
+                + "外部平台上报/回调才写“接收XXX上报数据”，X 后同步响应写“获取XXX同步响应数据”。出现“请求请求”“接收+功能过程名+请求”或“接收向XX平台发送……”时，应结合原文修正数据方向和子过程名称。\n");
+        builder.append("- 数据组和属性必须逐项来自原文表格、接口定义、正文明确业务项或同一功能过程已知属性；“请求编号、操作人、请求时间、业务状态、处理时间”等通用字段没有依据时必须删除。无法识别任何属性时整格写“待确认”，不得保留“字段名（待确认）”混合表达。\n");
+        if (splitRuleConfigService != null) {
+            builder.append(splitRuleConfigService.getEffectiveRulesPrompt()).append("【当前生效规则结束】\n");
         } else {
-            builder.append("10. 当前存在原始需求证据。涉及新增、拆分、补充数据移动的建议，sourceReferences 必须至少包含一个 REQ-Bxxxx 证据编号，不能只依据 EXCEL-ROW。\n");
+            builder.append(ActionMovementRule.canonicalPromptRules());
         }
-        builder.append("输出严格 JSON 数组，不要 Markdown。元素格式：\n");
+        builder.append("原文和数据组支持的组合应保留；缺少数据移动用 ADD_MISSING_MOVEMENT，多余且无依据的数据移动用 REMOVE_UNSUPPORTED_MOVEMENT，"
+                + "需要等行数替换错误类型或数据组时用 ADJUST_MOVEMENT_STRUCTURE，历史/全表查重调整 CFP 时用 ADJUST_REUSE_CLASSIFICATION。\n");
+        if (!state.isSourceAvailable()) {
+            builder.append("11. 当前没有原始需求文档。不得新增表中没有体现的业务功能；只能依据 EXCEL-ROW 现有字段修正功能边界、重复项或明显错误的数据移动。\n");
+        } else {
+            builder.append("11. 当前存在原始需求证据。涉及新增、拆分、补充或删除数据移动的建议，sourceReferences 必须至少包含一个 REQ-Bxxxx 证据编号，不能只依据 EXCEL-ROW。\n");
+        }
+        builder.append(deepSeekPrompt
+                ? "输出顶层为 suggestions 数组的严格 JSON 对象，不要 Markdown；没有建议时输出 "
+                        + DeepSeekPromptProfile.emptyJson(AiPromptTask.DEEP_REVIEW) + "。元素格式：\n"
+                : "输出严格 JSON 数组，不要 Markdown。元素格式：\n");
         builder.append("{\"operation\":\"SPLIT_FUNCTION\",\"title\":\"\",\"reason\":\"\",\"evidence\":\"\",\"sourceReferences\":[\"REQ-B0001\"],\"confidence\":0.0,\"targetRowNumbers\":[1],\"replacementRows\":[{...}]}\n\n");
         builder.append("【当前拆分行】\n");
         for (Integer number : chunk.getRowNumbers()) {
@@ -504,6 +654,18 @@ public class DeepSplitAiService {
             builder.append("EXCEL-ROW-").append(number).append(" ");
             builder.append(toJson(new IndexedRow(number, state.getOriginalRows().get(number - 1)))).append("\n");
         }
+        List<Integer> duplicateCandidateRows = selectGlobalDuplicateCandidateRows(
+                state.getOriginalRows(), chunk.getRowNumbers());
+        builder.append("\n【全表语义查重候选】\n");
+        builder.append("以下行来自当前批次之外，只用于比较历史/全表重复与复用；不得作为 targetRowNumbers。\n");
+        if (duplicateCandidateRows.isEmpty()) {
+            builder.append("无高相似候选。\n");
+        } else {
+            for (Integer number : duplicateCandidateRows) {
+                builder.append("EXCEL-ROW-").append(number).append(" ");
+                builder.append(toJson(new IndexedRow(number, state.getOriginalRows().get(number - 1)))).append("\n");
+            }
+        }
         builder.append("\n【检索到的原始需求证据】\n");
         if (evidence.isEmpty()) {
             builder.append("无原始需求文本。\n");
@@ -512,31 +674,49 @@ public class DeepSplitAiService {
                 builder.append("[").append(block.getId()).append("] ").append(block.getText()).append("\n");
             }
         }
-        return builder.toString();
+        String prompt = builder.toString();
+        return deepSeekPrompt
+                ? DeepSeekPromptProfile.specialize(
+                        AiPromptTask.DEEP_REVIEW, prompt, splitRuleConfigService.getRuleVersion())
+                : prompt;
     }
 
     private String callAiWithRetries(String projectId, String jobId, DeepSplitChunk chunk,
                                      String prompt, int evidenceBlockCount) {
         RuntimeException last = null;
-        int attempts = maxRetries + 1;
+        int attempts = currentChunkMaxRetries() + 1;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             long startedAt = System.nanoTime();
             String context = "projectId=" + projectId + ", jobId=" + jobId + ", chunkId=" + chunk.getId()
                     + ", attempt=" + attempt + "/" + attempts + ", rows=" + chunk.getRowNumbers().size()
                     + ", evidenceBlocks=" + evidenceBlockCount + ", promptChars=" + prompt.length()
-                    + ", model=" + model + ", timeoutSeconds=" + chunkTimeoutSeconds;
+                    + ", model=" + currentModel() + ", timeoutSeconds=" + currentChunkTimeoutSeconds();
             log.info("Deep split AI call started: {}", context);
             appendCallLog(projectId, jobId, "START " + context);
             try {
-                ChatLanguageModel chatModel = OpenAiChatModel.builder()
-                        .baseUrl(baseUrl)
-                        .apiKey(resolveApiKey())
-                        .modelName(model)
-                        .temperature(0.0)
-                        .timeout(Duration.ofSeconds(chunkTimeoutSeconds))
-                        .maxRetries(0)
-                        .build();
-                String response = chatModel.generate(prompt);
+                String response;
+                if (aiModelConfigService != null) {
+                    response = aiModelConfigService.generateForTask(
+                            prompt, AiPromptTask.DEEP_REVIEW, true, 0);
+                } else if (usesDeepSeekPrompt()) {
+                    AiModelProfile profile = new AiModelProfile();
+                    profile.setProvider("deepseek");
+                    profile.setBaseUrl(baseUrl);
+                    profile.setModel(model);
+                    response = new DeepSeekChatClient(objectMapper).generate(
+                            profile, resolveApiKey(), AiPromptTask.DEEP_REVIEW,
+                            prompt, chunkTimeoutSeconds, 0);
+                } else {
+                    ChatLanguageModel chatModel = OpenAiChatModel.builder()
+                            .baseUrl(baseUrl)
+                            .apiKey(resolveApiKey())
+                            .modelName(model)
+                            .temperature(0.0)
+                            .timeout(Duration.ofSeconds(chunkTimeoutSeconds))
+                            .maxRetries(0)
+                            .build();
+                    response = chatModel.generate(prompt);
+                }
                 long elapsedMillis = Duration.ofNanos(System.nanoTime() - startedAt).toMillis();
                 String success = context + ", elapsedMs=" + elapsedMillis + ", responseChars=" + text(response).length();
                 log.info("Deep split AI call succeeded: {}", success);
@@ -580,21 +760,29 @@ public class DeepSplitAiService {
     private List<DeepSplitSuggestion> parseSuggestions(String aiText) {
         String json = stripJsonArray(aiText);
         try {
-            return objectMapper.readValue(json, new TypeReference<List<DeepSplitSuggestion>>() {
-            });
+            if (json.startsWith("{")) {
+                JsonSuggestionWrapper wrapper = objectMapper.readValue(json, JsonSuggestionWrapper.class);
+                return wrapper.getSuggestions() == null
+                        ? Collections.<DeepSplitSuggestion>emptyList() : wrapper.getSuggestions();
+            }
+            return objectMapper.readValue(json, new TypeReference<List<DeepSplitSuggestion>>() {});
         } catch (IOException ex) {
             throw new BusinessException("AI 深度审校结果不是有效 JSON，请重试当前批次。", ex);
         }
     }
 
-    private List<DeepSplitSuggestion> normalizeSuggestions(DeepSplitJobState state,
-                                                           DeepSplitChunk chunk,
-                                                           List<EvidenceBlock> evidence,
-                                                           List<DeepSplitSuggestion> rawSuggestions) {
+    List<DeepSplitSuggestion> normalizeSuggestions(DeepSplitJobState state,
+                                                   DeepSplitChunk chunk,
+                                                   List<EvidenceBlock> evidence,
+                                                   List<DeepSplitSuggestion> rawSuggestions) {
         List<DeepSplitSuggestion> result = new ArrayList<DeepSplitSuggestion>();
         Set<Integer> chunkRows = new HashSet<Integer>(chunk.getRowNumbers());
         Set<String> validReferences = new HashSet<String>();
         for (Integer number : chunk.getRowNumbers()) {
+            validReferences.add("EXCEL-ROW-" + number);
+        }
+        for (Integer number : selectGlobalDuplicateCandidateRows(
+                state.getOriginalRows(), chunk.getRowNumbers())) {
             validReferences.add("EXCEL-ROW-" + number);
         }
         for (EvidenceBlock block : evidence) {
@@ -623,13 +811,18 @@ public class DeepSplitAiService {
             if (replacements.isEmpty()) {
                 continue;
             }
+            attachSuggestionEvidence(replacements, suggestion.getEvidence(), references);
             if ("SPLIT_FUNCTION".equals(suggestion.getOperation()) && distinctProcesses(replacements) < 2) {
                 continue;
             }
             if ("ADD_MISSING_MOVEMENT".equals(suggestion.getOperation()) && replacements.size() <= targets.size()) {
                 continue;
             }
-            if ("MERGE_DUPLICATE".equals(suggestion.getOperation()) && targets.size() < 2) {
+            if ("REMOVE_UNSUPPORTED_MOVEMENT".equals(suggestion.getOperation()) && replacements.size() >= targets.size()) {
+                continue;
+            }
+            if ("ADJUST_REUSE_CLASSIFICATION".equals(suggestion.getOperation())
+                    && !isReuseClassificationOnlyChange(state.getOriginalRows(), targets, replacements)) {
                 continue;
             }
             double confidence = Math.max(0, Math.min(1, suggestion.getConfidence()));
@@ -637,6 +830,11 @@ public class DeepSplitAiService {
                 continue;
             }
             if (!hasMaterialChange(state.getOriginalRows(), targets, replacements)) {
+                continue;
+            }
+            if (ruleValidationService != null
+                    && !"ADJUST_REUSE_CLASSIFICATION".equals(suggestion.getOperation())
+                    && !ruleValidationService.generatedBlockingIssues(replacements).isEmpty()) {
                 continue;
             }
             suggestion.setTargetRowNumbers(targets);
@@ -722,9 +920,25 @@ public class DeepSplitAiService {
             row.setSequenceDiagram(firstText(source.getSequenceDiagram(), defaultSequence(row.getMovementType())));
             row.setReuseDegree(normalizeReuse(firstText(source.getReuseDegree(), base.getReuseDegree(), "新增")));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
+            row.setEvidence(firstText(source.getEvidence(), base.getEvidence()));
+            row.setSourceReferences(source.getSourceReferences() == null
+                    ? new ArrayList<String>() : new ArrayList<String>(source.getSourceReferences()));
             result.add(row);
         }
         return result;
+    }
+
+    private void attachSuggestionEvidence(List<FunctionSplitRow> rows,
+                                          String evidence,
+                                          List<String> references) {
+        for (FunctionSplitRow row : rows) {
+            if (!StringUtils.hasText(row.getEvidence())) {
+                row.setEvidence(text(evidence));
+            }
+            if (row.getSourceReferences() == null || row.getSourceReferences().isEmpty()) {
+                row.setSourceReferences(new ArrayList<String>(references));
+            }
+        }
     }
 
     private int distinctProcesses(List<FunctionSplitRow> rows) {
@@ -751,6 +965,35 @@ public class DeepSplitAiService {
         Collections.sort(before);
         Collections.sort(after);
         return !before.equals(after);
+    }
+
+    private boolean isReuseClassificationOnlyChange(List<FunctionSplitRow> originalRows,
+                                                    List<Integer> targetNumbers,
+                                                    List<FunctionSplitRow> replacementRows) {
+        if (targetNumbers.size() != replacementRows.size()) {
+            return false;
+        }
+        List<String> before = new ArrayList<String>();
+        for (Integer number : targetNumbers) {
+            if (number == null || number < 1 || number > originalRows.size()) {
+                return false;
+            }
+            before.add(structureSignature(originalRows.get(number - 1)));
+        }
+        List<String> after = new ArrayList<String>();
+        for (FunctionSplitRow row : replacementRows) {
+            after.add(structureSignature(row));
+        }
+        Collections.sort(before);
+        Collections.sort(after);
+        return before.equals(after);
+    }
+
+    private String structureSignature(FunctionSplitRow row) {
+        return text(row.getFunctionProcess()) + "|"
+                + text(row.getSubProcessDescription()) + "|"
+                + text(row.getMovementType()).toUpperCase(Locale.ROOT) + "|"
+                + text(row.getDataGroup()) + "|" + text(row.getDataAttributes());
     }
 
     private String materialSignature(FunctionSplitRow row) {
@@ -813,7 +1056,7 @@ public class DeepSplitAiService {
         List<EvidenceBlock> selected = new ArrayList<EvidenceBlock>();
         int chars = 0;
         for (EvidenceBlock block : ranked) {
-            if (selected.size() >= MAX_EVIDENCE_BLOCKS || chars + block.getText().length() > evidenceChars) {
+            if (selected.size() >= MAX_EVIDENCE_BLOCKS || chars + block.getText().length() > currentEvidenceChars()) {
                 continue;
             }
             if (block.getScore() <= 0 && !selected.isEmpty()) {
@@ -961,7 +1204,7 @@ public class DeepSplitAiService {
         response.setSourceType(state.getSourceType());
         response.setSourceAvailable(state.isSourceAvailable());
         response.setTotalChunks(state.getChunks().size());
-        response.setChunkParallelism(chunkParallelism);
+        response.setChunkParallelism(currentChunkParallelism());
         int completed = 0;
         int running = 0;
         int failed = 0;
@@ -1093,6 +1336,9 @@ public class DeepSplitAiService {
         if (text.startsWith("```")) {
             text = text.replaceFirst("^```(?:json)?", "").replaceFirst("```$", "").trim();
         }
+        if (text.startsWith("{")) {
+            return text;
+        }
         int start = text.indexOf('[');
         int end = text.lastIndexOf(']');
         return start >= 0 && end >= start ? text.substring(start, end + 1) : text;
@@ -1161,8 +1407,14 @@ public class DeepSplitAiService {
         if ("SPLIT_FUNCTION".equals(operation)) {
             return "拆分功能过程：" + process;
         }
-        if ("MERGE_DUPLICATE".equals(operation)) {
-            return "合并重复功能：" + process;
+        if ("REMOVE_UNSUPPORTED_MOVEMENT".equals(operation)) {
+            return "删除无依据数据移动：" + process;
+        }
+        if ("ADJUST_MOVEMENT_STRUCTURE".equals(operation)) {
+            return "调整数据移动结构：" + process;
+        }
+        if ("ADJUST_REUSE_CLASSIFICATION".equals(operation)) {
+            return "调整复用与 CFP：" + process;
         }
         return "补充数据移动：" + process;
     }
@@ -1214,6 +1466,58 @@ public class DeepSplitAiService {
         return value;
     }
 
+    private AiModelProfile activeProfile() {
+        return aiModelConfigService == null ? null : aiModelConfigService.getActiveProfile();
+    }
+
+    private boolean hasConfiguredApiKey() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? StringUtils.hasText(resolveApiKey())
+                : StringUtils.hasText(profile.getApiKey()) || StringUtils.hasText(resolveApiKey());
+    }
+
+    private String currentModel() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? model : profile.getModel();
+    }
+
+    private boolean usesDeepSeekPrompt() {
+        AiModelProfile profile = activeProfile();
+        return profile == null
+                ? DeepSeekPromptProfile.matches("", baseUrl, model)
+                : DeepSeekPromptProfile.matches(profile);
+    }
+
+    private long currentChunkTimeoutSeconds() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? chunkTimeoutSeconds : Math.max(20, profile.getChunkTimeoutSeconds());
+    }
+
+    private int currentChunkMaxRetries() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? maxRetries : Math.max(0, profile.getChunkMaxRetries());
+    }
+
+    private int currentChunkPromptChars() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? chunkPromptChars : Math.max(1000, profile.getChunkPromptChars());
+    }
+
+    private int currentEvidenceChars() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? evidenceChars : Math.max(500, profile.getEvidenceChars());
+    }
+
+    private int currentMaxRequestRows() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? maxRequestRows : Math.max(MIN_REQUEST_ROWS_LIMIT, profile.getMaxRequestRows());
+    }
+
+    private int currentChunkParallelism() {
+        AiModelProfile profile = activeProfile();
+        return profile == null ? chunkParallelism : Math.max(1, profile.getChunkParallelism());
+    }
+
     private String firstText(String... values) {
         for (String value : values) {
             if (StringUtils.hasText(value)) {
@@ -1229,6 +1533,16 @@ public class DeepSplitAiService {
 
     private String now() {
         return LocalDateTime.now().format(DATE_TIME_FORMATTER);
+    }
+
+    private static class DuplicateCandidateGroup {
+        private final List<Integer> rowNumbers;
+        private final int score;
+
+        private DuplicateCandidateGroup(List<Integer> rowNumbers, int score) {
+            this.rowNumbers = new ArrayList<Integer>(rowNumbers);
+            this.score = score;
+        }
     }
 
     public static class DeepSplitJobState {
@@ -1329,5 +1643,17 @@ public class DeepSplitAiService {
 
         public int getRowNumber() { return rowNumber; }
         public FunctionSplitRow getRow() { return row; }
+    }
+
+    private static class JsonSuggestionWrapper {
+        private List<DeepSplitSuggestion> suggestions;
+
+        public List<DeepSplitSuggestion> getSuggestions() {
+            return suggestions;
+        }
+
+        public void setSuggestions(List<DeepSplitSuggestion> suggestions) {
+            this.suggestions = suggestions;
+        }
     }
 }

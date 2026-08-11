@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>大模型管理 - COSMIC 软件造价 AI 工作台</title>
+  <link rel="stylesheet" href="/app.css?v=20260801-model-management">
+  <style>
+    .model-page { max-width: 1440px; margin: 0 auto; padding: 24px; }
+    .model-page-head, .model-toolbar, .model-card-head, .model-actions, .model-row-actions, .model-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .model-page-head { margin-bottom:18px; }
+    .model-page-head h2, .model-card h3 { margin:0; }
+    .model-page-head p, .model-card-head p { margin:5px 0 0; color:#657083; }
+    .model-toolbar { background:#fff; border:1px solid #e5e9f0; border-radius:12px; padding:14px 16px; margin-bottom:16px; }
+    .model-grid { display:flex; flex-direction:column; gap:12px; }
+    .model-card { background:#fff; border:1px solid #e1e6ee; border-radius:14px; padding:0 18px; box-shadow:0 4px 18px rgba(36,52,71,.05); overflow:hidden; }
+    .model-card.active { border-color:#3979f6; box-shadow:0 0 0 2px rgba(57,121,246,.1); }
+    .model-card-head { min-height:82px; padding:12px 0; }
+    .model-summary { justify-content:flex-start; min-width:0; flex:1; }
+    .model-summary-main { min-width:220px; }
+    .model-summary-main p { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .model-summary-meta { display:flex; flex-wrap:wrap; gap:8px 18px; color:#687386; font-size:13px; }
+    .model-summary-meta span { white-space:nowrap; }
+    .model-status { display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; background:#edf4ff; color:#2864cb; font-size:12px; font-weight:700; }
+    .model-row-actions { justify-content:flex-end; flex-wrap:wrap; flex-shrink:0; }
+    .model-row-actions button { padding:8px 13px; }
+    .model-expanded { border-top:1px solid #edf0f5; padding:18px 0 20px; }
+    .model-expanded-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+    .model-expanded-head h4 { margin:0; color:#26364b; }
+    .model-detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .model-detail-item { min-width:0; padding:12px 14px; background:#f7f9fc; border:1px solid #edf0f5; border-radius:10px; }
+    .model-detail-item.wide { grid-column:span 2; }
+    .model-detail-item span { display:block; margin-bottom:5px; color:#7a8596; font-size:12px; }
+    .model-detail-item b { display:block; color:#2f3d50; font-size:14px; overflow-wrap:anywhere; }
+    .model-form { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 14px; margin-top:15px; }
+    .model-form label { display:flex; flex-direction:column; gap:6px; color:#364152; font-size:13px; font-weight:600; }
+    .model-form label.wide { grid-column:1/-1; }
+    .model-form input { width:100%; box-sizing:border-box; }
+    .model-section { grid-column:1/-1; margin-top:5px; padding-top:13px; border-top:1px dashed #dce2eb; font-weight:700; color:#243447; }
+    .model-hint { grid-column:1/-1; margin:-3px 0 2px; color:#798497; font-size:12px; line-height:1.55; }
+    .model-actions { grid-column:1/-1; justify-content:flex-end; margin-top:4px; }
+    .danger-text { color:#bd2c2c; border-color:#f0caca; background:#fff7f7; }
+    .config-path { color:#687386; font-size:12px; overflow-wrap:anywhere; }
+    #modelMessage { min-height:22px; margin:12px 2px; }
+    @media(max-width:900px){ .model-card-head,.model-summary{align-items:flex-start;flex-direction:column}.model-row-actions{width:100%;justify-content:flex-start}.model-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    @media(max-width:700px){ .model-page{padding:14px}.model-form,.model-detail-grid{grid-template-columns:1fr}.model-form label.wide,.model-section,.model-hint,.model-actions,.model-detail-item.wide{grid-column:1}.model-page-head,.model-toolbar{align-items:flex-start;flex-direction:column}.model-row-actions button{flex:1}.model-summary-main{min-width:0} }
+  </style>
+</head>
+<body>
+  <header class="topbar"><h1>COSMIC 软件造价 AI 工作台</h1></header>
+  <main class="model-page">
+    <div class="model-page-head">
+      <div><h2>大模型管理</h2><p>选择业务当前使用的模型，并统一设置超时、重试和并发参数。保存后立即生效。</p></div>
+      <div class="model-actions"><button type="button" class="ghost" onclick="location.href='/projects.html'">项目列表</button><button type="button" class="ghost" onclick="location.href='/index.html'">返回工作台</button></div>
+    </div>
+    <div class="model-toolbar">
+      <div><b>模型配置</b><div id="configPath" class="config-path">正在读取配置...</div></div>
+      <div class="model-actions"><button type="button" class="secondary" onclick="addModel()">新增模型</button><button id="saveModelsBtn" type="button" onclick="saveModels()">保存并应用</button></div>
+    </div>
+    <div id="modelMessage" class="message"></div>
+    <div id="modelGrid" class="model-grid"></div>
+  </main>
+  <script>
+    let settings = { selectedId: "", models: [] };
+    let expandedIndex = -1;
+    let expandedMode = "";
+
+    async function loadModels() {
+      setMessage("正在读取大模型配置...");
+      try {
+        const payload = await request("/api/ai-models");
+        settings = payload.data || settings;
+        document.getElementById("configPath").textContent = "运行时配置文件：" + (settings.configPath || "-") + "；首次配置来自 application.yml";
+        renderModels();
+        setMessage("已加载 " + settings.models.length + " 个模型配置。", "success");
+      } catch (error) { setMessage(error.message, "error"); }
+    }
+
+    function renderModels() {
+      const grid = document.getElementById("modelGrid");
+      grid.innerHTML = "";
+      settings.models.forEach(function(model, index) {
+        const card = document.createElement("section");
+        card.className = "model-card" + (model.id === settings.selectedId ? " active" : "");
+        card.innerHTML =
+          '<div class="model-card-head"><div class="model-summary"><div class="model-summary-main"><h3>' + escapeHtml(model.name || "未命名模型") + '</h3><p>' + escapeHtml(model.model || "-") + '</p></div>' +
+          '<div class="model-summary-meta"><span>供应商：' + escapeHtml(model.provider || "-") + '</span><span>并发：' + escapeHtml(model.maxConcurrency) + '</span><span>超时：' + escapeHtml(model.timeoutSeconds) + ' 秒</span></div></div>' +
+          '<div class="model-row-actions">' + (model.id === settings.selectedId ? '<span class="model-status">当前使用</span>' : '<button type="button" class="secondary" onclick="selectModel(' + index + ')">设为当前</button>') +
+          '<button type="button" class="ghost" onclick="toggleModel(' + index + ',\'detail\')">' + buttonText(index, "detail", "详情") + '</button>' +
+          '<button type="button" onclick="toggleModel(' + index + ',\'edit\')">' + buttonText(index, "edit", "编辑") + '</button>' +
+          '<button type="button" class="danger-text" onclick="removeModel(' + index + ')">删除</button></div></div>' +
+          (expandedIndex === index ? (expandedMode === "edit" ? editPanel(model, index) : detailPanel(model, index)) : "");
+        grid.appendChild(card);
+      });
+    }
+
+    function buttonText(index, mode, text) {
+      return expandedIndex === index && expandedMode === mode ? "收起" : text;
+    }
+
+    function toggleModel(index, mode) {
+      if (expandedIndex === index && expandedMode === mode) {
+        expandedIndex = -1;
+        expandedMode = "";
+      } else {
+        expandedIndex = index;
+        expandedMode = mode;
+      }
+      renderModels();
+    }
+
+    function detailPanel(model, index) {
+      return '<div class="model-expanded"><div class="model-expanded-head"><h4>模型配置详情</h4><button type="button" onclick="toggleModel(' + index + ',\'edit\')">编辑此模型</button></div>' +
+        '<div class="model-detail-grid">' +
+        detail("配置 ID", model.id) + detail("显示名称", model.name) + detail("供应商", model.provider) +
+        detail("模型标识", model.model) + detail("API Key", model.apiKeyConfigured || (model.apiKey && model.apiKey.indexOf("********") !== 0) ? "已配置" : "未配置") + detail("Base URL", model.baseUrl, true) +
+        detail("普通调用超时", model.timeoutSeconds + " 秒") + detail("失败重试", model.maxRetries + " 次") + detail("模型最大并发", model.maxConcurrency) +
+        detail("单批超时", model.chunkTimeoutSeconds + " 秒") + detail("单批重试", model.chunkMaxRetries + " 次") + detail("分批并发", model.chunkParallelism) +
+        detail("提示词字符数", model.chunkPromptChars) + detail("证据字符数", model.evidenceChars) + detail("单任务最大行数", model.maxRequestRows) +
+        '</div></div>';
+    }
+
+    function detail(label, value, wide) {
+      return '<div class="model-detail-item' + (wide ? " wide" : "") + '"><span>' + escapeHtml(label) + '</span><b>' + escapeHtml(value == null ? "-" : value) + '</b></div>';
+    }
+
+    function editPanel(model, index) {
+      return '<div class="model-expanded"><div class="model-expanded-head"><h4>编辑模型配置</h4><button type="button" class="ghost" onclick="toggleModel(' + index + ',\'edit\')">取消展开</button></div><div class="model-form">' +
+          field(index,"name","显示名称",model.name,"text",false) + field(index,"id","配置 ID",model.id,"text",false) +
+          field(index,"provider","供应商",model.provider,"text",false) + field(index,"model","模型标识",model.model,"text",false) +
+          field(index,"baseUrl","OpenAI 兼容 Base URL",model.baseUrl,"url",true) +
+          field(index,"apiKey","API Key",model.apiKey,"password",true,'留空将保留已配置的 Key') +
+          '<div class="model-section">普通调用参数</div>' +
+          field(index,"timeoutSeconds","超时（秒）",model.timeoutSeconds,"number",false,"5-3600") +
+          field(index,"maxRetries","失败重试次数",model.maxRetries,"number",false,"0-10") +
+          field(index,"maxConcurrency","模型最大并发",model.maxConcurrency,"number",false,"1-200；所有 AI 场景共享") +
+          '<div class="model-hint">模型最大并发是最终保护上限；即使分批并发更大，同时发往该模型的请求也不会超过此值。</div>' +
+          '<div class="model-section">深度审校与批处理参数</div>' +
+          field(index,"chunkTimeoutSeconds","单批超时（秒）",model.chunkTimeoutSeconds,"number",false,"20-3600") +
+          field(index,"chunkMaxRetries","单批重试次数",model.chunkMaxRetries,"number",false,"0-10") +
+          field(index,"chunkParallelism","分批并发数",model.chunkParallelism,"number",false,"1-100") +
+          field(index,"chunkPromptChars","单批提示词字符数",model.chunkPromptChars,"number",false,"1000-200000") +
+          field(index,"evidenceChars","原文证据字符数",model.evidenceChars,"number",false,"500-100000") +
+          field(index,"maxRequestRows","单任务最大行数",model.maxRequestRows,"number",false,"20-100000") +
+          '<div class="model-actions"><button type="button" class="ghost" onclick="toggleModel(' + index + ',\'edit\')">完成编辑</button><button type="button" onclick="saveModels()">保存并应用</button></div></div></div>';
+    }
+
+    function field(index, key, label, value, type, wide, hint) {
+      return '<label class="' + (wide ? "wide" : "") + '"><span>' + label + (hint ? ' <small>（' + hint + '）</small>' : '') + '</span><input type="' + type + '" value="' + escapeHtml(value == null ? "" : value) + '" onchange="updateModel(' + index + ',\'' + key + '\',this.value,\'' + type + '\')"></label>';
+    }
+
+    function updateModel(index, key, value, type) {
+      const oldId = settings.models[index].id;
+      settings.models[index][key] = type === "number" ? Number(value) : value.trim();
+      if (key === "id" && settings.selectedId === oldId) settings.selectedId = settings.models[index].id;
+    }
+
+    function selectModel(index) { settings.selectedId = settings.models[index].id; renderModels(); setMessage("已选择“" + (settings.models[index].name || settings.models[index].model) + "”，点击保存并应用后生效。"); }
+
+    function addModel() {
+      const suffix = Date.now().toString().slice(-6);
+      settings.models.push({ id:"model-" + suffix, name:"新模型", provider:"openai-compatible", baseUrl:"https://api.openai.com/v1", apiKey:"", model:"gpt-4o-mini", timeoutSeconds:360, maxRetries:2, maxConcurrency:5, chunkTimeoutSeconds:500, chunkMaxRetries:1, chunkParallelism:5, chunkPromptChars:9000, evidenceChars:5000, maxRequestRows:10000 });
+      if (!settings.selectedId) settings.selectedId = settings.models[0].id;
+      expandedIndex = settings.models.length - 1;
+      expandedMode = "edit";
+      renderModels();
+      setTimeout(function() { const cards=document.querySelectorAll(".model-card"); if(cards[expandedIndex]) cards[expandedIndex].scrollIntoView({behavior:"smooth",block:"center"}); }, 0);
+    }
+
+    function removeModel(index) {
+      if (settings.models.length <= 1) { setMessage("至少需要保留一个模型配置。", "error"); return; }
+      const removed = settings.models[index];
+      if (!window.confirm("确认删除模型“" + (removed.name || removed.id) + "”？")) return;
+      settings.models.splice(index, 1);
+      if (removed.id === settings.selectedId) settings.selectedId = settings.models[0].id;
+      expandedIndex = -1;
+      expandedMode = "";
+      renderModels();
+    }
+
+    async function saveModels() {
+      document.getElementById("saveModelsBtn").disabled = true;
+      setMessage("正在保存并应用配置...");
+      try {
+        const payload = await request("/api/ai-models", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(settings) });
+        settings = payload.data;
+        expandedIndex = -1;
+        expandedMode = "";
+        renderModels();
+        setMessage("配置已保存并立即生效，当前模型：" + currentModelName(), "success");
+      } catch (error) { setMessage(error.message, "error"); }
+      finally { document.getElementById("saveModelsBtn").disabled = false; }
+    }
+
+    function currentModelName() { const item = settings.models.find(function(m){return m.id === settings.selectedId;}); return item ? item.name + " / " + item.model : "-"; }
+    function setMessage(text, type) { const el=document.getElementById("modelMessage"); el.textContent=text||""; el.className="message"+(type?" "+type:""); }
+    async function request(url, options) { const response=await fetch(url,options||{}); const payload=await response.json(); if(!response.ok||payload.success===false) throw new Error(payload.message||("请求失败："+response.status)); return payload; }
+    function escapeHtml(value) { return String(value==null?"":value).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\"/g,"&quot;").replace(/'/g,"&#039;"); }
+    window.addEventListener("DOMContentLoaded", loadModels);
+  </script>
+</body>
+</html>

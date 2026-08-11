@@ -11,6 +11,8 @@ public class AiReviewValidationItem {
     private String suggestedSubProcessDescription;
     private String suggestedDataGroup;
     private String suggestedDataAttributes;
+    private String suggestedReuseDegree;
+    private Double suggestedCfp;
     private double confidence;
 
     public int getRowIndex() {
@@ -83,6 +85,22 @@ public class AiReviewValidationItem {
 
     public void setSuggestedDataAttributes(String suggestedDataAttributes) {
         this.suggestedDataAttributes = suggestedDataAttributes;
+    }
+
+    public String getSuggestedReuseDegree() {
+        return suggestedReuseDegree;
+    }
+
+    public void setSuggestedReuseDegree(String suggestedReuseDegree) {
+        this.suggestedReuseDegree = suggestedReuseDegree;
+    }
+
+    public Double getSuggestedCfp() {
+        return suggestedCfp;
+    }
+
+    public void setSuggestedCfp(Double suggestedCfp) {
+        this.suggestedCfp = suggestedCfp;
     }
 
     public double getConfidence() {

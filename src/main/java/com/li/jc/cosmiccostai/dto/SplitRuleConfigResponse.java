@@ -4,6 +4,7 @@ public class SplitRuleConfigResponse {
 
     private String content;
     private String path;
+    private String ruleVersion;
 
     public String getContent() {
         return content;
@@ -19,5 +20,13 @@ public class SplitRuleConfigResponse {
 
     public void setPath(String path) {
         this.path = path;
+    }
+
+    public String getRuleVersion() {
+        return ruleVersion;
+    }
+
+    public void setRuleVersion(String ruleVersion) {
+        this.ruleVersion = ruleVersion;
     }
 }

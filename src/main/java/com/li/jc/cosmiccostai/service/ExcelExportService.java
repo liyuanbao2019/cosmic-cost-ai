@@ -2,6 +2,8 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.ExcelExportResponse;
+import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
+import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.model.CosmicResult;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
@@ -18,10 +20,14 @@ import org.apache.poi.ss.usermodel.Font;
 import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.SheetConditionalFormatting;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.ss.util.RegionUtil;
+import org.apache.poi.xssf.usermodel.DefaultIndexedColorMap;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,9 +57,15 @@ public class ExcelExportService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int TEMPLATE_CLEAR_ROW_LIMIT = 500;
     private static final int STANDARD_LAST_EXPORT_COLUMN = 12;
+    private static final int FIRST_SPLIT_DATA_ROW = 5;
+    private static final String VALIDATION_ERROR = "ERROR";
+    private static final String VALIDATION_RISK = "RISK";
+    private static final byte[] VALIDATION_RISK_FILL_RGB = new byte[]{(byte) 255, (byte) 242, (byte) 204};
+    private static final byte[] VALIDATION_ERROR_FILL_RGB = new byte[]{(byte) 244, (byte) 204, (byte) 204};
 
     private final FileStorageService fileStorageService;
     private final FunctionDescriptionAiService functionDescriptionAiService;
+    private final RuleValidationService ruleValidationService;
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
@@ -64,13 +76,23 @@ public class ExcelExportService {
         this(fileStorageService, outputBaseDir, configuredTemplatePath, new FunctionDescriptionAiService());
     }
 
-    @Autowired
     public ExcelExportService(FileStorageService fileStorageService,
                               @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
                               @Value("${cosmic.template.excel-path:}") String configuredTemplatePath,
                               FunctionDescriptionAiService functionDescriptionAiService) {
+        this(fileStorageService, outputBaseDir, configuredTemplatePath,
+                functionDescriptionAiService, new RuleValidationService());
+    }
+
+    @Autowired
+    public ExcelExportService(FileStorageService fileStorageService,
+                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
+                              @Value("${cosmic.template.excel-path:}") String configuredTemplatePath,
+                              FunctionDescriptionAiService functionDescriptionAiService,
+                              RuleValidationService ruleValidationService) {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
+        this.ruleValidationService = ruleValidationService;
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
         this.objectMapper = new ObjectMapper();
@@ -82,6 +104,8 @@ public class ExcelExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> splitRows = readOrCreateSplitRows(metadata, results);
+        RuleValidationResponse validation = ruleValidationService.validate(splitRows);
+        ruleValidationService.ensureReadyForExport(validation, "导出送审 Excel");
         Path templatePath = resolveTemplatePath(zh("\u9644\u4ef63"));
         Path businessTemplatePath = resolveTemplatePath(zh("\u9644\u4ef62"));
         Path projectOutputDir = outputBaseDir.resolve(projectId);
@@ -100,7 +124,7 @@ public class ExcelExportService {
                 if (sheet == null) {
                     sheet = workbook.getSheetAt(2);
                 }
-                movementRows = fillSheet(sheet, metadata, splitRows);
+                movementRows = fillSheet(sheet, metadata, splitRows, validation);
                 for (FunctionSplitRow row : splitRows) {
                     totalCfp += row.getCfp();
                 }
@@ -263,10 +287,11 @@ public class ExcelExportService {
         return null;
     }
 
-    private int fillSheet(Sheet sheet, ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+    private int fillSheet(Sheet sheet, ProjectMetadata metadata, List<FunctionSplitRow> rows,
+                          RuleValidationResponse validation) {
         clearTemplateData(sheet);
 
-        int rowIndex = 5;
+        int rowIndex = FIRST_SPLIT_DATA_ROW;
         int movementRows = 0;
         Map<Short, CellStyle> styleCache = new HashMap<Short, CellStyle>();
         for (FunctionSplitRow splitRow : rows) {
@@ -294,9 +319,11 @@ public class ExcelExportService {
 
             int lastDataRow = rowIndex - 1;
         removeInternalExportColumns(sheet);
-        applyDataBorders(sheet, 5, lastDataRow, 0, STANDARD_LAST_EXPORT_COLUMN);
-        mergeHierarchyColumns(sheet, rows, 5, lastDataRow);
-        addReuseDegreeValidation(sheet, 5, rowIndex - 1);
+        applyDataBorders(sheet, FIRST_SPLIT_DATA_ROW, lastDataRow, 0, STANDARD_LAST_EXPORT_COLUMN);
+        Map<Integer, String> validationSeverityByRow = validationSeverityByRow(validation, rows.size());
+        mergeHierarchyColumns(sheet, rows, FIRST_SPLIT_DATA_ROW, lastDataRow, validationSeverityByRow);
+        applyValidationRiskFills(sheet, FIRST_SPLIT_DATA_ROW, lastDataRow, validationSeverityByRow);
+        addReuseDegreeValidation(sheet, FIRST_SPLIT_DATA_ROW, rowIndex - 1);
         return movementRows;
     }
 
@@ -463,35 +490,116 @@ public class ExcelExportService {
         return style;
     }
 
-    private void mergeHierarchyColumns(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow) {
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 0, -1);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 1, 0);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 2, 1);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 3, 2);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 4, 3);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 5, 4);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 6, 5);
+    private void mergeHierarchyColumns(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow,
+                                       Map<Integer, String> validationSeverityByRow) {
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 0, -1, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 1, 0, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 2, 1, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 3, 2, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 4, 3, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 5, 4, validationSeverityByRow);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 6, 5, validationSeverityByRow);
     }
 
-    private void mergeSameContentColumn(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow, int colIndex, int parentColIndex) {
+    private void mergeSameContentColumn(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow,
+                                        int colIndex, int parentColIndex,
+                                        Map<Integer, String> validationSeverityByRow) {
         if (lastRow < firstRow) {
             return;
         }
         int groupStart = firstRow;
         String previous = rowValue(rows, 0, colIndex);
         String previousParent = parentKey(rows, 0, parentColIndex);
+        String previousSeverity = validationSeverityByRow.get(1);
         for (int rowIndex = firstRow + 1; rowIndex <= lastRow + 1; rowIndex++) {
             int dataIndex = rowIndex - firstRow;
             String current = rowIndex <= lastRow ? rowValue(rows, dataIndex, colIndex) : null;
             String currentParent = rowIndex <= lastRow ? parentKey(rows, dataIndex, parentColIndex) : null;
-            if (previous != null && previous.equals(current) && previousParent.equals(currentParent)) {
+            String currentSeverity = rowIndex <= lastRow ? validationSeverityByRow.get(dataIndex + 1) : null;
+            if (previous != null && previous.equals(current) && previousParent.equals(currentParent)
+                    && sameValidationSeverity(previousSeverity, currentSeverity)) {
                 continue;
             }
             mergeRegionIfNeeded(sheet, groupStart, rowIndex - 1, colIndex, previous);
             groupStart = rowIndex;
             previous = current;
             previousParent = currentParent == null ? "" : currentParent;
+            previousSeverity = currentSeverity;
         }
+    }
+
+    private boolean sameValidationSeverity(String left, String right) {
+        return left == null ? right == null : left.equals(right);
+    }
+
+    private Map<Integer, String> validationSeverityByRow(RuleValidationResponse validation, int rowCount) {
+        Map<Integer, String> severities = new HashMap<Integer, String>();
+        if (validation == null || validation.getIssues() == null) {
+            return severities;
+        }
+        for (RuleValidationIssue issue : validation.getIssues()) {
+            if (issue == null || issue.getRowIndex() < 1 || issue.getRowIndex() > rowCount) {
+                continue;
+            }
+            String severity = issue.getSeverity();
+            if (!VALIDATION_ERROR.equals(severity) && !VALIDATION_RISK.equals(severity)) {
+                continue;
+            }
+            String current = severities.get(issue.getRowIndex());
+            if (current == null || VALIDATION_ERROR.equals(severity)) {
+                severities.put(issue.getRowIndex(), severity);
+            }
+        }
+        return severities;
+    }
+
+    private void applyValidationRiskFills(Sheet sheet, int firstRow, int lastRow,
+                                          Map<Integer, String> validationSeverityByRow) {
+        if (lastRow < firstRow || validationSeverityByRow.isEmpty()) {
+            return;
+        }
+        Workbook workbook = sheet.getWorkbook();
+        Map<String, CellStyle> fillStyleCache = new HashMap<String, CellStyle>();
+        for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
+            String severity = validationSeverityByRow.get(rowIndex - firstRow + 1);
+            if (severity == null) {
+                continue;
+            }
+            Row row = getOrCreateRow(sheet, rowIndex);
+            for (int colIndex = 0; colIndex <= STANDARD_LAST_EXPORT_COLUMN; colIndex++) {
+                Cell cell = row.getCell(colIndex);
+                if (cell == null) {
+                    cell = row.createCell(colIndex);
+                }
+                cell.setCellStyle(validationRiskStyle(workbook, cell.getCellStyle(), severity, fillStyleCache));
+            }
+        }
+    }
+
+    private CellStyle validationRiskStyle(Workbook workbook, CellStyle sourceStyle, String severity,
+                                          Map<String, CellStyle> fillStyleCache) {
+        short sourceIndex = sourceStyle == null ? -1 : sourceStyle.getIndex();
+        String cacheKey = sourceIndex + ":" + severity;
+        CellStyle cached = fillStyleCache.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        CellStyle style = workbook.createCellStyle();
+        if (sourceStyle != null) {
+            style.cloneStyleFrom(sourceStyle);
+        }
+        if (style instanceof XSSFCellStyle) {
+            byte[] rgb = VALIDATION_ERROR.equals(severity)
+                    ? VALIDATION_ERROR_FILL_RGB : VALIDATION_RISK_FILL_RGB;
+            ((XSSFCellStyle) style).setFillForegroundColor(
+                    new XSSFColor(rgb, new DefaultIndexedColorMap()));
+        } else {
+            style.setFillForegroundColor(VALIDATION_ERROR.equals(severity)
+                    ? IndexedColors.ROSE.getIndex() : IndexedColors.LIGHT_YELLOW.getIndex());
+        }
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        fillStyleCache.put(cacheKey, style);
+        return style;
     }
 
     private void mergeRegionIfNeeded(Sheet sheet, int firstRow, int lastRow, int colIndex, String value) {
@@ -553,6 +661,7 @@ public class ExcelExportService {
     }
 
     private void clearTemplateData(Sheet sheet) {
+        removeTemplateConditionalFormatting(sheet);
         List<CellRangeAddress> mergedToRemove = new ArrayList<CellRangeAddress>();
         for (int i = 0; i < sheet.getNumMergedRegions(); i++) {
             CellRangeAddress region = sheet.getMergedRegion(i);
@@ -579,6 +688,13 @@ public class ExcelExportService {
                     cell.setBlank();
                 }
             }
+        }
+    }
+
+    private void removeTemplateConditionalFormatting(Sheet sheet) {
+        SheetConditionalFormatting formatting = sheet.getSheetConditionalFormatting();
+        for (int index = formatting.getNumConditionalFormattings() - 1; index >= 0; index--) {
+            formatting.removeConditionalFormatting(index);
         }
     }
 
@@ -624,9 +740,9 @@ public class ExcelExportService {
 
         CellStyle style = workbook.createCellStyle();
         style.cloneStyleFrom(sourceStyle);
-        style.setFillPattern(FillPatternType.NO_FILL);
-        style.setFillForegroundColor(IndexedColors.AUTOMATIC.getIndex());
-        style.setFillBackgroundColor(IndexedColors.AUTOMATIC.getIndex());
+        style.setFillForegroundColor(IndexedColors.WHITE.getIndex());
+        style.setFillBackgroundColor(IndexedColors.WHITE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
         style.setFont(createBlackFont(workbook, sourceStyle));
         applyThinBorders(style);
         styleCache.put(sourceIndex, style);
@@ -700,39 +816,7 @@ public class ExcelExportService {
     }
 
     private List<FunctionSplitRow> toSplitRows(ProjectMetadata metadata, CosmicResult result) {
-        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
-        addRows(rows, metadata, result, "E", result.getEntry(), zh("\u63a5\u6536") + result.getFunction() + zh("\u8bf7\u6c42"),
-                result.getFunction() + zh("\u8bf7\u6c42"), zh("\u8bf7\u6c42\u7f16\u53f7\u3001\u64cd\u4f5c\u4eba\u3001\u8bf7\u6c42\u65f6\u95f4"));
-        addRows(rows, metadata, result, "R", result.getRead(), zh("\u8bfb\u53d6") + result.getFunction() + zh("\u76f8\u5173\u6570\u636e"),
-                result.getFunction() + zh("\u6570\u636e"), zh("\u4e1a\u52a1\u7f16\u53f7\u3001\u4e1a\u52a1\u72b6\u6001\u3001\u4e1a\u52a1\u5185\u5bb9"));
-        addRows(rows, metadata, result, "W", result.getWrite(), zh("\u4fdd\u5b58") + result.getFunction() + zh("\u5904\u7406\u7ed3\u679c"),
-                result.getFunction() + zh("\u8bb0\u5f55"), zh("\u8bb0\u5f55\u7f16\u53f7\u3001\u5904\u7406\u72b6\u6001\u3001\u5904\u7406\u65f6\u95f4"));
-        addRows(rows, metadata, result, "X", result.getExit(), zh("\u8fd4\u56de") + result.getFunction() + zh("\u5904\u7406\u7ed3\u679c"),
-                result.getFunction() + zh("\u7ed3\u679c"), zh("\u7ed3\u679c\u7f16\u53f7\u3001\u7ed3\u679c\u72b6\u6001\u3001\u63d0\u793a\u4fe1\u606f"));
-        return rows;
-    }
-
-    private void addRows(List<FunctionSplitRow> rows, ProjectMetadata metadata, CosmicResult result, String type, int count,
-                         String description, String dataGroup, String dataAttributes) {
-        for (int i = 0; i < count; i++) {
-            FunctionSplitRow row = new FunctionSplitRow();
-            row.setProjectName(metadata.getName());
-            row.setLevel1Module(result.getModule());
-            row.setLevel2Module(result.getModule());
-            row.setLevel3Module(result.getModule());
-            row.setFunctionalUser(zh("\u53d1\u8d77\u8005\uff1a\u7528\u6237\n\u63a5\u6536\u8005\uff1a\u7cfb\u7edf"));
-            row.setTriggerEvent(result.getFunction());
-            row.setFunctionProcess(result.getFunction());
-            row.setSubProcessDescription(description);
-            row.setMovementType(type);
-            row.setDataGroup(dataGroup);
-            row.setDataAttributes(dataAttributes);
-            row.setFunctionDescription(buildFunctionDescription(result.getDescription(), description, dataAttributes));
-            row.setSequenceDiagram(defaultSequenceDiagram(type, description, dataGroup, dataAttributes));
-            row.setReuseDegree(zh("\u65b0\u589e"));
-            row.setCfp(1);
-            rows.add(row);
-        }
+        return FunctionSplitRowFactory.create(metadata, result);
     }
 
     private void normalizeSplitRows(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
@@ -770,13 +854,15 @@ public class ExcelExportService {
                 row.setTriggerEvent(row.getFunctionProcess());
             }
             if (!StringUtils.hasText(row.getDataGroup())) {
-                row.setDataGroup(row.getFunctionProcess());
+                row.setDataGroup(zh("\u5f85\u786e\u8ba4"));
             }
             if (!StringUtils.hasText(row.getDataAttributes())) {
-                row.setDataAttributes(zh("\u7f16\u53f7\u3001\u72b6\u6001\u3001\u65f6\u95f4"));
+                row.setDataAttributes(zh("\u5f85\u786e\u8ba4"));
             }
-            row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
-                    row.getDataGroup(), row.getDataAttributes()));
+            if (!StringUtils.hasText(row.getSequenceDiagram())) {
+                row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
+                        row.getDataGroup(), row.getDataAttributes()));
+            }
             row.setReuseDegree(normalizeReuseDegree(row.getReuseDegree()));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
             lastLevel1 = row.getLevel1Module();
@@ -826,8 +912,7 @@ public class ExcelExportService {
     private void applyGroupFunctionDescriptions(List<FunctionSplitRow> rows) {
         Map<String, List<FunctionSplitRow>> groups = new LinkedHashMap<String, List<FunctionSplitRow>>();
         for (FunctionSplitRow row : rows) {
-            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f"
-                    + safe(row.getLevel3Module()) + "\u001f" + safe(row.getFunctionProcess());
+            String key = FunctionProcessKey.of(row);
             List<FunctionSplitRow> groupRows = groups.get(key);
             if (groupRows == null) {
                 groupRows = new ArrayList<FunctionSplitRow>();
@@ -952,7 +1037,7 @@ public class ExcelExportService {
             return zh("UI->\u540e\u53f0\u670d\u52a1");
         }
         if ("W".equals(movementType)) {
-            return zh("\u540e\u53f0\u670d\u52a1->UI");
+            return zh("\u540e\u53f0\u670d\u52a1->\u540e\u53f0\u670d\u52a1");
         }
         return zh("\u540e\u53f0\u670d\u52a1->UI");
     }

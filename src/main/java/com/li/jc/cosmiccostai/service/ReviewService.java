@@ -2,6 +2,7 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
+import com.li.jc.cosmiccostai.model.CosmicMovement;
 import com.li.jc.cosmiccostai.model.CosmicResult;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
@@ -36,16 +37,24 @@ public class ReviewService {
 
     private final FileStorageService fileStorageService;
     private final FunctionDescriptionAiService functionDescriptionAiService;
+    private final RuleValidationService ruleValidationService;
     private final ObjectMapper objectMapper;
 
     public ReviewService(FileStorageService fileStorageService) {
-        this(fileStorageService, new FunctionDescriptionAiService());
+        this(fileStorageService, new FunctionDescriptionAiService(), new RuleValidationService());
+    }
+
+    public ReviewService(FileStorageService fileStorageService, FunctionDescriptionAiService functionDescriptionAiService) {
+        this(fileStorageService, functionDescriptionAiService, new RuleValidationService());
     }
 
     @Autowired
-    public ReviewService(FileStorageService fileStorageService, FunctionDescriptionAiService functionDescriptionAiService) {
+    public ReviewService(FileStorageService fileStorageService,
+                         FunctionDescriptionAiService functionDescriptionAiService,
+                         RuleValidationService ruleValidationService) {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
+        this.ruleValidationService = ruleValidationService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -74,6 +83,10 @@ public class ReviewService {
         return saveReview(projectId, rows, "EXCEL_IMPORTED", false);
     }
 
+    public ReviewResponse saveReuseAdjustedReview(String projectId, List<FunctionSplitRow> rows) {
+        return saveReview(projectId, rows, "REUSE_ADJUSTED", false);
+    }
+
     private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status) {
         return saveReview(projectId, rows, status, false);
     }
@@ -89,6 +102,10 @@ public class ReviewService {
         log.info("Saving review rows. projectId={}, status={}, rows={}, polishFunctionDescription={}",
                 projectId, status, rows.size(), polishFunctionDescription);
         normalizeRows(metadata, rows, polishFunctionDescription);
+        if (!"EXCEL_IMPORTED".equals(status) && !"REUSE_ADJUSTED".equals(status)
+                && "DOCUMENT".equals(sourceType(metadata))) {
+            ruleValidationService.ensureNoErrors(rows, "保存审核结果");
+        }
         List<CosmicResult> results = toCosmicResults(rows);
 
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
@@ -97,6 +114,7 @@ public class ReviewService {
         writeJson(Paths.get(metadata.getCosmicResultsPath()), results);
 
         metadata.setFunctionSplitRowsPath(splitPath.toString());
+        metadata.setRuleVersion(ruleValidationService.getRuleVersion());
         metadata.setStatus(status);
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
@@ -128,39 +146,7 @@ public class ReviewService {
     }
 
     private List<FunctionSplitRow> toSplitRows(ProjectMetadata metadata, CosmicResult result) {
-        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
-        addRows(rows, metadata, result, "E", result.getEntry(), zh("\u63a5\u6536") + result.getFunction() + zh("\u8bf7\u6c42"),
-                result.getFunction() + zh("\u8bf7\u6c42"), zh("\u8bf7\u6c42\u7f16\u53f7\u3001\u64cd\u4f5c\u4eba\u3001\u8bf7\u6c42\u65f6\u95f4"));
-        addRows(rows, metadata, result, "R", result.getRead(), zh("\u8bfb\u53d6") + result.getFunction() + zh("\u76f8\u5173\u6570\u636e"),
-                result.getFunction() + zh("\u6570\u636e"), zh("\u4e1a\u52a1\u7f16\u53f7\u3001\u4e1a\u52a1\u72b6\u6001\u3001\u4e1a\u52a1\u5185\u5bb9"));
-        addRows(rows, metadata, result, "W", result.getWrite(), zh("\u4fdd\u5b58") + result.getFunction() + zh("\u5904\u7406\u7ed3\u679c"),
-                result.getFunction() + zh("\u8bb0\u5f55"), zh("\u8bb0\u5f55\u7f16\u53f7\u3001\u5904\u7406\u72b6\u6001\u3001\u5904\u7406\u65f6\u95f4"));
-        addRows(rows, metadata, result, "X", result.getExit(), zh("\u8fd4\u56de") + result.getFunction() + zh("\u5904\u7406\u7ed3\u679c"),
-                result.getFunction() + zh("\u7ed3\u679c"), zh("\u7ed3\u679c\u7f16\u53f7\u3001\u7ed3\u679c\u72b6\u6001\u3001\u63d0\u793a\u4fe1\u606f"));
-        return rows;
-    }
-
-    private void addRows(List<FunctionSplitRow> rows, ProjectMetadata metadata, CosmicResult result, String type, int count,
-                         String description, String dataGroup, String dataAttributes) {
-        for (int i = 0; i < count; i++) {
-            FunctionSplitRow row = new FunctionSplitRow();
-            row.setProjectName(metadata.getName());
-            row.setLevel1Module(result.getModule());
-            row.setLevel2Module(result.getModule());
-            row.setLevel3Module(result.getModule());
-            row.setFunctionalUser(zh("\u53d1\u8d77\u8005\uff1a\u7528\u6237\n\u63a5\u6536\u8005\uff1a\u7cfb\u7edf"));
-            row.setTriggerEvent(result.getFunction());
-            row.setFunctionProcess(result.getFunction());
-            row.setSubProcessDescription(description);
-            row.setMovementType(type);
-            row.setDataGroup(dataGroup);
-            row.setDataAttributes(dataAttributes);
-            row.setFunctionDescription(buildFunctionDescription(result.getDescription(), description, dataAttributes));
-            row.setSequenceDiagram(defaultSequenceDiagram(type, description, dataGroup, dataAttributes));
-            row.setReuseDegree(zh("\u65b0\u589e"));
-            row.setCfp(1);
-            rows.add(row);
-        }
+        return FunctionSplitRowFactory.create(metadata, result);
     }
 
     private void normalizeRows(ProjectMetadata metadata, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
@@ -201,13 +187,16 @@ public class ReviewService {
                 row.setTriggerEvent(row.getFunctionProcess());
             }
             if (!StringUtils.hasText(row.getDataGroup())) {
-                row.setDataGroup(row.getFunctionProcess());
+                row.setDataGroup(zh("\u5f85\u786e\u8ba4"));
             }
             if (!StringUtils.hasText(row.getDataAttributes())) {
-                row.setDataAttributes(zh("\u7f16\u53f7\u3001\u72b6\u6001\u3001\u65f6\u95f4"));
+                row.setDataAttributes(zh("\u5f85\u786e\u8ba4"));
             }
-            row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
-                    row.getDataGroup(), row.getDataAttributes()));
+            if (!StringUtils.hasText(row.getSequenceDiagram())) {
+                row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
+                        row.getDataGroup(), row.getDataAttributes()));
+            }
+            MovementDescriptionNormalizer.normalize(row);
             row.setReuseDegree(normalizeReuseDegree(row.getReuseDegree()));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
             lastLevel1 = row.getLevel1Module();
@@ -254,8 +243,7 @@ public class ReviewService {
     private void applyGroupFunctionDescriptions(List<FunctionSplitRow> rows) {
         Map<String, List<FunctionSplitRow>> groups = new LinkedHashMap<String, List<FunctionSplitRow>>();
         for (FunctionSplitRow row : rows) {
-            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f"
-                    + safe(row.getLevel3Module()) + "\u001f" + safe(row.getFunctionProcess());
+            String key = FunctionProcessKey.of(row);
             List<FunctionSplitRow> groupRows = groups.get(key);
             if (groupRows == null) {
                 groupRows = new ArrayList<FunctionSplitRow>();
@@ -381,7 +369,7 @@ public class ReviewService {
             return zh("UI->\u540e\u53f0\u670d\u52a1");
         }
         if ("W".equals(type)) {
-            return zh("\u540e\u53f0\u670d\u52a1->UI");
+            return zh("\u540e\u53f0\u670d\u52a1->\u540e\u53f0\u670d\u52a1");
         }
         return zh("\u540e\u53f0\u670d\u52a1->UI");
     }
@@ -436,9 +424,19 @@ public class ReviewService {
                 result.setModule(row.getLevel1Module());
                 result.setFunction(process);
                 result.setDescription(row.getFunctionDescription());
+                result.setFunctionalUser(row.getFunctionalUser());
+                result.setTriggerEvent(row.getTriggerEvent());
                 result.setSequenceDiagram(row.getSequenceDiagram());
+                result.setMovements(new ArrayList<CosmicMovement>());
                 map.put(process, result);
             }
+            CosmicMovement movement = new CosmicMovement();
+            movement.setType(row.getMovementType());
+            movement.setDescription(row.getSubProcessDescription());
+            movement.setDataGroup(row.getDataGroup());
+            movement.setDataAttributes(row.getDataAttributes());
+            movement.setSequenceDiagram(row.getSequenceDiagram());
+            result.getMovements().add(movement);
             if ("E".equals(row.getMovementType())) {
                 result.setEntry(result.getEntry() + 1);
             } else if ("R".equals(row.getMovementType())) {
@@ -490,6 +488,9 @@ public class ReviewService {
         response.setTotalCfp(totalCfp);
         response.setStatus(metadata.getStatus());
         response.setSourceType(sourceType(metadata));
+        // Always expose the rule package that is currently judging this response.
+        // Historical projects may not have persisted a rule version when they were created.
+        response.setRuleVersion(ruleValidationService.getRuleVersion());
         response.setResults(results);
         response.setSplitRows(rows);
         return response;

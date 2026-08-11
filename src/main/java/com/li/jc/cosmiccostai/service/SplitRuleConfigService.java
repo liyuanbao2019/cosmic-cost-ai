@@ -12,11 +12,18 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 @Service
 public class SplitRuleConfigService {
 
     private static final String DEFAULT_RULE_RESOURCE = "static/split-check-rules.md";
+    /**
+     * Bump whenever deterministic validation semantics change. The public rule
+     * version must identify both the editable prose and the server-side judge.
+     */
+    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-11.v2.2";
 
     private final Path editableRulePath;
 
@@ -37,6 +44,34 @@ public class SplitRuleConfigService {
         return resolveEditableRulePath().toString();
     }
 
+    public String getRuleVersion() {
+        String material = DETERMINISTIC_RULE_ENGINE_REVISION + "\n"
+                + getRules() + "\n" + ActionMovementRule.canonicalPromptRules();
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(material.getBytes(StandardCharsets.UTF_8));
+            StringBuilder value = new StringBuilder("R-");
+            for (int i = 0; i < 8 && i < hash.length; i++) {
+                value.append(String.format("%02x", hash[i] & 0xff));
+            }
+            return value.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
+        }
+    }
+
+    /**
+     * The exact rule package supplied to every AI stage. Editable audit rules
+     * are supplemental; the deterministic action catalogue is appended last
+     * so prose edits cannot silently override server-side validation.
+     */
+    public String getEffectiveRulesPrompt() {
+        return "【当前生效规则版本：" + getRuleVersion() + "】\n"
+                + "【可编辑审计规则】\n" + getRules().trim() + "\n"
+                + "【系统统一动作目录（机器强制）】\n" + ActionMovementRule.canonicalPromptRules()
+                + "如可编辑规则与系统统一动作目录冲突，以系统统一动作目录和原文证据约束为准。\n";
+    }
+
     public String saveRules(String content) {
         if (!StringUtils.hasText(content)) {
             throw new BusinessException("初审规则内容不能为空");
@@ -54,6 +89,7 @@ public class SplitRuleConfigService {
     private void ensureEditableRuleFile() {
         Path path = resolveEditableRulePath();
         if (Files.exists(path)) {
+            upgradeLegacyBundledRules(path);
             return;
         }
         String defaultRules = readDefaultRules();
@@ -62,6 +98,24 @@ public class SplitRuleConfigService {
             Files.write(path, defaultRules.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new BusinessException("初始化初审规则失败：" + path, ex);
+        }
+    }
+
+    private void upgradeLegacyBundledRules(Path path) {
+        try {
+            String existing = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+            if (existing.contains("COSMIC 软件造价拆分基础规则 v2.0")) {
+                return;
+            }
+            boolean legacyBundledRules = existing.startsWith("# 拆分校验规则")
+                    && (existing.contains("暂不按“三要素相同/两项相同”自动判定不同功能过程")
+                    || existing.contains("X 后不得再出现 E/R/W")
+                    || existing.contains("X 输出后再次出现 E"));
+            if (legacyBundledRules) {
+                Files.write(path, readDefaultRules().getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("升级 v2.0 初审规则失败：" + path, ex);
         }
     }
 

@@ -1,11 +1,19 @@
 package com.li.jc.cosmiccostai.model;
 
+import java.util.List;
+import java.util.ArrayList;
+
 public class CosmicResult {
 
     private String module;
     private String function;
     private String description;
+    private String functionalUser;
+    private String triggerEvent;
     private String sequenceDiagram;
+    private List<CosmicMovement> movements;
+    private String evidence;
+    private List<String> sourceReferences = new ArrayList<String>();
     private int entry;
     private int read;
     private int write;
@@ -36,12 +44,52 @@ public class CosmicResult {
         this.description = description;
     }
 
+    public String getFunctionalUser() {
+        return functionalUser;
+    }
+
+    public void setFunctionalUser(String functionalUser) {
+        this.functionalUser = functionalUser;
+    }
+
+    public String getTriggerEvent() {
+        return triggerEvent;
+    }
+
+    public void setTriggerEvent(String triggerEvent) {
+        this.triggerEvent = triggerEvent;
+    }
+
     public String getSequenceDiagram() {
         return sequenceDiagram;
     }
 
     public void setSequenceDiagram(String sequenceDiagram) {
         this.sequenceDiagram = sequenceDiagram;
+    }
+
+    public List<CosmicMovement> getMovements() {
+        return movements;
+    }
+
+    public void setMovements(List<CosmicMovement> movements) {
+        this.movements = movements;
+    }
+
+    public String getEvidence() {
+        return evidence;
+    }
+
+    public void setEvidence(String evidence) {
+        this.evidence = evidence;
+    }
+
+    public List<String> getSourceReferences() {
+        return sourceReferences;
+    }
+
+    public void setSourceReferences(List<String> sourceReferences) {
+        this.sourceReferences = sourceReferences;
     }
 
     public int getEntry() {

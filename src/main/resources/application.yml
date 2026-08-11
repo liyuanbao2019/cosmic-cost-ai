@@ -54,7 +54,11 @@ cosmic:
     # 需求说明书 Word 模板路径；可通过 COSMIC_WORD_TEMPLATE 环境变量覆盖
     word-path: ${COSMIC_WORD_TEMPLATE:templates/附件1-XX项目需求说明书V1.0.docx}
   ai:
-    # 当前大模型供应商标识；主要用于配置可读性和后续扩展，目前实际调用按 base-url/api-key/model 执行
+    # 当前使用的模型配置 ID；管理页面保存后会立即切换，无需重启
+    selected-id: ${COSMIC_AI_SELECTED_ID:deepseek-default}
+    # 页面管理配置的持久化文件；首次启动时由下面的 YAML 模型列表初始化
+    config-path: ${COSMIC_AI_CONFIG_PATH:storage/config/ai-models.json}
+    # 当前大模型供应商标识；provider/model/base-url 任一识别为 DeepSeek 时启用 DeepSeek 专项提示词与调用参数
     provider: deepseek
     # 大模型接口 Base URL；默认 DeepSeek OpenAI 兼容接口，可通过 OPENAI_BASE_URL 覆盖
     base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
@@ -66,6 +70,8 @@ cosmic:
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
     # 普通 AI 调用失败后的最大重试次数；网络抖动或模型服务短暂失败时使用
     max-retries: ${OPENAI_MAX_RETRIES:2}
+    # 单个模型允许的全局在途请求数，所有 AI 场景共用这道并发保护
+    max-concurrency: ${OPENAI_MAX_CONCURRENCY:10}
     deep-split:
       # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
       worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:32}
@@ -83,6 +89,23 @@ cosmic:
       max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}
       # AI 分批并发数；同时用于 AI 深度审核分批并发，以及 Excel 导出 Word 时功能描述生成的批次并发
       chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:10}
+    # 可在 YAML 中预置多个 OpenAI 兼容模型；首次启动后也可在“大模型管理”页面维护
+    models:
+      - id: deepseek-default
+        name: DeepSeek 默认模型
+        provider: deepseek
+        base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
+        api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
+        model: ${OPENAI_MODEL:deepseek-v4-pro}
+        timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
+        max-retries: ${OPENAI_MAX_RETRIES:2}
+        max-concurrency: ${OPENAI_MAX_CONCURRENCY:10}
+        chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:500}
+        chunk-max-retries: ${COSMIC_DEEP_SPLIT_MAX_RETRIES:1}
+        chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:10}
+        chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
+        evidence-chars: ${COSMIC_DEEP_SPLIT_EVIDENCE_CHARS:5000}
+        max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}
   rules:
     # 规则初审使用的规则说明文件路径；默认读取前端 static 目录下的 split-check-rules.md
     split-rules-path: ${COSMIC_SPLIT_RULES_PATH:classpath:/static/split-check-rules.md}

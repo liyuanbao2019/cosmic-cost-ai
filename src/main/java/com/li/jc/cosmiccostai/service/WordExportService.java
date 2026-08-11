@@ -55,12 +55,13 @@ public class WordExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String BODY_TEXT_STYLE = "2";
-    private static final String SUBSECTION_HEADING_STYLE = BODY_TEXT_STYLE;
+    private static final String SUBSECTION_HEADING_STYLE = "10";
     private static final String PROCESS_HEADING_STYLE = "9";
 
     private final FileStorageService fileStorageService;
     private final FunctionDescriptionAiService functionDescriptionAiService;
     private final ExportProgressService exportProgressService;
+    private final RuleValidationService ruleValidationService;
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
@@ -71,15 +72,26 @@ public class WordExportService {
         this(fileStorageService, outputBaseDir, configuredTemplatePath, new FunctionDescriptionAiService(), new ExportProgressService());
     }
 
-    @Autowired
     public WordExportService(FileStorageService fileStorageService,
                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
                              @Value("${cosmic.template.word-path:}") String configuredTemplatePath,
                              FunctionDescriptionAiService functionDescriptionAiService,
                              ExportProgressService exportProgressService) {
+        this(fileStorageService, outputBaseDir, configuredTemplatePath,
+                functionDescriptionAiService, exportProgressService, new RuleValidationService());
+    }
+
+    @Autowired
+    public WordExportService(FileStorageService fileStorageService,
+                             @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
+                             @Value("${cosmic.template.word-path:}") String configuredTemplatePath,
+                             FunctionDescriptionAiService functionDescriptionAiService,
+                             ExportProgressService exportProgressService,
+                             RuleValidationService ruleValidationService) {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
         this.exportProgressService = exportProgressService;
+        this.ruleValidationService = ruleValidationService;
         this.objectMapper = new ObjectMapper();
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
@@ -91,6 +103,7 @@ public class WordExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> rows = readReviewedRows(metadata);
+        ruleValidationService.ensureReadyForExport(rows, "导出送审 Word");
         List<FunctionGroup> groups = groupRows(rows);
         applyExportFunctionDescriptions(metadata, groups);
         double totalCfp = calculateTotalCfp(results);
@@ -156,7 +169,7 @@ public class WordExportService {
 
     private void replaceCoverTitle(XWPFDocument document, ProjectMetadata metadata) {
         String title = sourceBaseName(metadata);
-        for (int i = 0; i < document.getParagraphs().size() && i < 10; i++) {
+        for (int i = 0; i < document.getParagraphs().size(); i++) {
             XWPFParagraph paragraph = document.getParagraphs().get(i);
             String text = paragraph.getText() == null ? "" : paragraph.getText().trim();
             if (zh("\u0058\u0058\u9879\u76ee\u9700\u6c42\u8bf4\u660e\u4e66").equals(text)) {
@@ -264,8 +277,7 @@ public class WordExportService {
         Map<String, FunctionGroup> map = new LinkedHashMap<String, FunctionGroup>();
         for (FunctionSplitRow row : rows) {
             normalizeRow(row);
-            String key = safe(row.getLevel1Module()) + "\u001f" + safe(row.getLevel2Module()) + "\u001f"
-                    + safe(row.getLevel3Module()) + "\u001f" + safe(row.getFunctionProcess());
+            String key = FunctionProcessKey.of(row);
             FunctionGroup group = map.get(key);
             if (group == null) {
                 group = new FunctionGroup(row.getLevel1Module(), row.getLevel2Module(), row.getLevel3Module(),
@@ -292,7 +304,7 @@ public class WordExportService {
         Map<String, List<FunctionSplitRow>> rowsByGroup = new LinkedHashMap<String, List<FunctionSplitRow>>();
         Map<String, FunctionGroup> groupByKey = new LinkedHashMap<String, FunctionGroup>();
         for (FunctionGroup group : groups) {
-            String key = groupKey(group.level1, group.level2, group.level3, group.functionProcess);
+            String key = FunctionProcessKey.of(group.rows.get(0));
             rowsByGroup.put(key, group.rows);
             groupByKey.put(key, group);
         }
@@ -415,10 +427,6 @@ public class WordExportService {
             last = insertParagraphAfter(document, last, zh("\u529f\u80fd\u63cf\u8ff0"), SUBSECTION_HEADING_STYLE, true);
             last = insertBodyParagraphAfter(document, last, safe(group.description));
         }
-    }
-
-    private String groupKey(String level1, String level2, String level3, String functionProcess) {
-        return safe(level1) + "\u001f" + safe(level2) + "\u001f" + safe(level3) + "\u001f" + safe(functionProcess);
     }
 
     private String buildGroupFunctionDescription(List<FunctionSplitRow> rows) {
@@ -624,7 +632,10 @@ public class WordExportService {
             }
             return zh("UI->\u540e\u53f0\u670d\u52a1");
         }
-        if ("W".equalsIgnoreCase(movementType) || "X".equalsIgnoreCase(movementType)) {
+        if ("W".equalsIgnoreCase(movementType)) {
+            return zh("\u540e\u53f0\u670d\u52a1->\u540e\u53f0\u670d\u52a1");
+        }
+        if ("X".equalsIgnoreCase(movementType)) {
             return zh("\u540e\u53f0\u670d\u52a1->UI");
         }
         return "UI->UI";

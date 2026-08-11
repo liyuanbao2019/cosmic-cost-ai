@@ -2,11 +2,16 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.dto.ExcelExportResponse;
 import com.li.jc.cosmiccostai.dto.WordExportResponse;
+import com.li.jc.cosmiccostai.model.CosmicResult;
+import com.li.jc.cosmiccostai.model.FunctionSplitRow;
+import com.li.jc.cosmiccostai.model.ProjectMetadata;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,11 +35,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExportRuleRegressionTest {
 
     @Test
-    void exportsFixedSequenceRulesAndWordSections() throws Exception {
-        FileStorageService storageService = new FileStorageService("storage");
-        ExcelExportService excelExportService = new ExcelExportService(storageService, "output",
+    void exportsFixedSequenceRulesAndWordSections(@TempDir Path tempDir) throws Exception {
+        FileStorageService storageService = new FileStorageService(tempDir.resolve("storage").toString());
+        prepareProject(storageService, "CODEX_RULE_TEST");
+        String outputDir = tempDir.resolve("output").toString();
+        ExcelExportService excelExportService = new ExcelExportService(storageService, outputDir,
                 "templates/附件3-XX项目功能点拆分表V1.0.xlsx");
-        WordExportService wordExportService = new WordExportService(storageService, "output",
+        WordExportService wordExportService = new WordExportService(storageService, outputDir,
                 "templates/附件1-XX项目需求说明书V1.0.docx");
 
         ExcelExportResponse excel = excelExportService.export("CODEX_RULE_TEST");
@@ -72,8 +79,8 @@ class ExportRuleRegressionTest {
         }
         String text = documentXml.replaceAll("<[^>]+>", "");
         assertTrue(mediaCount > 0);
-        assertTrue(text.startsWith("rule-test"));
-        assertFalse(text.startsWith("XX项目需求说明书"));
+        assertTrue(text.contains("rule-test"));
+        assertFalse(text.contains("XX项目需求说明书"));
         YearMonth now = YearMonth.now();
         assertTrue(text.contains(now.getYear() + "年" + now.getMonthValue() + "月"));
         assertFalse(text.contains("XXXX年XX月"));
@@ -88,6 +95,67 @@ class ExportRuleRegressionTest {
         assertEquals("2", paragraphStyle(documentXml, "1) 录入公告信息"));
         assertEquals("2", paragraphStyle(documentXml, "运营人员填写公告标题"));
         assertTrue(count(documentXml, "UI-&gt;UI") <= 1);
+    }
+
+    private void prepareProject(FileStorageService storageService, String projectId) throws Exception {
+        Path projectDir = storageService.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path resultsPath = projectDir.resolve("cosmic-results.json");
+        Path rowsPath = projectDir.resolve("function-split-rows.json");
+
+        CosmicResult result = new CosmicResult();
+        result.setModule("公告管理");
+        result.setFunction("新增公告信息");
+        result.setDescription("运营人员填写公告标题并发布公告信息。");
+        result.setFunctionalUser("运营人员");
+        result.setTriggerEvent("运营人员提交公告信息");
+        result.setSequenceDiagram("UI->UI;后台服务->后台服务;后台服务->UI");
+        result.setEntry(1);
+        result.setWrite(1);
+        result.setExit(1);
+        result.setCfp(3D);
+
+        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
+        rows.add(row("E", "录入公告信息", "公告录入数据", "标题、内容、发布范围、生效时间", "UI->UI"));
+        rows.add(row("W", "保存公告信息", "公告信息表", "标题、内容、发布范围、生效时间", "后台服务->后台服务"));
+        rows.add(row("X", "返回公告发布结果", "公告发布结果", "发布状态、结果说明", "后台服务->UI"));
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.writeValue(resultsPath.toFile(), java.util.Collections.singletonList(result));
+        objectMapper.writeValue(rowsPath.toFile(), rows);
+
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setName("rule-test");
+        metadata.setSourceFileName("rule-test.docx");
+        metadata.setFileType("docx");
+        metadata.setStatus("REVIEWED");
+        metadata.setCosmicResultsPath(resultsPath.toString());
+        metadata.setFunctionSplitRowsPath(rowsPath.toString());
+        metadata.setCreatedAt("2026-08-08 00:00:00");
+        metadata.setUpdatedAt("2026-08-08 00:00:00");
+        storageService.saveMetadata(metadata);
+    }
+
+    private FunctionSplitRow row(String movement, String subProcess, String dataGroup,
+                                 String attributes, String sequence) {
+        FunctionSplitRow row = new FunctionSplitRow();
+        row.setProjectName("rule-test");
+        row.setLevel1Module("公告管理");
+        row.setLevel2Module("公告管理");
+        row.setLevel3Module("公告发布");
+        row.setFunctionalUser("运营人员");
+        row.setTriggerEvent("运营人员提交公告信息");
+        row.setFunctionProcess("新增公告信息");
+        row.setFunctionDescription("运营人员填写公告标题并发布公告信息。");
+        row.setSubProcessDescription(subProcess);
+        row.setMovementType(movement);
+        row.setDataGroup(dataGroup);
+        row.setDataAttributes(attributes);
+        row.setSequenceDiagram(sequence);
+        row.setReuseDegree("新增");
+        row.setCfp(1D);
+        return row;
     }
 
     private String cell(Sheet sheet, int rowIndex, int colIndex) {

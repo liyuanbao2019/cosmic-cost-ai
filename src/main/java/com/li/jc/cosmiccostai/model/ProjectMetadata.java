@@ -20,6 +20,7 @@ public class ProjectMetadata {
     private String status;
     private String createdAt;
     private String updatedAt;
+    private String ruleVersion;
 
     public String getId() {
         return id;
@@ -163,5 +164,13 @@ public class ProjectMetadata {
 
     public void setUpdatedAt(String updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getRuleVersion() {
+        return ruleVersion;
+    }
+
+    public void setRuleVersion(String ruleVersion) {
+        this.ruleVersion = ruleVersion;
     }
 }

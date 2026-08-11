@@ -12,6 +12,7 @@ public class ReviewResponse {
     private double totalCfp;
     private String status;
     private String sourceType;
+    private String ruleVersion;
     private List<CosmicResult> results;
     private List<FunctionSplitRow> splitRows;
 
@@ -53,6 +54,14 @@ public class ReviewResponse {
 
     public void setSourceType(String sourceType) {
         this.sourceType = sourceType;
+    }
+
+    public String getRuleVersion() {
+        return ruleVersion;
+    }
+
+    public void setRuleVersion(String ruleVersion) {
+        this.ruleVersion = ruleVersion;
     }
 
     public List<CosmicResult> getResults() {

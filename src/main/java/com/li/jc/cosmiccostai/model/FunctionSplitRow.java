@@ -1,5 +1,8 @@
 package com.li.jc.cosmiccostai.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class FunctionSplitRow {
 
     private String projectName;
@@ -17,6 +20,8 @@ public class FunctionSplitRow {
     private String sequenceDiagram;
     private String reuseDegree;
     private double cfp;
+    private String evidence;
+    private List<String> sourceReferences = new ArrayList<String>();
 
     public String getProjectName() {
         return projectName;
@@ -136,5 +141,21 @@ public class FunctionSplitRow {
 
     public void setCfp(double cfp) {
         this.cfp = cfp;
+    }
+
+    public String getEvidence() {
+        return evidence;
+    }
+
+    public void setEvidence(String evidence) {
+        this.evidence = evidence;
+    }
+
+    public List<String> getSourceReferences() {
+        return sourceReferences;
+    }
+
+    public void setSourceReferences(List<String> sourceReferences) {
+        this.sourceReferences = sourceReferences;
     }
 }

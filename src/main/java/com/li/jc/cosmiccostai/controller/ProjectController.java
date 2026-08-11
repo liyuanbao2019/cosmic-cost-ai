@@ -17,6 +17,8 @@ import com.li.jc.cosmiccostai.dto.ExportProgressResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
 import com.li.jc.cosmiccostai.dto.ProjectListResponse;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
+import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentRequest;
+import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageApplyRequest;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageResponse;
@@ -35,6 +37,7 @@ import com.li.jc.cosmiccostai.service.ExportProgressService;
 import com.li.jc.cosmiccostai.service.MaterialArchiveService;
 import com.li.jc.cosmiccostai.service.ProjectListService;
 import com.li.jc.cosmiccostai.service.ReviewService;
+import com.li.jc.cosmiccostai.service.ReuseDegreeAiAdjustmentService;
 import com.li.jc.cosmiccostai.service.RequirementCoverageService;
 import com.li.jc.cosmiccostai.service.RequirementInputService;
 import com.li.jc.cosmiccostai.service.RuleValidationService;
@@ -80,6 +83,7 @@ public class ProjectController {
     private final RequirementCoverageService requirementCoverageService;
     private final RequirementInputService requirementInputService;
     private final DocumentChapterSelectionService documentChapterSelectionService;
+    private final ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -96,7 +100,8 @@ public class ProjectController {
                              ProjectListService projectListService,
                              RequirementCoverageService requirementCoverageService,
                              RequirementInputService requirementInputService,
-                             DocumentChapterSelectionService documentChapterSelectionService) {
+                             DocumentChapterSelectionService documentChapterSelectionService,
+                             ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -113,6 +118,7 @@ public class ProjectController {
         this.requirementCoverageService = requirementCoverageService;
         this.requirementInputService = requirementInputService;
         this.documentChapterSelectionService = documentChapterSelectionService;
+        this.reuseDegreeAiAdjustmentService = reuseDegreeAiAdjustmentService;
     }
 
     @Operation(summary = "List projects", description = "List historical projects from local storage.")
@@ -179,6 +185,7 @@ public class ProjectController {
     @Operation(summary = "AI 结构化提取", description = "只将 document-text.txt 中的“需求细则”章节发送给 AI，输出 module/function/description。")
     @PostMapping("/{projectId}/extract")
     public ApiResponse<ExtractResponse> extract(@PathVariable String projectId) {
+        requirementCoverageService.ensureReadyForExtraction(projectId);
         return ApiResponse.ok(aiExtractionService.extract(projectId));
     }
 
@@ -191,6 +198,7 @@ public class ProjectController {
     @Operation(summary = "Re-run AI extraction with edited prompt", description = "Use the user edited prompt to call AI again and overwrite extracted functions.")
     @PostMapping("/{projectId}/ai-prompt/extract")
     public ApiResponse<ExtractResponse> extractWithPrompt(@PathVariable String projectId, @RequestBody AiPromptRequest request) {
+        requirementCoverageService.ensureReadyForExtraction(projectId);
         return ApiResponse.ok(aiExtractionService.extractWithPrompt(projectId, request == null ? "" : request.getPrompt()));
     }
 
@@ -219,6 +227,16 @@ public class ProjectController {
     public ApiResponse<RuleValidationResponse> validateReview(@PathVariable String projectId,
                                                               @RequestBody List<FunctionSplitRow> rows) {
         return ApiResponse.ok(ruleValidationService.validate(rows));
+    }
+
+    @Operation(summary = "AI adjust reuse degree across the complete split table",
+            description = "Final split stage: classify 新增/复用/利旧 using the complete table and apply only evidence-backed decisions.")
+    @PostMapping("/{projectId}/reuse-degree/adjust")
+    public ApiResponse<ReuseDegreeAdjustmentResponse> adjustReuseDegree(
+            @PathVariable String projectId,
+            @RequestBody ReuseDegreeAdjustmentRequest request) {
+        return ApiResponse.ok(reuseDegreeAiAdjustmentService.adjust(projectId,
+                request == null ? null : request.getRows()));
     }
 
     @Operation(summary = "AI validate selected review risks", description = "Use AI to review selected high-risk rows after deterministic validation.")
