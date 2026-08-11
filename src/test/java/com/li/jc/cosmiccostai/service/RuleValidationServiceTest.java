@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -314,7 +315,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void flagsInternalMovementRenderedAsCrossBoundaryOutput() {
+    void allowsStructureRiskExportWhileKeepingGeneratedRisk() {
         RuleValidationService service = new RuleValidationService();
         FunctionSplitRow entry = row("处理订单", "E", "订单请求", "订单编号", "新增");
         FunctionSplitRow write = row("处理订单", "W", "订单表", "订单状态", "新增");
@@ -323,9 +324,24 @@ class RuleValidationServiceTest {
         RuleValidationResponse response = service.validate(Arrays.asList(entry, write));
 
         assertTrue(hasIssue(response, "与跨边界输出 X 的方向相同"), describe(response));
+        assertEquals(0, response.getErrorCount(), describe(response));
+        assertTrue(response.getStructureRiskCount() > 0, describe(response));
         assertFalse(service.generatedBlockingIssues(Arrays.asList(entry, write)).isEmpty());
-        assertThrows(com.li.jc.cosmiccostai.common.BusinessException.class,
+        assertDoesNotThrow(
                 () -> service.ensureReadyForExport(Arrays.asList(entry, write), "导出"));
+    }
+
+    @Test
+    void deterministicErrorsStillBlockExport() {
+        RuleValidationService service = new RuleValidationService();
+        FunctionSplitRow entry = row("处理订单", "E", "", "订单编号", "新增");
+        FunctionSplitRow write = row("处理订单", "W", "订单表", "订单状态", "新增");
+
+        RuleValidationResponse response = service.validate(Arrays.asList(entry, write));
+
+        assertTrue(response.getErrorCount() > 0, describe(response));
+        assertThrows(com.li.jc.cosmiccostai.common.BusinessException.class,
+                () -> service.ensureReadyForExport(response, "导出"));
     }
 
     @Test

@@ -140,12 +140,16 @@ public class RuleValidationService {
             throw new com.li.jc.cosmiccostai.common.BusinessException(
                     safe(action) + "未取得统一 COSMIC 规则校验结果，无法导出送审材料。");
         }
-        if (response.getErrorCount() <= 0 && response.getStructureRiskCount() <= 0) {
+        // Structure risks are review reminders, not export blockers. They are
+        // written back to the review columns and highlighted in the exported
+        // workbook so that a reviewer can make the final judgement. Only a
+        // deterministic rule error makes the material invalid for export.
+        if (response.getErrorCount() <= 0) {
             return;
         }
-        String severity = response.getErrorCount() > 0 ? "ERROR" : "RISK";
         throw new com.li.jc.cosmiccostai.common.BusinessException(
-                safe(action) + "未通过统一 COSMIC 送审门禁：" + summarize(response.getIssues(), severity, 5));
+                safe(action) + "未通过统一 COSMIC 送审门禁："
+                        + summarize(response.getIssues(), "ERROR", 5));
     }
 
     public String getRuleVersion() {

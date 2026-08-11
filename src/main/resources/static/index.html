@@ -180,6 +180,7 @@
           <select id="projectName">
             <option value="">-- 请选择 --</option>
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
+            <option value="2026年家客终端扩容">2026年家客终端扩容</option>
             <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
             <option value="26年共享采集">26年共享采集</option>
             <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
@@ -2463,21 +2464,16 @@
           nextOrigins.push(deepSplitRowOrigins[index] || []);
         }
       });
-      const suggestedReuse = textOr(item.suggestedReuseDegree, "");
-      if (reuseOptions.indexOf(suggestedReuse) >= 0 && row.reuseDegree !== suggestedReuse) {
-        row.reuseDegree = suggestedReuse;
-        changedFields.push("复用度/CFP");
-      }
       const gateResponse = await request("/api/projects/" + currentProjectId + "/review/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nextRows.map(rowForSubmit))
       });
       const gate = gateResponse.data || {};
-      if ((gate.errorCount || 0) > 0 || (gate.structureRiskCount || 0) > 0) {
+      if ((gate.errorCount || 0) > 0) {
         showDialog("无法采纳深度审核建议",
-          "替换结果未通过当前统一规则门禁：错误 " + (gate.errorCount || 0)
-          + " 条，结构风险 " + (gate.structureRiskCount || 0) + " 条。请重新执行 AI 深度审核。");
+          "该建议会产生 " + (gate.errorCount || 0)
+          + " 条确定性错误，不能采纳。请修改建议或重新执行 AI 深度审核。");
         return;
       }
       splitRows = nextRows;
@@ -2497,7 +2493,12 @@
       const appliedCount = suggestions.filter(function (item) { return item.clientState === "APPLIED"; }).length;
       $("deepSplitStatus").textContent = "已采纳 " + appliedCount + "/" + suggestions.length
         + " 条建议；上方 CFP 只统计已采纳结果";
-      setMessage("已采纳并保存第 " + appliedCount + " 条建议。其余不冲突建议仍可继续采纳；请重新执行规则初审。", "success");
+      const remainingStructureRisks = Number(gate.structureRiskCount || 0);
+      setMessage("已采纳并保存第 " + appliedCount + " 条建议。"
+        + (remainingStructureRisks > 0
+          ? "当前仍有 " + remainingStructureRisks + " 条结构风险，可继续逐条采纳或带风险标记导出；"
+          : "当前没有结构风险；")
+        + "请重新执行规则初审。", "success");
     }
 
     function currentIndexForDeepSplitOriginalRow(rowNumber) {
@@ -3822,14 +3823,16 @@
         showDialog("暂无可导出的审核数据", "请先上传需求文档并完成 AI 拆分，再导出送审材料。");
         return;
       }
+      let exportStructureRiskCount = 0;
       try {
         const validationResponse = await runRuleValidationRequest();
         const validation = validationResponse.data || {};
         renderRuleValidation(validation);
-        if ((validation.errorCount || 0) > 0 || (validation.structureRiskCount || 0) > 0) {
+        exportStructureRiskCount = Number(validation.structureRiskCount || 0);
+        if ((validation.errorCount || 0) > 0) {
           showDialog("无法导出送审材料",
-            "当前拆分结果仍有 " + (validation.errorCount || 0) + " 条确定性错误、"
-              + (validation.structureRiskCount || 0) + " 条结构风险。请按初审结果修正后再导出。");
+            "当前拆分结果仍有 " + (validation.errorCount || 0)
+              + " 条确定性错误。请按初审结果修正后再导出；结构风险不阻断导出。");
           return;
         }
       } catch (error) {
@@ -3837,6 +3840,10 @@
         return;
       }
       openExportDialog();
+      if (exportStructureRiskCount > 0) {
+        setExportProgressHint("当前仍有 " + exportStructureRiskCount
+          + " 条结构风险：允许导出，相关行及风险原因将在功能点拆分表中着色，供人工审核。");
+      }
       $("export-dialog-close").disabled = true;
       await withBusy(async function () {
         try {
@@ -3889,7 +3896,10 @@
           setMaterialActionExported(true);
           markDone("review");
           $("outputPanel").classList.add("hidden");
-          setMessage("送审材料已导出并完成 ZIP 打包。", "success");
+          setMessage("送审材料已导出并完成 ZIP 打包。"
+            + (exportStructureRiskCount > 0
+              ? "其中 " + exportStructureRiskCount + " 条结构风险已在功能点拆分表中着色，请人工审核。"
+              : ""), "success");
         } catch (error) {
           stopExportProgressPolling();
           setExportProgressHint("");
