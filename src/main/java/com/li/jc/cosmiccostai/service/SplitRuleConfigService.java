@@ -23,7 +23,7 @@ public class SplitRuleConfigService {
      * Bump whenever deterministic validation semantics change. The public rule
      * version must identify both the editable prose and the server-side judge.
      */
-    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-11.v2.2";
+    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-11.v2.4";
 
     private final Path editableRulePath;
 

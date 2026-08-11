@@ -4,6 +4,7 @@ import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
 import com.li.jc.cosmiccostai.model.CosmicMovement;
 import com.li.jc.cosmiccostai.model.CosmicResult;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -102,6 +103,7 @@ public class ReviewService {
         log.info("Saving review rows. projectId={}, status={}, rows={}, polishFunctionDescription={}",
                 projectId, status, rows.size(), polishFunctionDescription);
         normalizeRows(metadata, rows, polishFunctionDescription);
+        RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         if (!"EXCEL_IMPORTED".equals(status) && !"REUSE_ADJUSTED".equals(status)
                 && "DOCUMENT".equals(sourceType(metadata))) {
             ruleValidationService.ensureNoErrors(rows, "保存审核结果");
@@ -130,6 +132,7 @@ public class ReviewService {
                         new TypeReference<List<FunctionSplitRow>>() {
                         });
                 normalizeRows(metadata, rows, false);
+                RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
                 return rows;
             } catch (IOException ex) {
                 throw new BusinessException("Read function split rows failed", ex);
@@ -142,7 +145,24 @@ public class ReviewService {
             rows.addAll(toSplitRows(metadata, result));
         }
         normalizeRows(metadata, rows, false);
+        RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         return rows;
+    }
+
+    private List<ExtractedFunction> readExtractedFunctions(ProjectMetadata metadata) {
+        if (metadata == null || !StringUtils.hasText(metadata.getExtractedFunctionsPath())) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        Path path = Paths.get(metadata.getExtractedFunctionsPath());
+        if (!Files.exists(path)) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        try {
+            return objectMapper.readValue(path.toFile(), new TypeReference<List<ExtractedFunction>>() {
+            });
+        } catch (IOException ex) {
+            throw new BusinessException("Read extracted functions failed: " + path, ex);
+        }
     }
 
     private List<FunctionSplitRow> toSplitRows(ProjectMetadata metadata, CosmicResult result) {

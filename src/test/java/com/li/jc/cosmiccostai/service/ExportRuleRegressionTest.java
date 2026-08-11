@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.dto.ExcelExportResponse;
 import com.li.jc.cosmiccostai.dto.WordExportResponse;
 import com.li.jc.cosmiccostai.model.CosmicResult;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +21,8 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -33,6 +36,62 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExportRuleRegressionTest {
+
+    @Test
+    void excelUsesFunctionEvidenceOrderEvenWhenSavedRowsPutCreateLast(@TempDir Path tempDir) throws Exception {
+        FileStorageService storageService = new FileStorageService(tempDir.resolve("storage").toString());
+        String projectId = "SOURCE_ORDER_TEST";
+        Path projectDir = storageService.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path resultsPath = projectDir.resolve("cosmic-results.json");
+        Path rowsPath = projectDir.resolve("function-split-rows.json");
+        Path extractedPath = projectDir.resolve("extracted-functions.json");
+
+        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
+        rows.add(orderRow("查询客户", "E", "发起客户查询", "查询条件", "客户编号", "REQ-L0010"));
+        rows.add(orderRow("查询客户", "R", "读取客户信息", "客户表", "客户编号、客户名称", "REQ-L0008"));
+        rows.add(orderRow("查询客户", "X", "返回客户查询结果", "客户查询结果", "客户编号、客户名称", "REQ-L0010"));
+        rows.add(orderRow("新增客户", "E", "提交新增客户信息", "客户新增数据", "客户名称", "REQ-L0009"));
+        rows.add(orderRow("新增客户", "W", "写入客户信息", "客户表", "客户名称", "REQ-L0009"));
+        rows.add(orderRow("新增客户", "X", "返回客户新增结果", "客户新增结果", "处理结果", "REQ-L0009"));
+
+        ExtractedFunction query = new ExtractedFunction("客户管理", "查询客户", "查询客户信息");
+        query.setSourceReferences(Collections.singletonList("REQ-L0010"));
+        ExtractedFunction create = new ExtractedFunction("客户管理", "新增客户", "新增客户信息");
+        create.setSourceReferences(Collections.singletonList("REQ-L0009"));
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.writeValue(resultsPath.toFile(), Collections.emptyList());
+        objectMapper.writeValue(rowsPath.toFile(), rows);
+        objectMapper.writeValue(extractedPath.toFile(), Arrays.asList(query, create));
+
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setName("source-order-test");
+        metadata.setSourceFileName("source-order-test.docx");
+        metadata.setFileType("docx");
+        metadata.setStatus("REVIEWED");
+        metadata.setCosmicResultsPath(resultsPath.toString());
+        metadata.setFunctionSplitRowsPath(rowsPath.toString());
+        metadata.setExtractedFunctionsPath(extractedPath.toString());
+        metadata.setCreatedAt("2026-08-11 00:00:00");
+        metadata.setUpdatedAt("2026-08-11 00:00:00");
+        storageService.saveMetadata(metadata);
+
+        ExcelExportService service = new ExcelExportService(storageService, tempDir.resolve("output").toString(),
+                "templates/附件3-XX项目功能点拆分表V1.0.xlsx");
+        ExcelExportResponse response = service.export(projectId);
+
+        try (InputStream inputStream = Files.newInputStream(Paths.get(response.getExcelOutputPath()));
+             Workbook workbook = new XSSFWorkbook(inputStream)) {
+            Sheet sheet = workbook.getSheet("2、功能点拆分表");
+            if (sheet == null) {
+                sheet = workbook.getSheetAt(2);
+            }
+            assertEquals("新增客户", cell(sheet, 5, 6));
+            assertEquals("查询客户", cell(sheet, 8, 6));
+        }
+    }
 
     @Test
     void exportsFixedSequenceRulesAndWordSections(@TempDir Path tempDir) throws Exception {
@@ -58,11 +117,12 @@ class ExportRuleRegressionTest {
             if (sheet == null) {
                 sheet = workbook.getSheetAt(2);
             }
-            assertNull(sheet.getRow(2).getCell(13));
+            assertEquals("风险原因（提交送审前务必删除）",
+                    sheet.getRow(2).getCell(13).getStringCellValue());
             assertNull(sheet.getRow(2).getCell(14));
-            assertNull(sheet.getRow(5).getCell(13));
+            assertEquals("", sheet.getRow(5).getCell(13).getStringCellValue());
             assertNull(sheet.getRow(5).getCell(14));
-            assertTrue(sheet.isColumnHidden(13));
+            assertFalse(sheet.isColumnHidden(13));
             assertTrue(sheet.isColumnHidden(14));
         }
 
@@ -155,6 +215,29 @@ class ExportRuleRegressionTest {
         row.setSequenceDiagram(sequence);
         row.setReuseDegree("新增");
         row.setCfp(1D);
+        return row;
+    }
+
+    private FunctionSplitRow orderRow(String process, String movement, String subProcess,
+                                      String dataGroup, String attributes, String reference) {
+        FunctionSplitRow row = new FunctionSplitRow();
+        row.setProjectName("source-order-test");
+        row.setLevel1Module("客户管理");
+        row.setLevel2Module("客户管理");
+        row.setLevel3Module("客户管理");
+        row.setFunctionalUser("发起者：用户\n接收者：本系统");
+        row.setTriggerEvent(process);
+        row.setFunctionProcess(process);
+        row.setFunctionDescription(process + "信息。");
+        row.setSubProcessDescription(subProcess);
+        row.setMovementType(movement);
+        row.setDataGroup(dataGroup);
+        row.setDataAttributes(attributes);
+        row.setSequenceDiagram("R".equals(movement) || "W".equals(movement)
+                ? "后台服务->后台服务" : ("E".equals(movement) ? "UI->UI" : "后台服务->UI"));
+        row.setReuseDegree("新增");
+        row.setCfp(1D);
+        row.setSourceReferences(Collections.singletonList(reference));
         return row;
     }
 

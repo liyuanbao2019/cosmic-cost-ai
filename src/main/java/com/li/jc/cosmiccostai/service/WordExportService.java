@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.WordExportResponse;
 import com.li.jc.cosmiccostai.model.CosmicResult;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -103,6 +104,7 @@ public class WordExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> rows = readReviewedRows(metadata);
+        RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         ruleValidationService.ensureReadyForExport(rows, "导出送审 Word");
         List<FunctionGroup> groups = groupRows(rows);
         applyExportFunctionDescriptions(metadata, groups);
@@ -207,6 +209,22 @@ public class WordExportService {
             }
         }
         return readRowsFromExcel(Paths.get(metadata.getExcelOutputPath()));
+    }
+
+    private List<ExtractedFunction> readExtractedFunctions(ProjectMetadata metadata) {
+        if (metadata == null || !StringUtils.hasText(metadata.getExtractedFunctionsPath())) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        Path path = Paths.get(metadata.getExtractedFunctionsPath());
+        if (!Files.exists(path)) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        try {
+            return objectMapper.readValue(path.toFile(), new TypeReference<List<ExtractedFunction>>() {
+            });
+        } catch (IOException ex) {
+            throw new BusinessException("Read extracted functions failed: " + path, ex);
+        }
     }
 
     private List<FunctionSplitRow> readRowsFromExcel(Path excelPath) {

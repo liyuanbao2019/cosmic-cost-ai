@@ -178,6 +178,7 @@ public class AiExtractionService {
                     aiGeneratedSplitQualityService.summarize(initialReviewIssues));
         }
         attachRequirementEvidence(functions, requirementDetail);
+        RequirementSourceOrder.sortFunctions(functions);
 
         Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
         Path extractedPath = projectDir.resolve("extracted-functions.json");
@@ -380,7 +381,9 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "19. 输出前对全部候选做三轮扫描：先按历史评审批注 N/NM/数字行号/O/OLD/UIUE/C/NR/算法/需求文档不涉及处理，再做当前输出的功能级语义查重，最后按子过程描述、数据移动类型、数据组、数据属性和功能逻辑检查复用。功能级重复/包含按 0，子过程级复用按 0.33，确有新增且有原文依据才按 1。"
                 + System.lineSeparator()
-                + "20. 严禁机械补“读取XXX相关数据”“保存XXX处理结果”“返回XXX处理结果”，也不得用请求编号/操作人/请求时间、业务编号/状态/内容、记录编号/处理状态/时间、结果编号/状态/提示信息等泛化属性制造差异。"
+                + "20. 子过程描述应与真实 E/R/W/X 数据移动一致；新疆项目不因“读取相关数据”“保存处理结果”“返回处理结果”等表述本身判定风险或核减。不得用请求编号/操作人/请求时间、业务编号/状态/内容、记录编号/处理状态/时间、结果编号/状态/提示信息等无原文依据的泛化属性制造差异。"
+                + System.lineSeparator()
+                + "21. functions 必须按功能自身 sourceReferences 对应的 REQ-L 原文先后顺序输出，不得按模型归类习惯重排；同一功能过程的全部 movements 必须连续。原文同一位置拆出多个独立动作时，新增/新建/创建/添加/录入/导入/定时生成/定时汇总排在查询、修改、删除、导出、下载之前。"
                 + System.lineSeparator()
                 + "输出要求："
                 + System.lineSeparator()

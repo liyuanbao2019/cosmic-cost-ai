@@ -56,7 +56,9 @@ class AiExtractionPromptRulesTest {
         assertFalse(prompt.contains("至少 6 个数据属性"));
         assertTrue(prompt.contains("禁止虚构字段"));
         assertTrue(prompt.contains("N/NM/数字行号/O/OLD/UIUE/C/NR/算法/需求文档不涉及"));
-        assertTrue(prompt.contains("读取XXX相关数据"));
+        assertTrue(prompt.contains("新疆项目不因“读取相关数据”“保存处理结果”“返回处理结果”等表述本身判定风险或核减"));
+        assertTrue(prompt.contains("functions 必须按功能自身 sourceReferences 对应的 REQ-L 原文先后顺序输出"));
+        assertTrue(prompt.contains("同一功能过程的全部 movements 必须连续"));
         assertTrue(prompt.contains("【需求细则】"));
         assertTrue(prompt.contains("[REQ-L0001] 用户提交规则校验需求"));
         assertTrue(prompt.contains("\"sourceReferences\":[\"REQ-L0001\"]"));
@@ -77,6 +79,7 @@ class AiExtractionPromptRulesTest {
         assertTrue(prompt.contains("deepseek-cosmic-v1"));
         assertTrue(prompt.contains("唯一规则源：SplitRuleConfigService 当前生效完整规则"));
         assertTrue(prompt.contains("顶层只能包含 functions 数组"));
+        assertTrue(prompt.contains("不得把原文前置的新增、定时生成或导入功能移到查询、修改、删除、导出、下载之后"));
         assertTrue(prompt.contains("{\"functions\":[]}"));
         assertTrue(prompt.indexOf(ruleTitle) >= 0);
         assertTrue(prompt.indexOf(ruleTitle) == prompt.lastIndexOf(ruleTitle));

@@ -71,6 +71,7 @@ class DeepSplitAiServiceTest {
         assertTrue(prompt.contains("请求请求"));
         assertTrue(prompt.contains("用户/UI 主动触发写“发起XXX查询"));
         assertTrue(prompt.contains("外部平台上报/回调才写"));
+        assertTrue(prompt.contains("新疆项目不因“读取相关数据”“保存处理结果”“返回处理结果”等子过程表述本身判定风险或核减"));
         assertTrue(prompt.contains("每个功能过程至少包含 2 行"));
         assertTrue(prompt.contains("不设置最多 4 行限制"));
         assertFalse(prompt.contains("2—4 行"));

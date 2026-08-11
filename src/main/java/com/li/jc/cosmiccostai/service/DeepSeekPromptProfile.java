@@ -102,6 +102,7 @@ public final class DeepSeekPromptProfile {
         switch (task) {
             case EXTRACTION:
                 builder.append("任务输出协议：顶层固定为 {\"functions\":[...]}；functions 每个元素严格使用任务正文定义的字段。\n");
+                builder.append("顺序协议：先按功能自身 sourceReferences 对应的 REQ-L 原文顺序排列 functions；不得把原文前置的新增、定时生成或导入功能移到查询、修改、删除、导出、下载之后。\n");
                 break;
             case INITIAL_REVIEW:
                 builder.append("任务输出协议：顶层固定为 {\"items\":[...]}；items 每个元素严格使用任务正文定义的字段。\n");

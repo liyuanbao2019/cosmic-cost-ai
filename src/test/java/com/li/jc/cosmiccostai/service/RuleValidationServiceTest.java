@@ -483,19 +483,24 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void flagsDesignInstituteReviewLabelsUniversalTemplatesAndGenericAttributes() {
+    void xinjiangAllowsCommonSubProcessPhrasesButStillFlagsOtherReviewRisks() {
         RuleValidationService service = new RuleValidationService();
         FunctionSplitRow read = row("处理客户资料", "R", "客户资料表", "客户编号", "新增");
         read.setSubProcessDescription("读取客户资料相关数据");
         read.setDataAttributes("请求编号、操作人、请求时间");
         read.setEvidence("评审备注：OLD");
+        FunctionSplitRow write = row("处理客户资料", "W", "客户资料表", "客户编号", "新增");
+        write.setSubProcessDescription("保存处理结果");
+        FunctionSplitRow exit = row("处理客户资料", "X", "客户结果", "客户编号", "新增");
+        exit.setSubProcessDescription("返回处理结果");
 
         RuleValidationResponse response = service.validate(Arrays.asList(
                 row("处理客户资料", "E", "客户请求", "客户编号", "新增"),
                 read,
-                row("处理客户资料", "X", "客户结果", "客户编号", "新增")));
+                write,
+                exit));
 
-        assertTrue(hasIssue(response, "高频核减模板"), describe(response));
+        assertFalse(hasIssue(response, "高频核减模板"), describe(response));
         assertTrue(hasIssue(response, "泛化占位组合"), describe(response));
         assertTrue(hasIssue(response, "评审标签“OLD”"), describe(response));
     }

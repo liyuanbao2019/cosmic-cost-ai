@@ -10,6 +10,8 @@ import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import org.apache.poi.ss.usermodel.BorderStyle;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
@@ -35,7 +37,7 @@ class ExcelRiskColorExportTest {
     private static final String PROJECT_ID = "RISK_COLOR_TEST";
 
     @Test
-    void colorsEveryExportedCellOnRiskRowsAndLeavesCleanRowsUncolored(@TempDir Path tempDir) throws Exception {
+    void colorsOnlyNonMergedCellsAndExportsRiskReasonNextToCfp(@TempDir Path tempDir) throws Exception {
         Path verificationDir = verificationDir(tempDir);
         FileStorageService storageService = new FileStorageService(verificationDir.resolve("storage").toString());
         List<FunctionSplitRow> rows = rowsWithOneMaterialRisk();
@@ -62,7 +64,7 @@ class ExcelRiskColorExportTest {
 
             int cleanExcelRow = 5;
             int riskExcelRow = 7;
-            for (int column = 0; column <= 12; column++) {
+            for (int column = 7; column <= 13; column++) {
                 Cell riskCell = sheet.getRow(riskExcelRow).getCell(column);
                 assertEquals(FillPatternType.SOLID_FOREGROUND, riskCell.getCellStyle().getFillPattern());
                 assertEquals("FFF2CC", rgbHex(riskCell), "column " + column);
@@ -71,10 +73,25 @@ class ExcelRiskColorExportTest {
                 Cell cleanCell = sheet.getRow(cleanExcelRow).getCell(column);
                 assertNotEquals("FFF2CC", rgbHex(cleanCell), "column " + column);
             }
-            assertEquals("RISK_COLOR_TEST", sheet.getRow(riskExcelRow).getCell(0).getStringCellValue());
+            for (int column = 0; column <= 6; column++) {
+                assertTrue(isMergedAcrossRows(sheet, 5, 7, column),
+                        "hierarchy column " + column + " must remain merged across all process rows");
+                assertNotEquals("FFF2CC", rgbHex(sheet.getRow(5).getCell(column)), "column " + column);
+            }
+            assertEquals("RISK_COLOR_TEST", sheet.getRow(5).getCell(0).getStringCellValue());
             assertEquals("待确认", sheet.getRow(riskExcelRow).getCell(10).getStringCellValue());
             assertTrue(sheet.getRow(riskExcelRow).getCell(12).getCellFormula().contains("L8"));
-            assertFalse(isMergedAcrossRows(sheet, 6, 7, 0), "clean and risk rows must not share a merged cell");
+            assertEquals("风险原因（提交送审前务必删除）",
+                    sheet.getRow(2).getCell(13).getStringCellValue());
+            assertFalse(sheet.isColumnHidden(13));
+            Cell riskReasonCell = sheet.getRow(riskExcelRow).getCell(13);
+            assertTrue(riskReasonCell.getStringCellValue().contains("待确认"));
+            assertRedBold(workbook, sheet.getRow(1).getCell(13));
+            assertRedBold(workbook, sheet.getRow(2).getCell(13));
+            assertRedBold(workbook, sheet.getRow(4).getCell(13));
+            assertRedBold(workbook, riskReasonCell);
+            assertTrue(isMergedAcrossRows(sheet, 2, 3, 13), "risk reason header must match CFP header layout");
+            assertTrue(isMergedAcrossRows(sheet, 0, 0, 0, 13), "title must extend through the risk reason column");
             assertEquals(0, sheet.getSheetConditionalFormatting().getNumConditionalFormattings(),
                     "legacy duplicate-value colors must not override unified validation colors");
         }
@@ -165,9 +182,14 @@ class ExcelRiskColorExportTest {
     }
 
     private boolean isMergedAcrossRows(Sheet sheet, int firstRow, int lastRow, int column) {
+        return isMergedAcrossRows(sheet, firstRow, lastRow, column, column);
+    }
+
+    private boolean isMergedAcrossRows(Sheet sheet, int firstRow, int lastRow,
+                                       int firstColumn, int lastColumn) {
         for (int index = 0; index < sheet.getNumMergedRegions(); index++) {
             org.apache.poi.ss.util.CellRangeAddress region = sheet.getMergedRegion(index);
-            if (region.getFirstColumn() == column && region.getLastColumn() == column
+            if (region.getFirstColumn() == firstColumn && region.getLastColumn() == lastColumn
                     && region.getFirstRow() <= firstRow && region.getLastRow() >= lastRow) {
                 return true;
             }
@@ -186,6 +208,12 @@ class ExcelRiskColorExportTest {
         }
         String argb = color.getARGBHex();
         return argb.length() > 6 ? argb.substring(argb.length() - 6) : argb;
+    }
+
+    private void assertRedBold(Workbook workbook, Cell cell) {
+        Font font = workbook.getFontAt(cell.getCellStyle().getFontIndexAsInt());
+        assertTrue(font.getBold());
+        assertEquals(IndexedColors.RED.getIndex(), font.getColor());
     }
 
     private String describe(RuleValidationResponse response) {

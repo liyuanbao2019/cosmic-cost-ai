@@ -5,6 +5,7 @@ import com.li.jc.cosmiccostai.dto.ExcelExportResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.model.CosmicResult;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -56,7 +57,10 @@ public class ExcelExportService {
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int TEMPLATE_CLEAR_ROW_LIMIT = 500;
-    private static final int STANDARD_LAST_EXPORT_COLUMN = 12;
+    private static final int FIRST_NON_MERGED_EXPORT_COLUMN = 7;
+    private static final int CFP_COLUMN = 12;
+    private static final int RISK_REASON_COLUMN = 13;
+    private static final int STANDARD_LAST_EXPORT_COLUMN = RISK_REASON_COLUMN;
     private static final int FIRST_SPLIT_DATA_ROW = 5;
     private static final String VALIDATION_ERROR = "ERROR";
     private static final String VALIDATION_RISK = "RISK";
@@ -104,6 +108,7 @@ public class ExcelExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> splitRows = readOrCreateSplitRows(metadata, results);
+        RequirementSourceOrder.sortRows(splitRows, readExtractedFunctions(metadata));
         RuleValidationResponse validation = ruleValidationService.validate(splitRows);
         ruleValidationService.ensureReadyForExport(validation, "导出送审 Excel");
         Path templatePath = resolveTemplatePath(zh("\u9644\u4ef63"));
@@ -231,6 +236,22 @@ public class ExcelExportService {
         }
     }
 
+    private List<ExtractedFunction> readExtractedFunctions(ProjectMetadata metadata) {
+        if (metadata == null || !StringUtils.hasText(metadata.getExtractedFunctionsPath())) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        Path path = Paths.get(metadata.getExtractedFunctionsPath());
+        if (!Files.exists(path)) {
+            return new ArrayList<ExtractedFunction>();
+        }
+        try {
+            return objectMapper.readValue(path.toFile(), new TypeReference<List<ExtractedFunction>>() {
+            });
+        } catch (IOException ex) {
+            throw new BusinessException("Read extracted functions failed: " + path, ex);
+        }
+    }
+
     private List<FunctionSplitRow> readOrCreateSplitRows(ProjectMetadata metadata, List<CosmicResult> results) {
         if (StringUtils.hasText(metadata.getFunctionSplitRowsPath()) && Files.exists(Paths.get(metadata.getFunctionSplitRowsPath()))) {
             try {
@@ -290,13 +311,16 @@ public class ExcelExportService {
     private int fillSheet(Sheet sheet, ProjectMetadata metadata, List<FunctionSplitRow> rows,
                           RuleValidationResponse validation) {
         clearTemplateData(sheet);
+        prepareRiskReasonColumn(sheet);
 
         int rowIndex = FIRST_SPLIT_DATA_ROW;
         int movementRows = 0;
         Map<Short, CellStyle> styleCache = new HashMap<Short, CellStyle>();
+        Map<Integer, String> validationRiskReasonsByRow = validationRiskReasonsByRow(validation, rows.size());
         for (FunctionSplitRow splitRow : rows) {
             Row row = getOrCreateRow(sheet, rowIndex);
             copyRowStyle(sheet, 5 + Math.min(movementRows, 2), rowIndex, styleCache);
+            copyCellStyle(row, 10, RISK_REASON_COLUMN);
             setCell(row, 0, splitRow.getProjectName());
             setCell(row, 1, splitRow.getLevel1Module());
             setCell(row, 2, splitRow.getLevel2Module());
@@ -312,48 +336,72 @@ public class ExcelExportService {
                 String formula = "IF(L" + (rowIndex + 1) + "=\"" + zh("\u65b0\u589e") + "\",1,IF(L"
                         + (rowIndex + 1) + "=\"" + zh("\u590d\u7528") + "\",1/3,IF(L"
                         + (rowIndex + 1) + "=\"" + zh("\u5229\u65e7") + "\",0)))";
-                setFormula(row, 12, formula);
+                setFormula(row, CFP_COLUMN, formula);
+                setOptionalCell(row, RISK_REASON_COLUMN, validationRiskReasonsByRow.get(movementRows + 1));
                 rowIndex++;
                 movementRows++;
             }
 
             int lastDataRow = rowIndex - 1;
-        removeInternalExportColumns(sheet);
         applyDataBorders(sheet, FIRST_SPLIT_DATA_ROW, lastDataRow, 0, STANDARD_LAST_EXPORT_COLUMN);
         Map<Integer, String> validationSeverityByRow = validationSeverityByRow(validation, rows.size());
-        mergeHierarchyColumns(sheet, rows, FIRST_SPLIT_DATA_ROW, lastDataRow, validationSeverityByRow);
+        mergeHierarchyColumns(sheet, rows, FIRST_SPLIT_DATA_ROW, lastDataRow);
         applyValidationRiskFills(sheet, FIRST_SPLIT_DATA_ROW, lastDataRow, validationSeverityByRow);
+        applyRiskReasonFont(sheet, 1, lastDataRow);
         addReuseDegreeValidation(sheet, FIRST_SPLIT_DATA_ROW, rowIndex - 1);
         return movementRows;
     }
 
-    private void removeInternalExportColumns(Sheet sheet) {
-        int lastColumn = STANDARD_LAST_EXPORT_COLUMN;
-        for (int rowIndex = 0; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-            Row row = sheet.getRow(rowIndex);
-            if (row != null && row.getLastCellNum() > 0) {
-                lastColumn = Math.max(lastColumn, row.getLastCellNum() - 1);
-            }
-        }
-        if (lastColumn > 14) {
-            sheet.shiftColumns(15, lastColumn, -2);
-        }
-        for (int rowIndex = 0; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-            Row row = sheet.getRow(rowIndex);
-            if (row == null) {
-                continue;
-            }
-            removeCell(row, 13);
-            removeCell(row, 14);
-        }
-        sheet.setColumnHidden(13, true);
-        sheet.setColumnHidden(14, true);
+    private void prepareRiskReasonColumn(Sheet sheet) {
+        sheet.setColumnHidden(RISK_REASON_COLUMN, false);
+        sheet.setColumnHidden(RISK_REASON_COLUMN + 1, true);
+        sheet.setColumnWidth(RISK_REASON_COLUMN, Math.max(sheet.getColumnWidth(10), 40 * 256));
+
+        extendTitleMergeToRiskReasonColumn(sheet);
+        copyHeaderCellStyle(sheet, 1, CFP_COLUMN, RISK_REASON_COLUMN);
+        setCell(getOrCreateRow(sheet, 1), RISK_REASON_COLUMN, zh("\u5ba1\u6838\u4fe1\u606f"));
+        copyHeaderCellStyle(sheet, 2, CFP_COLUMN, RISK_REASON_COLUMN);
+        copyHeaderCellStyle(sheet, 3, CFP_COLUMN, RISK_REASON_COLUMN);
+        setCell(getOrCreateRow(sheet, 2), RISK_REASON_COLUMN,
+                zh("\u98ce\u9669\u539f\u56e0\uff08\u63d0\u4ea4\u9001\u5ba1\u524d\u52a1\u5fc5\u5220\u9664\uff09"));
+        setOptionalCell(getOrCreateRow(sheet, 3), RISK_REASON_COLUMN, null);
+        CellRangeAddress headerRegion = new CellRangeAddress(2, 3, RISK_REASON_COLUMN, RISK_REASON_COLUMN);
+        sheet.addMergedRegion(headerRegion);
+        RegionUtil.setBorderTop(BorderStyle.THIN, headerRegion, sheet);
+        RegionUtil.setBorderRight(BorderStyle.THIN, headerRegion, sheet);
+        RegionUtil.setBorderBottom(BorderStyle.THIN, headerRegion, sheet);
+        RegionUtil.setBorderLeft(BorderStyle.THIN, headerRegion, sheet);
+
+        copyHeaderCellStyle(sheet, 4, CFP_COLUMN, RISK_REASON_COLUMN);
+        setCell(getOrCreateRow(sheet, 4), RISK_REASON_COLUMN,
+                zh("\u89c4\u5219\u521d\u5ba1\u53d1\u73b0\u7684\u98ce\u9669\u539f\u56e0\uff0c\u591a\u4e2a\u539f\u56e0\u5206\u884c\u5c55\u793a\u3002"));
     }
 
-    private void removeCell(Row row, int columnIndex) {
-        Cell cell = row.getCell(columnIndex);
-        if (cell != null) {
-            row.removeCell(cell);
+    private void extendTitleMergeToRiskReasonColumn(Sheet sheet) {
+        for (int index = 0; index < sheet.getNumMergedRegions(); index++) {
+            CellRangeAddress region = sheet.getMergedRegion(index);
+            if (region.getFirstRow() == 0 && region.getLastRow() == 0
+                    && region.getFirstColumn() == 0 && region.getLastColumn() == CFP_COLUMN) {
+                sheet.removeMergedRegion(index);
+                sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, RISK_REASON_COLUMN));
+                return;
+            }
+        }
+    }
+
+    private void copyHeaderCellStyle(Sheet sheet, int rowIndex, int sourceColumn, int targetColumn) {
+        Row row = getOrCreateRow(sheet, rowIndex);
+        copyCellStyle(row, sourceColumn, targetColumn);
+    }
+
+    private void copyCellStyle(Row row, int sourceColumn, int targetColumn) {
+        Cell source = row.getCell(sourceColumn);
+        Cell target = row.getCell(targetColumn);
+        if (target == null) {
+            target = row.createCell(targetColumn);
+        }
+        if (source != null) {
+            target.setCellStyle(source.getCellStyle());
         }
     }
 
@@ -490,46 +538,36 @@ public class ExcelExportService {
         return style;
     }
 
-    private void mergeHierarchyColumns(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow,
-                                       Map<Integer, String> validationSeverityByRow) {
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 0, -1, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 1, 0, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 2, 1, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 3, 2, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 4, 3, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 5, 4, validationSeverityByRow);
-        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 6, 5, validationSeverityByRow);
+    private void mergeHierarchyColumns(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow) {
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 0, -1);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 1, 0);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 2, 1);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 3, 2);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 4, 3);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 5, 4);
+        mergeSameContentColumn(sheet, rows, firstRow, lastRow, 6, 5);
     }
 
     private void mergeSameContentColumn(Sheet sheet, List<FunctionSplitRow> rows, int firstRow, int lastRow,
-                                        int colIndex, int parentColIndex,
-                                        Map<Integer, String> validationSeverityByRow) {
+                                        int colIndex, int parentColIndex) {
         if (lastRow < firstRow) {
             return;
         }
         int groupStart = firstRow;
         String previous = rowValue(rows, 0, colIndex);
         String previousParent = parentKey(rows, 0, parentColIndex);
-        String previousSeverity = validationSeverityByRow.get(1);
         for (int rowIndex = firstRow + 1; rowIndex <= lastRow + 1; rowIndex++) {
             int dataIndex = rowIndex - firstRow;
             String current = rowIndex <= lastRow ? rowValue(rows, dataIndex, colIndex) : null;
             String currentParent = rowIndex <= lastRow ? parentKey(rows, dataIndex, parentColIndex) : null;
-            String currentSeverity = rowIndex <= lastRow ? validationSeverityByRow.get(dataIndex + 1) : null;
-            if (previous != null && previous.equals(current) && previousParent.equals(currentParent)
-                    && sameValidationSeverity(previousSeverity, currentSeverity)) {
+            if (previous != null && previous.equals(current) && previousParent.equals(currentParent)) {
                 continue;
             }
             mergeRegionIfNeeded(sheet, groupStart, rowIndex - 1, colIndex, previous);
             groupStart = rowIndex;
             previous = current;
             previousParent = currentParent == null ? "" : currentParent;
-            previousSeverity = currentSeverity;
         }
-    }
-
-    private boolean sameValidationSeverity(String left, String right) {
-        return left == null ? right == null : left.equals(right);
     }
 
     private Map<Integer, String> validationSeverityByRow(RuleValidationResponse validation, int rowCount) {
@@ -553,6 +591,36 @@ public class ExcelExportService {
         return severities;
     }
 
+    private Map<Integer, String> validationRiskReasonsByRow(RuleValidationResponse validation, int rowCount) {
+        Map<Integer, LinkedHashSet<String>> reasonsByRow = new LinkedHashMap<Integer, LinkedHashSet<String>>();
+        if (validation == null || validation.getIssues() == null) {
+            return new LinkedHashMap<Integer, String>();
+        }
+        for (RuleValidationIssue issue : validation.getIssues()) {
+            if (issue == null || issue.getRowIndex() < 1 || issue.getRowIndex() > rowCount
+                    || (!VALIDATION_ERROR.equals(issue.getSeverity()) && !VALIDATION_RISK.equals(issue.getSeverity()))) {
+                continue;
+            }
+            String message = safeText(issue.getMessage());
+            if (!StringUtils.hasText(message)) {
+                continue;
+            }
+            String field = safeText(issue.getField());
+            String reason = StringUtils.hasText(field) ? "[" + field + "] " + message : message;
+            LinkedHashSet<String> reasons = reasonsByRow.get(issue.getRowIndex());
+            if (reasons == null) {
+                reasons = new LinkedHashSet<String>();
+                reasonsByRow.put(issue.getRowIndex(), reasons);
+            }
+            reasons.add(reason);
+        }
+        Map<Integer, String> result = new LinkedHashMap<Integer, String>();
+        for (Map.Entry<Integer, LinkedHashSet<String>> entry : reasonsByRow.entrySet()) {
+            result.put(entry.getKey(), String.join("\n", entry.getValue()));
+        }
+        return result;
+    }
+
     private void applyValidationRiskFills(Sheet sheet, int firstRow, int lastRow,
                                           Map<Integer, String> validationSeverityByRow) {
         if (lastRow < firstRow || validationSeverityByRow.isEmpty()) {
@@ -566,7 +634,8 @@ public class ExcelExportService {
                 continue;
             }
             Row row = getOrCreateRow(sheet, rowIndex);
-            for (int colIndex = 0; colIndex <= STANDARD_LAST_EXPORT_COLUMN; colIndex++) {
+            for (int colIndex = FIRST_NON_MERGED_EXPORT_COLUMN;
+                 colIndex <= STANDARD_LAST_EXPORT_COLUMN; colIndex++) {
                 Cell cell = row.getCell(colIndex);
                 if (cell == null) {
                     cell = row.createCell(colIndex);
@@ -600,6 +669,43 @@ public class ExcelExportService {
         style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
         fillStyleCache.put(cacheKey, style);
         return style;
+    }
+
+    private void applyRiskReasonFont(Sheet sheet, int firstRow, int lastRow) {
+        Workbook workbook = sheet.getWorkbook();
+        Map<Short, CellStyle> styleCache = new HashMap<Short, CellStyle>();
+        for (int rowIndex = firstRow; rowIndex <= lastRow; rowIndex++) {
+            Row row = sheet.getRow(rowIndex);
+            Cell cell = row == null ? null : row.getCell(RISK_REASON_COLUMN);
+            if (cell == null) {
+                continue;
+            }
+            CellStyle sourceStyle = cell.getCellStyle();
+            short sourceIndex = sourceStyle.getIndex();
+            CellStyle emphasizedStyle = styleCache.get(sourceIndex);
+            if (emphasizedStyle == null) {
+                emphasizedStyle = workbook.createCellStyle();
+                emphasizedStyle.cloneStyleFrom(sourceStyle);
+                emphasizedStyle.setFont(createRedBoldFont(workbook, sourceStyle));
+                styleCache.put(sourceIndex, emphasizedStyle);
+            }
+            cell.setCellStyle(emphasizedStyle);
+        }
+    }
+
+    private Font createRedBoldFont(Workbook workbook, CellStyle sourceStyle) {
+        Font sourceFont = workbook.getFontAt(sourceStyle.getFontIndexAsInt());
+        Font font = workbook.createFont();
+        font.setFontName(sourceFont.getFontName());
+        font.setFontHeight(sourceFont.getFontHeight());
+        font.setBold(true);
+        font.setItalic(sourceFont.getItalic());
+        font.setUnderline(sourceFont.getUnderline());
+        font.setStrikeout(sourceFont.getStrikeout());
+        font.setTypeOffset(sourceFont.getTypeOffset());
+        font.setCharSet(sourceFont.getCharSet());
+        font.setColor(IndexedColors.RED.getIndex());
+        return font;
     }
 
     private void mergeRegionIfNeeded(Sheet sheet, int firstRow, int lastRow, int colIndex, String value) {
@@ -714,7 +820,7 @@ public class ExcelExportService {
             return;
         }
         target.setHeight(source.getHeight());
-        for (int c = 0; c <= 14; c++) {
+        for (int c = 0; c <= STANDARD_LAST_EXPORT_COLUMN; c++) {
             Cell sourceCell = source.getCell(c);
             Cell targetCell = target.getCell(c);
             if (targetCell == null) {
@@ -785,6 +891,18 @@ public class ExcelExportService {
             cell = row.createCell(col);
         }
         cell.setCellValue(value == null ? "" : value);
+    }
+
+    private void setOptionalCell(Row row, int col, String value) {
+        Cell cell = row.getCell(col);
+        if (cell == null) {
+            cell = row.createCell(col);
+        }
+        if (StringUtils.hasText(value)) {
+            cell.setCellValue(value);
+        } else {
+            cell.setBlank();
+        }
     }
 
     private void setNumericCell(Row row, int col, double value) {
