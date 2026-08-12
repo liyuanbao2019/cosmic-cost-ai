@@ -85,6 +85,8 @@ cosmic:
       # 单个批次允许包含的最大需求文档数
       max-items: ${COSMIC_BATCH_SPLIT_MAX_ITEMS:50}
     smart-split:
+      # 新流程中的 AI 深度审核总开关；当前暂时关闭，设为 true 可恢复深审及安全建议采纳
+      deep-review-enabled: ${COSMIC_SMART_SPLIT_DEEP_REVIEW_ENABLED:false}
       # 单需求和批量需求共用：等待异步深度审核完成的最长时间，单位秒
       deep-review-wait-seconds: ${COSMIC_SMART_SPLIT_DEEP_REVIEW_WAIT_SECONDS:1800}
       # 深度审核存在失败分批时自动重试轮数；每轮仅重试失败批次

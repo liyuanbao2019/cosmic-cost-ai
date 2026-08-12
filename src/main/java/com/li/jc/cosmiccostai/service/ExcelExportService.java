@@ -51,6 +51,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class ExcelExportService {
@@ -64,6 +66,7 @@ public class ExcelExportService {
     private static final int FIRST_SPLIT_DATA_ROW = 5;
     private static final String VALIDATION_ERROR = "ERROR";
     private static final String VALIDATION_RISK = "RISK";
+    private static final Pattern LOGICAL_ROW_REFERENCE = Pattern.compile("第\\s*(\\d+)\\s*行");
     private static final byte[] VALIDATION_RISK_FILL_RGB = new byte[]{(byte) 255, (byte) 242, (byte) 204};
     private static final byte[] VALIDATION_ERROR_FILL_RGB = new byte[]{(byte) 244, (byte) 204, (byte) 204};
 
@@ -397,7 +400,8 @@ public class ExcelExportService {
         int rowIndex = FIRST_SPLIT_DATA_ROW;
         int movementRows = 0;
         Map<Short, CellStyle> styleCache = new HashMap<Short, CellStyle>();
-        Map<Integer, String> validationRiskReasonsByRow = validationRiskReasonsByRow(validation, rows.size());
+        Map<Integer, String> validationRiskReasonsByRow = validationRiskReasonsByRow(
+                validation, rows.size(), FIRST_SPLIT_DATA_ROW);
         for (FunctionSplitRow splitRow : rows) {
             Row row = getOrCreateRow(sheet, rowIndex);
             copyRowStyle(sheet, 5 + Math.min(movementRows, 2), rowIndex, styleCache);
@@ -676,7 +680,9 @@ public class ExcelExportService {
         return severities;
     }
 
-    private Map<Integer, String> validationRiskReasonsByRow(RuleValidationResponse validation, int rowCount) {
+    private Map<Integer, String> validationRiskReasonsByRow(RuleValidationResponse validation,
+                                                            int rowCount,
+                                                            int firstDataRowIndex) {
         Map<Integer, LinkedHashSet<String>> reasonsByRow = new LinkedHashMap<Integer, LinkedHashSet<String>>();
         if (validation == null || validation.getIssues() == null) {
             return new LinkedHashMap<Integer, String>();
@@ -686,7 +692,7 @@ public class ExcelExportService {
                     || (!VALIDATION_ERROR.equals(issue.getSeverity()) && !VALIDATION_RISK.equals(issue.getSeverity()))) {
                 continue;
             }
-            String message = safeText(issue.getMessage());
+            String message = excelRowReferences(safeText(issue.getMessage()), firstDataRowIndex);
             if (!StringUtils.hasText(message)) {
                 continue;
             }
@@ -704,6 +710,27 @@ public class ExcelExportService {
             result.put(entry.getKey(), String.join("\n", entry.getValue()));
         }
         return result;
+    }
+
+    String excelRowReferences(String message, int firstDataRowIndex) {
+        if (!StringUtils.hasText(message)) {
+            return message;
+        }
+        Matcher matcher = LOGICAL_ROW_REFERENCE.matcher(message);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            int logicalRow;
+            try {
+                logicalRow = Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException ex) {
+                continue;
+            }
+            int excelRow = firstDataRowIndex + logicalRow;
+            matcher.appendReplacement(result, Matcher.quoteReplacement(
+                    "Excel 第 " + excelRow + " 行（拆分数据第 " + logicalRow + " 条）"));
+        }
+        matcher.appendTail(result);
+        return result.toString();
     }
 
     private void applyValidationRiskFills(Sheet sheet, int firstRow, int lastRow,

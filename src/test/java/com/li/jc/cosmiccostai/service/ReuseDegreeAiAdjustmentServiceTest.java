@@ -208,6 +208,40 @@ class ReuseDegreeAiAdjustmentServiceTest {
     }
 
     @Test
+    void workflowWordInsideManagedObjectDoesNotBlockWholeProcessReuseAdjustment() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                moduleMovementRow("盘点单派发规则管理模块", "新增盘点单派发规则", "E", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "新增盘点单派发规则", "W", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "新增盘点单派发规则", "X", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "查询盘点单派发规则", "E", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "查询盘点单派发规则", "R", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "查询盘点单派发规则", "X", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "修改盘点单派发规则", "E", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "修改盘点单派发规则", "R", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "修改盘点单派发规则", "W", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "修改盘点单派发规则", "X", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "删除盘点单派发规则", "E", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "删除盘点单派发规则", "W", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "删除盘点单派发规则", "X", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "导出盘点单派发规则", "E", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "导出盘点单派发规则", "R", "新增"),
+                moduleMovementRow("盘点单派发规则管理模块", "导出盘点单派发规则", "X", "新增"));
+
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertEquals(10, decisions.size());
+        for (int index = 0; index < 6; index++) {
+            assertEquals("新增", rows.get(index).getReuseDegree());
+            assertEquals(1D, rows.get(index).getCfp(), 0.0001D);
+        }
+        for (int index = 6; index < rows.size(); index++) {
+            assertEquals("复用", rows.get(index).getReuseDegree());
+            assertEquals(0.33D, rows.get(index).getCfp(), 0.0001D);
+        }
+    }
+
+    @Test
     void moduleDefaultRequiresAnAnchorAndDoesNotCombineDifferentModules() {
         ReuseDegreeAiAdjustmentService service = service(null, null, null);
         List<FunctionSplitRow> rows = Arrays.asList(

@@ -16,6 +16,7 @@ import com.li.jc.cosmiccostai.dto.ExportFileActionResponse;
 import com.li.jc.cosmiccostai.dto.ExportProgressResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
 import com.li.jc.cosmiccostai.dto.ProjectListResponse;
+import com.li.jc.cosmiccostai.dto.ProjectListItem;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentRequest;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
@@ -129,8 +130,24 @@ public class ProjectController {
 
     @Operation(summary = "List projects", description = "List historical projects from local storage.")
     @GetMapping
-    public ApiResponse<ProjectListResponse> listProjects() {
-        return ApiResponse.ok(projectListService.listProjects());
+    public ApiResponse<ProjectListResponse> listProjects(
+            @RequestParam(value = "search", required = false) String search,
+            @RequestParam(value = "projectName", required = false) String projectName,
+            @RequestParam(value = "splitLevel", required = false) String splitLevel,
+            @RequestParam(value = "sourceType", required = false) String sourceType,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "risk", required = false) String risk,
+            @RequestParam(value = "exportStatus", required = false) String exportStatus,
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "pageSize", defaultValue = "20") int pageSize) {
+        return ApiResponse.ok(projectListService.listProjects(search, projectName, splitLevel,
+                sourceType, status, risk, exportStatus, page, pageSize));
+    }
+
+    @Operation(summary = "Get project summary", description = "Get lightweight project status and management association.")
+    @GetMapping("/{projectId}")
+    public ApiResponse<ProjectListItem> getProject(@PathVariable String projectId) {
+        return ApiResponse.ok(projectListService.getProject(projectId));
     }
 
     @Operation(summary = "Delete project", description = "Delete a local project and all files under its storage directory.")

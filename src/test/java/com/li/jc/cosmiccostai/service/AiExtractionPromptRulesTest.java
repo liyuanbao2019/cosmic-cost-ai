@@ -43,7 +43,8 @@ class AiExtractionPromptRulesTest {
         assertTrue(prompt.contains("正文中的“六级地址、故障原因、ret、P01、U13”"));
         assertTrue(prompt.contains("相同数据组传递同一批数据时"));
         assertTrue(prompt.contains("无载荷的定时/时钟触发 E 填“无业务数据”"));
-        assertTrue(prompt.contains("禁止“字段名（待确认）”混写"));
+        assertTrue(prompt.contains("新疆项目暂不因“字段名（待确认）”混合表达提示风险"));
+        assertTrue(prompt.contains("不因“配置”一词单独提示风险"));
         assertTrue(prompt.contains("至少输出 2 个 movements"));
         assertTrue(prompt.contains("最后一个必须是 W 或 X"));
         assertTrue(prompt.contains("不同功能过程中"));
@@ -80,6 +81,8 @@ class AiExtractionPromptRulesTest {
         assertTrue(prompt.contains("唯一规则源：SplitRuleConfigService 当前生效完整规则"));
         assertTrue(prompt.contains("顶层只能包含 functions 数组"));
         assertTrue(prompt.contains("不得把原文前置的新增、定时生成或导入功能移到查询、修改、删除、导出、下载之后"));
+        assertTrue(prompt.contains("更新调拨分派单状态为已出库，并更新库存及全生命周期流转记录"));
+        assertTrue(prompt.contains("调拨分派单、库存、全生命周期流转记录 3 个独立 W"));
         assertTrue(prompt.contains("{\"functions\":[]}"));
         assertTrue(prompt.indexOf(ruleTitle) >= 0);
         assertTrue(prompt.indexOf(ruleTitle) == prompt.lastIndexOf(ruleTitle));

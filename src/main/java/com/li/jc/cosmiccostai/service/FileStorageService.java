@@ -37,6 +37,10 @@ public class FileStorageService {
     }
 
     public UploadResponse upload(MultipartFile file, String projectName) {
+        return upload(file, projectName, "REQUIREMENT");
+    }
+
+    public UploadResponse upload(MultipartFile file, String projectName, String splitLevel) {
         validate(file);
 
         String originalFileName = cleanOriginalFileName(file.getOriginalFilename());
@@ -58,6 +62,7 @@ public class FileStorageService {
             ProjectMetadata metadata = new ProjectMetadata();
             metadata.setId(projectId);
             metadata.setName(resolvedProjectName);
+            metadata.setSplitLevel(normalizeSplitLevel(splitLevel));
             metadata.setSourceFileName(originalFileName);
             metadata.setStoredFilePath(storedFile.toString());
             metadata.setFileSize(file.getSize());
@@ -84,6 +89,10 @@ public class FileStorageService {
     }
 
     public ProjectMetadata uploadSplitExcel(MultipartFile file, String projectName) {
+        return uploadSplitExcel(file, projectName, "REQUIREMENT");
+    }
+
+    public ProjectMetadata uploadSplitExcel(MultipartFile file, String projectName, String splitLevel) {
         validateSplitExcel(file);
 
         String originalFileName = cleanOriginalFileName(file.getOriginalFilename());
@@ -105,6 +114,7 @@ public class FileStorageService {
             ProjectMetadata metadata = new ProjectMetadata();
             metadata.setId(projectId);
             metadata.setName(resolvedProjectName);
+            metadata.setSplitLevel(normalizeSplitLevel(splitLevel));
             metadata.setSourceFileName(originalFileName);
             metadata.setStoredFilePath(storedFile.toString());
             metadata.setFileSize(file.getSize());
@@ -193,6 +203,11 @@ public class FileStorageService {
             return originalFileName.substring(0, dotIndex);
         }
         return originalFileName;
+    }
+
+    private String normalizeSplitLevel(String splitLevel) {
+        return "PROJECT".equalsIgnoreCase(splitLevel == null ? "" : splitLevel.trim())
+                ? "PROJECT" : "REQUIREMENT";
     }
 
     private String getExtension(String fileName) {

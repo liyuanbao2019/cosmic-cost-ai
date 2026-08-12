@@ -68,6 +68,7 @@ public class SingleSmartSplitService {
             state.setStatus("QUEUED");
             state.setStage("QUEUED");
             state.setStageMessage("AI 智能拆分任务已进入队列");
+            state.setDeepSplitStatus(pipelineService.isDeepReviewEnabled() ? "PENDING" : "DISABLED");
             state.setProgressPercent(0);
             state.setCreatedAt(now());
             state.setUpdatedAt(state.getCreatedAt());
@@ -98,6 +99,9 @@ public class SingleSmartSplitService {
         fileStorageService.loadMetadata(projectId);
         synchronized (lockFor(projectId)) {
             SmartSplitJobResponse state = loadState(projectId);
+            if (!pipelineService.isDeepReviewEnabled()) {
+                state.setDeepSplitStatus("DISABLED");
+            }
             if (active(state.getStatus()) && !state.getJobId().equals(activeJobs.get(projectId))) {
                 state.setStatus("FAILED");
                 state.setStage("INTERRUPTED");
@@ -146,7 +150,8 @@ public class SingleSmartSplitService {
                     state.setStatus(result.isPartial() ? "PARTIAL" : "COMPLETED");
                     state.setStage("COMPLETED");
                     state.setStageMessage(result.isPartial()
-                            ? "智能拆分部分完成，已进入人工审核" : "智能拆分与全部自动校准已完成");
+                            ? "智能拆分部分完成，已进入人工审核"
+                            : "智能拆分、复用度调整和规则初审已完成");
                     state.setProgressPercent(100);
                     state.setDeepSplitJobId(result.getDeepSplitJobId());
                     state.setDeepSplitStatus(result.getDeepSplitStatus());

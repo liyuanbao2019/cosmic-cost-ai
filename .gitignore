@@ -15,6 +15,8 @@ sample/*
 logs/
 *.log
 .mybatis/
+.codex-tmp/
 templates/附件1-XX项目需求说明书V1.0.docx
 templates/附件2-业务需求信息汇总表V1.0.xlsx
+
 

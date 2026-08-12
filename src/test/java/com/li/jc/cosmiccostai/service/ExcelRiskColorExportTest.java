@@ -37,6 +37,18 @@ class ExcelRiskColorExportTest {
     private static final String PROJECT_ID = "RISK_COLOR_TEST";
 
     @Test
+    void convertsLogicalReviewRowToVisibleExcelRow() {
+        ExcelExportService service = new ExcelExportService(null, "output",
+                "templates/附件3-XX项目功能点拆分表V1.0.xlsx");
+
+        String converted = service.excelRowReferences(
+                "与第 30 行跨功能过程的审核三要素有两项相同，存在语义复用候选", 5);
+
+        assertEquals("与Excel 第 35 行（拆分数据第 30 条）跨功能过程的审核三要素有两项相同，存在语义复用候选",
+                converted);
+    }
+
+    @Test
     void colorsOnlyNonMergedCellsAndExportsRiskReasonNextToCfp(@TempDir Path tempDir) throws Exception {
         Path verificationDir = verificationDir(tempDir);
         FileStorageService storageService = new FileStorageService(verificationDir.resolve("storage").toString());

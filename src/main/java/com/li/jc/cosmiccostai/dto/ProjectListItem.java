@@ -4,6 +4,8 @@ public class ProjectListItem {
 
     private String projectId;
     private String projectName;
+    private String splitLevel;
+    private String batchId;
     private String sourceFileName;
     private String sourceType;
     private String status;
@@ -34,6 +36,14 @@ public class ProjectListItem {
     public void setProjectName(String projectName) {
         this.projectName = projectName;
     }
+
+    public String getSplitLevel() { return splitLevel; }
+
+    public void setSplitLevel(String splitLevel) { this.splitLevel = splitLevel; }
+
+    public String getBatchId() { return batchId; }
+
+    public void setBatchId(String batchId) { this.batchId = batchId; }
 
     public String getSourceFileName() {
         return sourceFileName;

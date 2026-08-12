@@ -210,6 +210,7 @@ public class BatchSplitService {
                 item.setStageMessage("等待进入文档解析队列");
                 state.getItems().add(item);
             }
+            associateProjects(state);
             saveState(state);
         } catch (RuntimeException ex) {
             for (String projectId : reserved) {
@@ -222,6 +223,15 @@ public class BatchSplitService {
             submitPreparation(batchId, projectId);
         }
         return get(batchId);
+    }
+
+    private void associateProjects(BatchSplitState state) {
+        for (BatchSplitItemState item : state.getItems()) {
+            ProjectMetadata metadata = fileStorageService.loadMetadata(item.getProjectId());
+            metadata.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
+            metadata.setBatchId(state.getBatchId());
+            fileStorageService.saveMetadata(metadata);
+        }
     }
 
     public BatchSplitJobResponse get(String batchId) {
@@ -620,7 +630,8 @@ public class BatchSplitService {
                     item.setStage("COMPLETED");
                     item.setProgressPercent(100);
                     item.setStageMessage(pipeline.isPartial()
-                            ? "智能拆分部分完成，已进入人工审核" : "智能拆分与全部自动校准已完成");
+                            ? "智能拆分部分完成，已进入人工审核"
+                            : "智能拆分、复用度调整和规则初审已完成");
                     item.setLastCompletedStage("RULE_VALIDATION");
                     item.setIssueCount(validation == null ? 0 : validation.getIssueCount());
                     item.setErrorCount(validation == null ? 0 : validation.getErrorCount());

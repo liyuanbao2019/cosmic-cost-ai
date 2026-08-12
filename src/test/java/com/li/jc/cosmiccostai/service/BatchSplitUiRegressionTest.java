@@ -23,7 +23,7 @@ class BatchSplitUiRegressionTest {
         assertTrue(html.contains("/start"));
         assertTrue(html.contains("id=\"splitLevel\"") && html.contains("value=\"PROJECT\">项目级"));
         assertTrue(html.contains("selectedSplitLevel() === \"PROJECT\""));
-        assertTrue(html.contains("COSMIC 初拆") && html.contains("安全建议采纳"));
+        assertTrue(html.contains("COSMIC 初拆 → 复用度调整 → 规则初审"));
         assertTrue(html.contains("id=\"batchProjectMaterials\""));
         assertTrue(html.contains("/materials/retry") && html.contains("/materials/"));
         assertTrue(html.contains("status === \"BLOCKED\""));

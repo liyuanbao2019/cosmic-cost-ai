@@ -21,6 +21,13 @@ public class ProjectMetadata {
     private String createdAt;
     private String updatedAt;
     private String ruleVersion;
+    private String splitLevel;
+    private String batchId;
+    private Integer functionCount;
+    private Integer issueCount;
+    private Integer errorCount;
+    private Integer riskCount;
+    private Integer suggestionCount;
 
     public String getId() {
         return id;
@@ -173,4 +180,32 @@ public class ProjectMetadata {
     public void setRuleVersion(String ruleVersion) {
         this.ruleVersion = ruleVersion;
     }
+
+    public String getSplitLevel() { return splitLevel; }
+
+    public void setSplitLevel(String splitLevel) { this.splitLevel = splitLevel; }
+
+    public String getBatchId() { return batchId; }
+
+    public void setBatchId(String batchId) { this.batchId = batchId; }
+
+    public Integer getFunctionCount() { return functionCount; }
+
+    public void setFunctionCount(Integer functionCount) { this.functionCount = functionCount; }
+
+    public Integer getIssueCount() { return issueCount; }
+
+    public void setIssueCount(Integer issueCount) { this.issueCount = issueCount; }
+
+    public Integer getErrorCount() { return errorCount; }
+
+    public void setErrorCount(Integer errorCount) { this.errorCount = errorCount; }
+
+    public Integer getRiskCount() { return riskCount; }
+
+    public void setRiskCount(Integer riskCount) { this.riskCount = riskCount; }
+
+    public Integer getSuggestionCount() { return suggestionCount; }
+
+    public void setSuggestionCount(Integer suggestionCount) { this.suggestionCount = suggestionCount; }
 }

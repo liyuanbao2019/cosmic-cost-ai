@@ -45,9 +45,29 @@
 
 .project-list-filters {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) 180px 180px 180px 180px;
+  grid-template-columns: minmax(260px, 1.25fr) minmax(220px, 1fr) 130px 160px 160px 160px 160px;
   gap: 10px;
   margin: 18px 0 14px;
+}
+
+.split-level-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.split-level-badge.project {
+  color: #6d28d9;
+  background: #ede9fe;
+}
+
+.split-level-badge.requirement {
+  color: #0369a1;
+  background: #e0f2fe;
 }
 
 .project-list-filters input,
@@ -1550,7 +1570,8 @@ button.material-view-btn:hover {
   box-shadow: 0 3px 10px rgba(20, 184, 166, 0.14);
 }
 
-button.ghost {
+button.ghost,
+.button-link.ghost {
   background: var(--soft);
   color: var(--secondary);
   border: 1.5px solid var(--line);
@@ -1560,7 +1581,8 @@ button.ghost {
   font-size: 12px;
 }
 
-button.ghost:hover {
+button.ghost:hover,
+.button-link.ghost:hover {
   background: #e2e8f0;
   border-color: #cbd5e1;
   box-shadow: none;

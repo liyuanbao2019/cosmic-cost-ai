@@ -48,7 +48,7 @@ class DeepSeekChatClientTest {
     }
 
     @Test
-    void extractionUsesJsonModeWithoutLongChainThinking() {
+    void extractionUsesJsonModeWithMaximumReasoningEffort() {
         String content = client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
                 "output json", 10, 0);
 
@@ -56,9 +56,9 @@ class DeepSeekChatClientTest {
         assertEquals("/v1/chat/completions", requestPath.get());
         JsonNode body = requestBody.get();
         assertEquals("json_object", body.path("response_format").path("type").asText());
-        assertEquals("disabled", body.path("thinking").path("type").asText());
+        assertEquals("enabled", body.path("thinking").path("type").asText());
+        assertEquals("max", body.path("reasoning_effort").asText());
         assertEquals(65536, body.path("max_tokens").asInt());
-        assertFalse(body.has("reasoning_effort"));
         assertFalse(body.has("temperature"));
         assertEquals("system", body.path("messages").path(0).path("role").asText());
         assertTrue(body.path("messages").path(0).path("content").asText().contains("唯一业务判定依据"));

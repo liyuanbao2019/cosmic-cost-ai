@@ -25,7 +25,7 @@ public class RuleValidationService {
             "\u5339\u914d", "\u89e3\u6790", "\u6062\u590d", "\u6e05\u9664", "\u8ba1\u7b97", "\u8fc7\u6ee4", "\u5237\u65b0",
             "\u8c03\u7814", "\u8bbe\u8ba1", "\u6d4b\u8bd5", "\u4e0a\u7ebf", "\u8c03\u4f18", "UI", "UE",
             "\u89c4\u5219\u6821\u9a8c", "\u8f93\u5165\u6821\u9a8c", "\u5408\u6cd5\u6027\u6821\u9a8c", "\u652f\u6491",
-            "\u96c6\u6210", "\u73b0\u573a", "\u5b9e\u65bd", "\u63a5\u53e3", "\u914d\u7f6e", "\u9875\u9762\u8bbe\u8ba1",
+            "\u96c6\u6210", "\u73b0\u573a", "\u5b9e\u65bd", "\u63a5\u53e3", "\u9875\u9762\u8bbe\u8ba1",
             "\u8c03\u7528", "\u65e5\u5fd7", "\u89e6\u53d1", "\u63d0\u793a", "\u7ffb\u9875", "\u52fe\u9009",
             "\u53d6\u6d88\u52fe\u9009", "\u56fe\u5c42\u5207\u6362", "\u81ea\u52a8\u586b\u5145", "\u9ad8\u4eae\u6e32\u67d3", "\u6682\u5b58",
             "\u90e8\u7f72", "\u8fc1\u79fb", "\u91cd\u7f6e\u67e5\u8be2\u6761\u4ef6", "\u6bcf\u9875\u6761\u6570", "Tab\u5207\u6362", "\u6253\u5f00\u5f39\u7a97");
@@ -46,7 +46,7 @@ public class RuleValidationService {
     private static final double CFP_TOLERANCE = 0.005D;
     private static final Set<String> GENERATED_BLOCKING_RISK_FIELDS = new HashSet<String>(Arrays.asList(
             "G功能过程", "H子过程描述", "功能过程", "数据移动结构", "数据移动组合",
-            "复用与 CFP", "拆分粒度", "纯前端操作", "开发术语", "日志审计", "持久化语义"));
+            "数据组", "复用与 CFP", "拆分粒度", "纯前端操作", "开发术语", "日志审计", "持久化语义"));
 
     private final SplitRuleConfigService splitRuleConfigService;
 
@@ -80,6 +80,7 @@ public class RuleValidationService {
             validateAuditWording(response, row, rowNumber);
             validateHistoricalReviewDecision(response, row, rowNumber);
             validateDataAttributeAudit(response, row, rowNumber);
+            validatePersistentDataGroupCardinality(response, row, rowNumber);
 
             String process = safe(row.getFunctionProcess());
             String key = FunctionProcessKey.of(row);
@@ -103,6 +104,47 @@ public class RuleValidationService {
         }
         finish(response);
         return response;
+    }
+
+    private void validatePersistentDataGroupCardinality(RuleValidationResponse response,
+                                                        FunctionSplitRow row,
+                                                        int rowNumber) {
+        String movement = safe(row.getMovementType()).toUpperCase(Locale.ROOT);
+        if (!("R".equals(movement) || "W".equals(movement))) {
+            return;
+        }
+        List<String> groups = explicitPersistentDataGroups(row.getDataGroup());
+        if (groups.size() < 2) {
+            return;
+        }
+        add(response, rowNumber, safe(row.getFunctionProcess()), "数据组", "RISK",
+                "单个 " + movement + " 同时包含 " + groups.size()
+                        + " 个明确持久化数据组（" + String.join("、", groups) + "）",
+                "保持当前功能过程不变，按不同逻辑数据组分别拆成 " + groups.size() + " 个 "
+                        + movement + "；同一对象仅更新多个字段时不得拆分。");
+    }
+
+    private List<String> explicitPersistentDataGroups(String dataGroup) {
+        String value = safe(dataGroup);
+        if (!StringUtils.hasText(value) || !value.matches(".*[、,，;；].*")) {
+            return Collections.emptyList();
+        }
+        List<String> groups = new ArrayList<String>();
+        for (String part : value.split("[、,，;；]+")) {
+            String group = safe(part).replaceAll("^[及和与]", "");
+            if (looksLikePersistentDataGroup(group) && !groups.contains(group)) {
+                groups.add(group);
+            }
+        }
+        return groups;
+    }
+
+    private boolean looksLikePersistentDataGroup(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        return containsAny(value, "表", "记录", "台账", "清单", "档案", "文件", "数据库", "数据集")
+                || value.endsWith("库存") || value.endsWith("数据");
     }
 
     /**
@@ -319,12 +361,6 @@ public class RuleValidationService {
     private void validateDataAttributeAudit(RuleValidationResponse response, FunctionSplitRow row, int rowNumber) {
         String attributes = safe(row.getDataAttributes());
         if (!StringUtils.hasText(attributes) || "\u5f85\u786e\u8ba4".equals(attributes)) {
-            return;
-        }
-        if (attributes.contains("\u5f85\u786e\u8ba4")) {
-            add(response, rowNumber, safe(row.getFunctionProcess()), "K\u6570\u636e\u5c5e\u6027", "RISK",
-                    "\u6570\u636e\u5c5e\u6027\u6df7\u7528\u4e86\u201c\u5b57\u6bb5\u540d\uff08\u5f85\u786e\u8ba4\uff09\u201d\u8868\u8fbe\uff0c\u65e0\u6cd5\u533a\u5206\u5df2\u6709\u8bc1\u636e\u7684\u5b57\u6bb5\u548c\u6a21\u578b\u63a8\u6d4b\u5b57\u6bb5",
-                    "\u6709\u539f\u6587\u6216\u540c\u4e00\u529f\u80fd\u8fc7\u7a0b\u4e0a\u4e0b\u6587\u4f9d\u636e\u7684\u5b57\u6bb5\u76f4\u63a5\u586b\u5199\uff1b\u5b8c\u5168\u65e0\u6cd5\u8bc6\u522b\u5c5e\u6027\u65f6\u6574\u683c\u586b\u201c\u5f85\u786e\u8ba4\u201d\u3002");
             return;
         }
         if (containsAny(attributes, "\u540c\u4e0a", "\u89c1\u4e0a", "\u4e0e\u4e0a\u76f8\u540c")) {
@@ -639,12 +675,6 @@ public class RuleValidationService {
             discouraged.addAll(match.getProfile().getDiscouragedMovements());
         }
         discouraged.removeAll(required);
-        if (ActionMovementRule.hasMultipleIndependentActions(process, triggerEvent, context)) {
-            addGroupIssue(response, rows, process, "功能过程", "RISK",
-                    "功能过程名称同时包含多个独立业务动作，当前不能按单一动作组合可靠校验",
-                    "请结合功能用户、触发事件和业务结果判断是否拆成多个功能过程；不得把新增、删除、修改、查询、导入导出等独立动作机械合并。");
-            markRows(structureRiskRows, rows);
-        }
         for (RowRef ref : rows) {
             String movement = safe(ref.row.getMovementType()).toUpperCase(Locale.ROOT);
             present.add(movement);
@@ -669,6 +699,16 @@ public class RuleValidationService {
 
         Set<String> missing = new LinkedHashSet<String>(required);
         missing.removeAll(present);
+        if (missing.size() == 1 && missing.contains("W")
+                && hasActionLabel(actionMatches, "流程派发/审批")
+                && hasNonWorkflowAction(actionMatches)
+                && !hasNonWorkflowWriteRequirement(actionMatches)) {
+            // Xinjiang review does not infer a write merely because a query,
+            // export or other R/X-oriented primary action also contains an object
+            // name such as “派发任务/派发记录”. Standalone dispatch or another
+            // matched action that independently requires W is still validated.
+            missing.remove("W");
+        }
         if (!missing.isEmpty()) {
             addGroupIssue(response, rows, process, "数据移动组合", "RISK",
                     "“" + actionKeywords(actionMatches) + "”类功能通常应包含 "
@@ -695,6 +735,34 @@ public class RuleValidationService {
             }
         }
         return null;
+    }
+
+    private boolean hasActionLabel(List<ActionMovementRule.Match> matches, String label) {
+        for (ActionMovementRule.Match match : matches) {
+            if (label.equals(match.getProfile().getLabel())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasNonWorkflowAction(List<ActionMovementRule.Match> matches) {
+        for (ActionMovementRule.Match match : matches) {
+            if (!"流程派发/审批".equals(match.getProfile().getLabel())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasNonWorkflowWriteRequirement(List<ActionMovementRule.Match> matches) {
+        for (ActionMovementRule.Match match : matches) {
+            if (!"流程派发/审批".equals(match.getProfile().getLabel())
+                    && match.getProfile().getRequiredMovements().contains("W")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean isSupportedOptionalMovement(List<ActionMovementRule.Match> matches,
@@ -1145,7 +1213,8 @@ public class RuleValidationService {
                 risks++;
                 if ("\u529f\u80fd\u8fc7\u7a0b".equals(issue.getField())
                         || "\u6570\u636e\u79fb\u52a8\u7ed3\u6784".equals(issue.getField())
-                        || "数据移动组合".equals(issue.getField())) {
+                        || "数据移动组合".equals(issue.getField())
+                        || "数据组".equals(issue.getField())) {
                     structureRisks++;
                 }
             }
@@ -1174,10 +1243,11 @@ public class RuleValidationService {
     private List<String> resolveHighRiskKeywords() {
         List<String> keywords = new ArrayList<String>(HIGH_RISK_KEYWORDS);
         for (String keyword : parseKeywords(readSplitRules())) {
-            if (!keywords.contains(keyword)) {
+            if (!"配置".equals(keyword) && !keywords.contains(keyword)) {
                 keywords.add(keyword);
             }
         }
+        keywords.remove("配置");
         return keywords;
     }
 

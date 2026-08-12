@@ -78,7 +78,8 @@ class DeepSplitAiServiceTest {
         assertFalse(prompt.contains("至少 6 个"));
         assertTrue(prompt.contains("正文中的“六级地址、故障原因、ret、P01、U13”"));
         assertTrue(prompt.contains("无载荷定时/时钟触发 E 填“无业务数据”"));
-        assertTrue(prompt.contains("禁止“字段名（待确认）”混写"));
+        assertTrue(prompt.contains("新疆项目暂不因“字段名（待确认）”混合表达提出建议"));
+        assertTrue(prompt.contains("不因功能名称含多个动作词或出现“配置”提出建议"));
         assertTrue(prompt.contains("翻页、勾选/取消勾选、图层切换"));
         assertTrue(prompt.contains("复用判定三要素"));
         assertTrue(prompt.contains("新增=1、复用=0.33、利旧=0"));
@@ -86,6 +87,10 @@ class DeepSplitAiServiceTest {
         assertTrue(prompt.contains("必须做全表语义查重"));
         assertTrue(prompt.contains("历史评审批注优先于通用模板"));
         assertTrue(prompt.contains("查询与展示同一对象通常合并"));
+        assertTrue(prompt.contains("一个 R/W 只能承载一个逻辑持久化数据组"));
+        assertTrue(prompt.contains("调拨分派单、库存、全生命周期流转记录 3 个 W"));
+        assertTrue(prompt.contains("不得机械合并动作模板并提出补 W 建议"));
+        assertTrue(prompt.contains("查询、导出、发送"));
         assertTrue(prompt.contains("【全表语义查重候选】"));
     }
 

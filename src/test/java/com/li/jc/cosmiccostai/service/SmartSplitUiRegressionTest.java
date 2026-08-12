@@ -24,8 +24,9 @@ class SmartSplitUiRegressionTest {
         assertFalse(html.contains("id=\"step-reuse\""));
         assertFalse(html.contains("id=\"step-precheck\""));
         assertTrue(html.contains("/smart-split"));
-        assertTrue(html.contains("重新执行深度审核"));
-        assertTrue(html.contains("COSMIC 初拆 → AI 深度审核 → 安全建议采纳 → 复用度调整 → 规则初审"));
+        assertTrue(html.contains("id=\"deepSplitBtn\" type=\"button\" class=\"deep-split-primary hidden\""));
+        assertTrue(html.contains("COSMIC 初拆 → 复用度调整 → 规则初审"));
+        assertTrue(html.contains("AI 深度审核已暂时关闭，流程不会发起深审模型请求"));
         assertTrue(html.contains("id=\"smartSplitDialogProgressBar\""));
         assertTrue(html.contains("id=\"smartStageCosmic\""));
         assertTrue(html.contains("id=\"smartStageDeepReview\""));

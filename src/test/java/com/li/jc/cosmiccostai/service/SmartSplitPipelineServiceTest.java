@@ -21,7 +21,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SmartSplitPipelineServiceTest {
@@ -60,7 +62,7 @@ class SmartSplitPipelineServiceTest {
         when(validation.validate(any())).thenReturn(validationResponse);
 
         SmartSplitPipelineService service = new SmartSplitPipelineService(
-                coverage, extraction, cosmic, review, deep, apply, reuse, validation, 60, 2);
+                coverage, extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
         final List<String> stages = new ArrayList<String>();
         SmartSplitPipelineService.PipelineResult result = service.runDocument(
                 "P1", "edited prompt", new SmartSplitPipelineService.StageListener() {
@@ -87,6 +89,51 @@ class SmartSplitPipelineServiceTest {
         assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
         assertEquals("COMPLETED", stages.get(stages.size() - 1));
         verify(extraction).extractWithPrompt("P1", "edited prompt");
+    }
+
+    @Test
+    void disabledDeepReviewSkipsModelAndSuggestionApplicationInSharedPipeline() {
+        RequirementCoverageService coverage = mock(RequirementCoverageService.class);
+        AiExtractionService extraction = mock(AiExtractionService.class);
+        CosmicAnalysisService cosmic = mock(CosmicAnalysisService.class);
+        ReviewService review = mock(ReviewService.class);
+        DeepSplitAiService deep = mock(DeepSplitAiService.class);
+        ReuseDegreeAiAdjustmentService reuse = mock(ReuseDegreeAiAdjustmentService.class);
+        RuleValidationService validation = mock(RuleValidationService.class);
+        DeepSplitSuggestionApplyService apply = new DeepSplitSuggestionApplyService(validation);
+
+        FunctionSplitRow row = row();
+        ReviewResponse reviewResponse = new ReviewResponse();
+        reviewResponse.setSplitRows(Collections.singletonList(row));
+        when(review.getReview("P1")).thenReturn(reviewResponse);
+        ReuseDegreeAdjustmentResponse reuseResponse = new ReuseDegreeAdjustmentResponse();
+        reuseResponse.setRows(Collections.singletonList(row));
+        when(reuse.adjust(eq("P1"), any())).thenReturn(reuseResponse);
+        RuleValidationResponse validationResponse = new RuleValidationResponse();
+        validationResponse.setRuleVersion("R-without-deep-review");
+        when(validation.validate(any())).thenReturn(validationResponse);
+
+        SmartSplitPipelineService service = new SmartSplitPipelineService(
+                coverage, extraction, cosmic, review, deep, apply, reuse, validation, false, 60, 2);
+        final List<String> stages = new ArrayList<String>();
+        SmartSplitPipelineService.PipelineResult result = service.runDocument(
+                "P1", "", new SmartSplitPipelineService.StageListener() {
+                    @Override
+                    public void onStage(String stage, int progressPercent, String message) {
+                        stages.add(stage);
+                    }
+                });
+
+        verifyNoInteractions(deep);
+        verify(review, never()).saveSmartSplitAdjustedReview(eq("P1"), any());
+        verify(reuse).adjust(eq("P1"), any());
+        assertFalse(stages.contains("DEEP_REVIEWING"));
+        assertFalse(stages.contains("APPLYING_DEEP_REVIEW"));
+        assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
+        assertEquals("DISABLED", result.getDeepSplitStatus());
+        assertEquals(0, result.getDeepSuggestionCount());
+        assertFalse(result.isPartial());
+        assertEquals("R-without-deep-review", result.getRuleVersion());
     }
 
     private FunctionSplitRow row() {

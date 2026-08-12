@@ -134,14 +134,16 @@ final class DeepSeekChatClient {
         body.put("response_format", singleton("type", "json_object"));
         body.put("max_tokens", maxTokens);
 
-        boolean reasoningTask = task == AiPromptTask.DEEP_REVIEW
+        boolean reasoningTask = task == AiPromptTask.EXTRACTION
+                || task == AiPromptTask.DEEP_REVIEW
                 || task == AiPromptTask.REUSE_ADJUSTMENT
                 || task == AiPromptTask.INITIAL_REVIEW;
         body.put("thinking", singleton("type", reasoningTask ? "enabled" : "disabled"));
         if (reasoningTask) {
-            // Deep review and cross-row reuse decisions need reasoning, but max effort
-            // multiplies latency when a project batch fans out several long prompts.
-            body.put("reasoning_effort", "high");
+            // Initial extraction is now the authoritative structure pass while the
+            // optional deep-review stage is disabled, so prioritize quality over latency.
+            // Other reasoning tasks retain the balanced high setting.
+            body.put("reasoning_effort", task == AiPromptTask.EXTRACTION ? "max" : "high");
         }
 
         List<Map<String, String>> messages = new ArrayList<Map<String, String>>();

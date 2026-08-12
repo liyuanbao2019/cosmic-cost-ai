@@ -31,6 +31,7 @@ public class SmartSplitPipelineService {
     private final DeepSplitSuggestionApplyService suggestionApplyService;
     private final ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService;
     private final RuleValidationService ruleValidationService;
+    private final boolean deepReviewEnabled;
     private final long deepReviewWaitMillis;
     private final int deepReviewRetryRounds;
 
@@ -42,6 +43,7 @@ public class SmartSplitPipelineService {
                                      DeepSplitSuggestionApplyService suggestionApplyService,
                                      ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService,
                                      RuleValidationService ruleValidationService,
+                                     @Value("${cosmic.ai.smart-split.deep-review-enabled:false}") boolean deepReviewEnabled,
                                      @Value("${cosmic.ai.smart-split.deep-review-wait-seconds:1800}") long deepReviewWaitSeconds,
                                      @Value("${cosmic.ai.smart-split.deep-review-retry-rounds:2}") int deepReviewRetryRounds) {
         this.requirementCoverageService = requirementCoverageService;
@@ -52,6 +54,7 @@ public class SmartSplitPipelineService {
         this.suggestionApplyService = suggestionApplyService;
         this.reuseDegreeAiAdjustmentService = reuseDegreeAiAdjustmentService;
         this.ruleValidationService = ruleValidationService;
+        this.deepReviewEnabled = deepReviewEnabled;
         this.deepReviewWaitMillis = Math.max(60, deepReviewWaitSeconds) * 1000L;
         this.deepReviewRetryRounds = Math.max(0, deepReviewRetryRounds);
     }
@@ -82,60 +85,71 @@ public class SmartSplitPipelineService {
             throw new BusinessException("智能拆分未取得可审核的功能点拆分行。");
         }
 
-        notify(listener, "DEEP_REVIEWING", 42, "正在结合原文证据执行 AI 深度结构审核");
-        DeepSplitRequest request = new DeepSplitRequest();
-        request.setRows(rows);
-        DeepSplitJobResponse deepJob = deepSplitAiService.start(projectId, request);
-        deepJob = awaitDeepReview(projectId, deepJob, listener);
-
         PipelineResult result = new PipelineResult();
-        result.deepSplitJobId = deepJob.getJobId();
-        result.deepSplitStatus = deepJob.getStatus();
-        result.deepSuggestionCount = deepJob.getSuggestions() == null ? 0 : deepJob.getSuggestions().size();
-        result.warnings.addAll(deepJob.getWarnings() == null
-                ? Collections.<String>emptyList() : deepJob.getWarnings());
+        if (deepReviewEnabled) {
+            notify(listener, "DEEP_REVIEWING", 42, "正在结合原文证据执行 AI 深度结构审核");
+            DeepSplitRequest request = new DeepSplitRequest();
+            request.setRows(rows);
+            DeepSplitJobResponse deepJob = deepSplitAiService.start(projectId, request);
+            deepJob = awaitDeepReview(projectId, deepJob, listener);
 
-        if ("FAILED".equals(deepJob.getStatus()) && result.deepSuggestionCount == 0) {
-            throw new BusinessException("AI 深度审核全部失败，已停止后续自动调整，请重新执行智能拆分。");
-        }
+            result.deepSplitJobId = deepJob.getJobId();
+            result.deepSplitStatus = deepJob.getStatus();
+            result.deepSuggestionCount = deepJob.getSuggestions() == null ? 0 : deepJob.getSuggestions().size();
+            result.warnings.addAll(deepJob.getWarnings() == null
+                    ? Collections.<String>emptyList() : deepJob.getWarnings());
 
-        notify(listener, "APPLYING_DEEP_REVIEW", 68, "正在自动采纳有证据、无冲突的深度审核建议");
-        DeepSplitSuggestionApplyService.ApplyResult applied = suggestionApplyService.apply(
-                rows, deepJob.getSuggestions());
-        result.appliedSuggestionCount = applied.getApplied();
-        result.skippedSuggestionCount = applied.getSkipped();
-        result.appliedSuggestionIds.addAll(applied.getAppliedSuggestionIds());
-        if (applied.getApplied() > 0) {
-            RuleValidationResponse baselineGate = ruleValidationService.validate(rows);
-            RuleValidationResponse applicationGate = ruleValidationService.validate(applied.getRows());
-            if (applicationGate.getErrorCount() <= baselineGate.getErrorCount()) {
-                ReviewResponse saved = reviewService.saveSmartSplitAdjustedReview(projectId, applied.getRows());
-                rows = saved.getSplitRows();
-            } else {
-                result.warnings.add("深度审核建议增加了确定性错误，已保留原始拆分表并转入最终规则初审。");
-                result.skippedSuggestionCount += result.appliedSuggestionCount;
-                result.appliedSuggestionCount = 0;
-                result.appliedSuggestionIds.clear();
+            if ("FAILED".equals(deepJob.getStatus()) && result.deepSuggestionCount == 0) {
+                throw new BusinessException("AI 深度审核全部失败，已停止后续自动调整，请重新执行智能拆分。");
             }
+
+            notify(listener, "APPLYING_DEEP_REVIEW", 68, "正在自动采纳有证据、无冲突的深度审核建议");
+            DeepSplitSuggestionApplyService.ApplyResult applied = suggestionApplyService.apply(
+                    rows, deepJob.getSuggestions());
+            result.appliedSuggestionCount = applied.getApplied();
+            result.skippedSuggestionCount = applied.getSkipped();
+            result.appliedSuggestionIds.addAll(applied.getAppliedSuggestionIds());
+            if (applied.getApplied() > 0) {
+                RuleValidationResponse baselineGate = ruleValidationService.validate(rows);
+                RuleValidationResponse applicationGate = ruleValidationService.validate(applied.getRows());
+                if (applicationGate.getErrorCount() <= baselineGate.getErrorCount()) {
+                    ReviewResponse saved = reviewService.saveSmartSplitAdjustedReview(projectId, applied.getRows());
+                    rows = saved.getSplitRows();
+                } else {
+                    result.warnings.add("深度审核建议增加了确定性错误，已保留原始拆分表并转入最终规则初审。");
+                    result.skippedSuggestionCount += result.appliedSuggestionCount;
+                    result.appliedSuggestionCount = 0;
+                    result.appliedSuggestionIds.clear();
+                }
+            }
+            result.partial = !"COMPLETED".equals(deepJob.getStatus());
+            if (result.partial) {
+                result.warnings.add("AI 深度审核仅部分完成；已完成建议已处理，失败批次保留为人工风险提示。");
+            }
+        } else {
+            result.deepSplitStatus = "DISABLED";
         }
 
-        notify(listener, "REUSE_ADJUSTING", 80, "正在按完整拆分表统一调整新增、复用和利旧");
+        notify(listener, "REUSE_ADJUSTING", deepReviewEnabled ? 80 : 62,
+                "正在按完整拆分表统一调整新增、复用和利旧");
         ReuseDegreeAdjustmentResponse reuse = reuseDegreeAiAdjustmentService.adjust(projectId, rows);
         rows = reuse.getRows();
 
-        notify(listener, "RULE_VALIDATING", 94, "正在执行最终确定性规则校验并生成风险提示");
+        notify(listener, "RULE_VALIDATING", deepReviewEnabled ? 94 : 88,
+                "正在执行最终确定性规则校验并生成风险提示");
         RuleValidationResponse validation = ruleValidationService.validate(rows);
         result.rows = rows;
         result.totalCfp = totalCfp(rows);
         result.validation = validation;
         result.ruleVersion = validation.getRuleVersion();
-        result.partial = !"COMPLETED".equals(deepJob.getStatus());
-        if (result.partial) {
-            result.warnings.add("AI 深度审核仅部分完成；已完成建议已处理，失败批次保留为人工风险提示。");
-        }
         notify(listener, "COMPLETED", 100, result.partial
-                ? "智能拆分部分完成，已进入人工审核" : "智能拆分与全部自动校准已完成");
+                ? "智能拆分部分完成，已进入人工审核"
+                : "智能拆分、复用度调整和规则初审已完成");
         return result;
+    }
+
+    public boolean isDeepReviewEnabled() {
+        return deepReviewEnabled;
     }
 
     private DeepSplitJobResponse awaitDeepReview(String projectId,

@@ -277,7 +277,15 @@ class RuleValidationServiceTest {
                 row("新增并查询用户", "E", "用户请求", "用户名称", "新增"),
                 row("新增并查询用户", "W", "用户表", "用户名称", "新增"),
                 row("新增并查询用户", "X", "处理结果", "处理状态", "新增")));
-        assertTrue(hasIssue(compoundCrud, "同时包含多个独立业务动作"), describe(compoundCrud));
+        assertFalse(hasIssue(compoundCrud, "同时包含多个独立业务动作"), describe(compoundCrud));
+
+        RuleValidationResponse managedWorkflowRule = service.validate(Arrays.asList(
+                row("修改盘点单派发规则", "E", "规则修改请求", "规则编号", "新增"),
+                row("修改盘点单派发规则", "R", "盘点单派发规则表", "规则编号", "新增"),
+                row("修改盘点单派发规则", "W", "盘点单派发规则表", "规则编号、规则状态", "新增"),
+                row("修改盘点单派发规则", "X", "规则修改结果", "处理结果", "新增")));
+        assertFalse(hasIssue(managedWorkflowRule, "同时包含多个独立业务动作"),
+                describe(managedWorkflowRule));
 
         RuleValidationResponse wrongOrder = service.validate(Arrays.asList(
                 row("修改订单", "E", "修改请求", "订单编号", "新增"),
@@ -312,6 +320,41 @@ class RuleValidationServiceTest {
         RuleValidationResponse separateModules = service.validate(Arrays.asList(
                 moduleOneEntry, moduleOneWrite, moduleTwoEntry, moduleTwoWrite));
         assertEquals(0, separateModules.getIssueCount(), describe(separateModules));
+    }
+
+    @Test
+    void doesNotRequireWriteForDispatchQueryInXinjiang() {
+        RuleValidationService service = new RuleValidationService();
+        RuleValidationResponse response = service.validate(Arrays.asList(
+                row("查询工单派发信息", "E", "派发查询条件", "工单编号", "新增"),
+                row("查询工单派发信息", "R", "工单派发记录表", "工单编号、派发状态", "新增"),
+                row("查询工单派发信息", "X", "工单派发查询结果", "工单编号、派发状态", "新增")));
+
+        assertFalse(hasCombinationIssue(response, "当前缺少 W"), describe(response));
+        assertFalse(hasIssue(response, "派发/查询"), describe(response));
+    }
+
+    @Test
+    void doesNotRequireWriteWhenExportObjectNameContainsDispatchInXinjiang() {
+        RuleValidationService service = new RuleValidationService();
+        RuleValidationResponse response = service.validate(Arrays.asList(
+                row("导出盘点派发任务统计数据", "E", "导出请求", "规则名称、时间范围", "新增"),
+                row("导出盘点派发任务统计数据", "R", "盘点派发任务统计表", "规则名称、派发时间", "新增"),
+                row("导出盘点派发任务统计数据", "X", "盘点派发任务导出文件", "统计数据", "新增")));
+
+        assertFalse(hasCombinationIssue(response, "当前缺少 W"), describe(response));
+        assertFalse(hasIssue(response, "派发/导出"), describe(response));
+    }
+
+    @Test
+    void standaloneDispatchStillRequiresWrite() {
+        RuleValidationService service = new RuleValidationService();
+        RuleValidationResponse response = service.validate(Arrays.asList(
+                row("派发巡检工单", "E", "派发请求", "工单编号", "新增"),
+                row("派发巡检工单", "R", "巡检工单表", "工单编号、处理人", "新增"),
+                row("派发巡检工单", "X", "派发结果", "处理状态", "新增")));
+
+        assertTrue(hasCombinationIssue(response, "当前缺少 W"), describe(response));
     }
 
     @Test
@@ -377,6 +420,28 @@ class RuleValidationServiceTest {
     }
 
     @Test
+    void requiresSeparateWritesForMultipleExplicitPersistentObjects() {
+        RuleValidationService service = new RuleValidationService();
+        FunctionSplitRow entry = row("调拨分派单出库", "E", "出库请求", "调拨单编号", "新增");
+        FunctionSplitRow combinedWrite = row("调拨分派单出库", "W",
+                "家客终端调拨单表、库存表、全生命周期流转记录表",
+                "出库数量、出库时间、终端编码、库存变动、流转记录信息", "新增");
+        combinedWrite.setSubProcessDescription("更新调拨分派单状态为已出库，并更新库存及全生命周期流转记录");
+        FunctionSplitRow exit = row("调拨分派单出库", "X", "出库结果", "处理结果", "新增");
+
+        RuleValidationResponse response = service.validate(Arrays.asList(entry, combinedWrite, exit));
+
+        assertTrue(hasIssue(response, "单个 W 同时包含 3 个明确持久化数据组"), describe(response));
+        assertTrue(service.generatedBlockingIssues(Arrays.asList(entry, combinedWrite, exit)).stream()
+                .anyMatch(issue -> "数据组".equals(issue.getField())), describe(response));
+
+        FunctionSplitRow oneObjectWrite = row("调拨分派单出库", "W", "家客终端调拨单表",
+                "调拨单状态、出库数量、出库时间", "新增");
+        RuleValidationResponse oneObject = service.validate(Arrays.asList(entry, oneObjectWrite, exit));
+        assertFalse(hasIssue(oneObject, "单个 W 同时包含"), describe(oneObject));
+    }
+
+    @Test
     void flagsFrontendGenericNameAndReferencedAttributesButNotAttributeCount() {
         RuleValidationService service = new RuleValidationService();
         FunctionSplitRow entry = row("翻页", "E", "翻页条件", "页码", "新增");
@@ -392,7 +457,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void treatsPendingAttributesAsMaterialRiskAndRejectsMixedPendingWording() {
+    void treatsWholeCellPendingAsMaterialRiskButAllowsMixedPendingWordingInXinjiang() {
         RuleValidationService service = new RuleValidationService();
         FunctionSplitRow trigger = row("推送公告信息", "E", "定时触发信号", "无业务数据", "新增");
         trigger.setTriggerEvent("定时任务触发");
@@ -409,7 +474,7 @@ class RuleValidationServiceTest {
                 Arrays.asList(trigger, known, pendingSameGroup, mixedPending));
 
         assertTrue(hasIssue(response, "相同数据组“公告数据”已有明确数据属性"), describe(response));
-        assertTrue(hasIssue(response, "混用了“字段名（待确认）”表达"), describe(response));
+        assertFalse(hasIssue(response, "混用了“字段名（待确认）”表达"), describe(response));
         assertFalse(hasIssue(response, "无载荷的定时/时钟触发不应使用“待确认”"), describe(response));
 
         FunctionSplitRow request = row("提交工单处理", "E", "工单请求", "工单编号", "新增");
@@ -419,6 +484,17 @@ class RuleValidationServiceTest {
         RuleValidationResponse genericResponse = service.validate(Arrays.asList(request, pendingResult));
 
         assertTrue(hasIssue(genericResponse, "送审材料尚有字段依据待补充"), describe(genericResponse));
+    }
+
+    @Test
+    void doesNotFlagConfigurationAsExpressionRiskInXinjiang() {
+        RuleValidationService service = new RuleValidationService();
+        FunctionSplitRow entryOnly = row("配置盘点规则", "E", "配置请求", "规则编号", "新增");
+
+        RuleValidationResponse response = service.validate(Arrays.asList(entryOnly));
+
+        assertTrue(response.getStructureRiskCount() > 0, describe(response));
+        assertFalse(hasIssue(response, "表达中出现“配置”"), describe(response));
     }
 
     @Test

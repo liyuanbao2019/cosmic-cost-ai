@@ -155,13 +155,52 @@ final class ActionMovementRule {
     }
 
     private static boolean hasWorkflowAction(String process) {
-        if (containsAny(process, "派发", "派单", "审批", "审核", "确认", "驳回", "撤回", "下发")) {
+        String actionContext = neutralizeWorkflowObjectTerms(process);
+        if (containsAny(actionContext, "派发", "派单", "审批", "审核", "确认", "驳回", "撤回", "下发")) {
             return true;
         }
-        if (!process.contains("发布")) {
+        if (!actionContext.contains("发布")) {
             return false;
         }
-        return !containsAny(process, "发布失败", "发布异常", "发布告警", "发布状态", "未发布", "无法发布");
+        return !containsAny(actionContext, "发布失败", "发布异常", "发布告警", "发布状态", "未发布", "无法发布");
+    }
+
+    /**
+     * Words such as "派发" and "审批" can be either real workflow actions or part of
+     * the managed business object's name. When another explicit CRUD/import/export
+     * action manages objects such as "盘点单派发规则", the embedded workflow word
+     * must not be counted as a second independent action.
+     */
+    private static String neutralizeWorkflowObjectTerms(String process) {
+        if (!containsAny(process,
+                "新增", "新建", "创建", "添加",
+                "删除", "移除", "废止", "作废", "注销",
+                "修改", "编辑", "更新", "变更", "调整", "配置", "绑定", "解绑",
+                "启用", "停用", "恢复", "清除", "关闭", "解锁", "归档",
+                "查询", "查看", "检索", "搜索", "列表", "详情",
+                "导入", "导出", "下载", "预览")) {
+            return process;
+        }
+        String result = process;
+        String[] workflowWords = {"派发", "派单", "审批", "审核", "确认", "驳回", "撤回", "下发", "发布"};
+        String[] objectSuffixes = {"规则", "配置", "策略", "模板", "记录", "状态", "结果", "列表", "详情"};
+        for (String workflow : workflowWords) {
+            if (hasExplicitWorkflowConnector(process, workflow)) {
+                continue;
+            }
+            for (String suffix : objectSuffixes) {
+                result = result.replace(workflow + suffix, suffix);
+            }
+        }
+        return result;
+    }
+
+    private static boolean hasExplicitWorkflowConnector(String process, String workflow) {
+        return containsAny(process,
+                "并" + workflow, "并且" + workflow, "同时" + workflow,
+                "随后" + workflow, "然后" + workflow, "再" + workflow,
+                "后" + workflow, "执行" + workflow, "进行" + workflow,
+                workflow + "并", workflow + "后再", workflow + "后");
     }
 
     static String canonicalPromptRules() {
@@ -170,6 +209,7 @@ final class ActionMovementRule {
                 + "- 新建/创建/添加按新增处理；移除/作废/注销按删除处理。只有明确关联读取其他持久化数据组时，新增/删除才扩展 R。\n"
                 + "- 修改类通常为 E-R-W-X；编辑/更新/业务配置/绑定解绑/启停/恢复清除/关闭按修改处理。若原文证明无需读取持久化原数据即可直接更新，可为 E-W-X，禁止为凑模板补 R。\n"
                 + "- 流程派发、发布、审批、审核、撤回按 E-R-W-X 处理。\n"
+                + "- 新疆项目中，查询、导出、发送等以 R/X 为主的功能或业务对象名称同时含“派发/派单”等词时，不得把动作模板机械合并后强制补 W，也不提示“派发/查询”“派发/导出”等组合缺少 W；只有独立派发功能，或原文明示更新派发状态、写入派发结果等持久化动作时才计 W。\n"
                 + "- 临时生成且下载后删除为 E-R-X，写入服务器并保留为 E-R-W-X；即文件写入服务器并保留为 E-R-W-X。\n"
                 + "- 定时文件采集直接保存文件并写业务表时，也可合并为 E-W-W。\n"
                 + "- 定时统计/汇总并保存：E-R-W；同时发送/推送/通知时必须增加 X，以 E-R-W-X 结束。\n"
@@ -180,7 +220,9 @@ final class ActionMovementRule {
                 + "- 外部平台稍后以回调/上报接口触发本系统时属于新的独立触发，必须另拆功能过程；不得把异步回调伪装为同步响应 E。\n"
                 + "- E 描述按真实发起方使用自然业务语言：用户/UI 主动触发写“发起/提交”，外部平台上报或回调才写“接收”，X 后同步响应写“获取同步响应数据”；禁止机械拼接“接收+功能过程名+请求”。\n"
                 + "- 不得只根据“同步、导出、采集、发送”等名称机械禁止或补充 R/W/X。\n"
-                + "- 同一功能名包含多个独立增删改查、导入导出或流程动作时，必须核对是否应拆成多个功能过程，不能跳过组合校验。\n"
+                + "- 新疆项目暂不因功能过程名称同时出现多个动作词直接提示风险，也不因出现“配置”提示表达风险；只有原文能够证明存在不同触发、不同用户目标或不同业务结果时，才拆成多个功能过程。\n"
+                + "- 一个 R/W 数据移动只能对应一个逻辑持久化数据组。同一触发、同一用户目标内，原文明示读取或更新多个不同业务对象、业务表、台账或记录时，功能过程保持一个，但必须按对象分别拆成多个 R/W；同一对象仅更新多个字段仍只计一个 W。"
+                + "例如“更新调拨分派单状态，并更新库存及全生命周期流转记录”应分别写调拨分派单、库存、全生命周期流转记录 3 个 W，不得合并到一个 W 的数据组中。\n"
                 + "- 顺序要求：首行必须是初始触发 E，末行为 W/X；禁止无依据的连续 E。X 后允许有依据的同步外部响应 E，其他 R/W/X 按真实业务依赖排序。\n"
                 + "- 不设置最多 4 行限制；5、6、12 行等长链路只要每一移动都有原文、边界和同一业务目标依据即可保留。\n";
     }

@@ -29,15 +29,17 @@ public class FileController {
     @Operation(summary = "上传需求说明书", description = "支持 docx 和 pdf，保存原始文件并生成项目元数据。")
     @PostMapping("/upload")
     public ApiResponse<UploadResponse> upload(@RequestParam("file") MultipartFile file,
-                                               @RequestParam(value = "projectName", required = false) String projectName) {
-        return ApiResponse.ok(fileStorageService.upload(file, projectName));
+                                               @RequestParam(value = "projectName", required = false) String projectName,
+                                               @RequestParam(value = "splitLevel", defaultValue = "REQUIREMENT") String splitLevel) {
+        return ApiResponse.ok(fileStorageService.upload(file, projectName, splitLevel));
     }
 
     @Operation(summary = "Import reviewed split Excel", description = "Import a pre-split Excel file and load it into the normal review workflow.")
     @PostMapping("/upload-split-excel")
     public ApiResponse<ReviewResponse> uploadSplitExcel(@RequestParam("file") MultipartFile file,
                                                         @RequestParam(value = "projectName", required = false) String projectName,
+                                                        @RequestParam(value = "splitLevel", defaultValue = "REQUIREMENT") String splitLevel,
                                                         @RequestParam(value = "polishFunctionDescription", defaultValue = "false") boolean polishFunctionDescription) {
-        return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName, polishFunctionDescription));
+        return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName, splitLevel, polishFunctionDescription));
     }
 }

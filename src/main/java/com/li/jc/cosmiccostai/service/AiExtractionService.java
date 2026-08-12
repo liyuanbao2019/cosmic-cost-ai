@@ -203,6 +203,11 @@ public class AiExtractionService {
         metadata.setExtractedFunctionsPath(extractedPath.toString());
         metadata.setCosmicResultsPath(null);
         metadata.setFunctionSplitRowsPath(null);
+        metadata.setFunctionCount(null);
+        metadata.setIssueCount(null);
+        metadata.setErrorCount(null);
+        metadata.setRiskCount(null);
+        metadata.setSuggestionCount(null);
         metadata.setExcelOutputPath(null);
         metadata.setBusinessRequirementOutputPath(null);
         metadata.setWordOutputPath(null);
@@ -355,7 +360,7 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "1. 以COSMIC功能过程为粒度。一个功能过程应由功能用户触发，并能形成一组完整的数据移动响应。"
                 + System.lineSeparator()
-                + "2. 新增、修改、删除、查询、审核、发布、撤回、配置、发送、推送、导入、导出等不同业务动作，应拆成不同功能。"
+                + "2. 新疆项目不得仅因功能名称同时出现新增、修改、删除、查询、审核、发布、撤回、配置、发送、推送、导入、导出等多个动作词就强制拆分；只有存在不同触发、不同用户目标或不同业务结果时才拆成不同功能。"
                 + System.lineSeparator()
                 + "3. 同一业务动作涉及多个明确对象或渠道时，应按对象或渠道拆分；但不要把同一触发、同一业务目标下的输入、外部同步往返、读取、写入、输出拆成多个功能。"
                 + "本系统向外部系统发送请求 X 后，对方在同一调用链中同步返回数据时，响应进入本系统可以再次记 E；只有对方稍后以回调/上报接口形成新的独立触发时，才必须另拆功能过程。"
@@ -390,7 +395,10 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "16. 校验、计算、解析、匹配、过滤、排序是数据操作，不单独计数据移动；只能根据真实跨边界输入输出或持久化读写计 E/R/W/X。"
                 + System.lineSeparator()
-                + "17. 同一功能过程中相同数据组传递同一批数据时，必须完整复用已明确属性。无载荷的定时/时钟触发 E 填“无业务数据”。只有原文和同一功能过程上下文都无法识别任何属性时才整格填“待确认”；禁止“字段名（待确认）”混写，禁止虚构字段或写“同上/见上”。"
+                + "17. 同一功能过程中相同数据组传递同一批数据时，必须完整复用已明确属性。无载荷的定时/时钟触发 E 填“无业务数据”。新疆项目暂不因“字段名（待确认）”混合表达提示风险；能从原文确认的属性仍应优先明确填写，禁止虚构字段或写“同上/见上”。"
+                + System.lineSeparator()
+                + "17.1 一个 R/W 只能对应一个逻辑持久化数据组。同一用户目标内原文明示读取或更新多个不同业务对象时，不拆成功能过程，但必须按对象分别输出多个 R/W；同一对象只更新多个字段时仍为一个 W。"
+                + "例如“更新调拨分派单状态为已出库，并更新库存及全生命周期流转记录”必须输出调拨分派单、库存、全生命周期流转记录 3 个独立 W，禁止合并成一个 W。"
                 + System.lineSeparator()
                 + "18. 【需求细则】每个非空段落带有 REQ-Lxxxx 编号。每个功能和每个 movement 必须填写实际支持它的 sourceReferences，并在 evidence 中摘录对应原文；不得编造不存在的编号。"
                 + System.lineSeparator()
@@ -601,9 +609,11 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "必须先按历史评审判例与当前输出全局语义查重，再判新增/复用/利旧；功能级重复为 0，子过程级复用为 0.33，不能通过改名、字段换序或通用占位属性规避。"
                 + System.lineSeparator()
-                + "同一功能过程中相同数据组传递同一批数据时复用已明确属性；无载荷定时触发填“无业务数据”。只有穷尽原文和上下文仍无任何属性时才整格填“待确认”，不得混写“字段名（待确认）”、虚构字段或写“同上/见上”。"
+                + "同一功能过程中相同数据组传递同一批数据时复用已明确属性；无载荷定时触发填“无业务数据”。新疆项目暂不因“字段名（待确认）”混合表达提示风险；仍不得虚构字段或写“同上/见上”。"
                 + System.lineSeparator()
-                + "如果需求中出现校验、解析、过滤、刷新、日志、提示、调用、接口、配置、页面设计等表达，只有原文明示伴随真实跨边界或持久化数据移动时才转写为 E/R/W/X；纯数据操作、技术实现或界面动作不得强行计量。"
+                + "一个 R/W 只能对应一个逻辑持久化数据组；原文明示同一功能过程更新多个不同业务对象时，必须按对象分别拆成多个 R/W，同一对象的多个字段不得反向拆细。"
+                + System.lineSeparator()
+                + "如果需求中出现校验、解析、过滤、刷新、日志、提示、调用、接口、页面设计等表达，只有原文明示伴随真实跨边界或持久化数据移动时才转写为 E/R/W/X；纯数据操作、技术实现或界面动作不得强行计量。业务配置按普通业务动作依据真实 E/R/W/X 判断，不因“配置”一词单独提示风险。"
                 + System.lineSeparator()
                 + "不要直接输出“规则校验”“日志”“调用”“提示”“页面设计”等抽象功能名；只有具备独立功能用户、触发、业务对象、数据组和结果时才生成对应功能过程。"
                 + System.lineSeparator()

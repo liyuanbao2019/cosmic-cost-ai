@@ -30,7 +30,7 @@ class SingleSmartSplitServiceTest {
         when(pipeline.runDocument(eq("P1"), eq(""), any(SmartSplitPipelineService.StageListener.class)))
                 .thenAnswer(invocation -> {
                     SmartSplitPipelineService.StageListener listener = invocation.getArgument(2);
-                    listener.onStage("DEEP_REVIEWING", 50, "正在深度审核");
+                    listener.onStage("REUSE_ADJUSTING", 62, "正在调整复用度");
                     return new SmartSplitPipelineService.PipelineResult();
                 });
         SingleSmartSplitService service = new SingleSmartSplitService(
@@ -42,6 +42,7 @@ class SingleSmartSplitServiceTest {
         SmartSplitJobResponse saved = service.get("P1");
 
         assertEquals("COMPLETED", saved.getStatus());
+        assertEquals("DISABLED", saved.getDeepSplitStatus());
         assertEquals(100, saved.getProgressPercent());
         assertEquals(started.getJobId(), saved.getJobId());
         assertTrue(Files.exists(temporaryProject.resolve("smart-split/state.json")));

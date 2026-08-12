@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>项目列表 - COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260617-project-list-3">
+  <link rel="stylesheet" href="/app.css?v=20260812-project-list-4">
 </head>
 
 <body>
@@ -22,7 +22,7 @@
             <p class="project-list-subtitle">查看历史项目、风险概况和导出状态，继续进入审核编辑。</p>
           </div>
           <div class="project-list-actions">
-            <button type="button" class="ghost" onclick="location.href='/models.html'">大模型管理</button>
+            <a class="button-link ghost" href="/models.html" target="_blank" rel="noopener noreferrer">大模型管理</a>
             <button type="button" class="ghost" onclick="location.href='/index.html'">返回工作台</button>
             <button type="button" onclick="loadProjects()">刷新</button>
           </div>
@@ -30,7 +30,21 @@
       </div>
 
       <div class="project-list-filters">
-        <input id="projectSearch" type="search" placeholder="搜索项目名称、文件名、项目ID" oninput="resetProjectPage()">
+        <input id="projectSearch" type="search" placeholder="搜索项目名称、文件名、项目ID、批次ID" oninput="scheduleProjectSearch()">
+        <select id="projectNameFilter" onchange="resetProjectPage()">
+          <option value="">全部项目名称</option>
+          <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
+          <option value="2026年家客终端扩容">2026年家客终端扩容</option>
+          <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
+          <option value="26年共享采集">26年共享采集</option>
+          <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
+          <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
+        </select>
+        <select id="splitLevelFilter" onchange="resetProjectPage()">
+          <option value="">全部拆分级别</option>
+          <option value="PROJECT">项目级</option>
+          <option value="REQUIREMENT">需求级</option>
+        </select>
         <select id="sourceFilter" onchange="resetProjectPage()">
           <option value="">全部来源</option>
           <option value="DOCUMENT">原始需求文档</option>
@@ -62,8 +76,8 @@
       </div>
 
       <div class="project-list-summary">
-        <div><b id="projectTotal">0</b><span>项目总数</span></div>
-        <div><b id="projectVisible">0</b><span>当前显示</span></div>
+        <div><b id="projectTotal">0</b><span>符合条件</span></div>
+        <div><b id="projectVisible">0</b><span>当前页</span></div>
         <div><b id="projectWithRisks">0</b><span>有初审提示</span></div>
         <div><b id="projectExported">0</b><span>已完整导出</span></div>
       </div>
@@ -76,6 +90,7 @@
                 <input id="selectPageProjects" type="checkbox" onchange="togglePageProjects(this.checked)" aria-label="选择当前页项目">
               </th>
               <th>项目名称</th>
+              <th>拆分级别</th>
               <th>来源</th>
               <th>状态</th>
               <th>功能过程</th>
@@ -88,7 +103,7 @@
           </thead>
           <tbody id="projectTableBody">
             <tr>
-              <td class="empty" colspan="10">正在加载项目...</td>
+              <td class="empty" colspan="11">正在加载项目...</td>
             </tr>
           </tbody>
         </table>
@@ -117,6 +132,9 @@
     let allProjects = [];
     let currentPage = 1;
     let pageSize = 20;
+    let totalPages = 1;
+    let filteredTotal = 0;
+    let searchTimer = null;
     let selectedProjectIds = {};
 
     document.addEventListener("DOMContentLoaded", loadProjects);
@@ -124,11 +142,17 @@
     async function loadProjects() {
       setProjectMessage("正在加载项目列表...");
       try {
-        const response = await request("/api/projects");
+        const response = await request(buildProjectListUrl());
         allProjects = ((response.data && response.data.projects) || []).map(normalizeProject);
-        pruneSelectedProjects();
-        fillStatusFilter(allProjects);
-        currentPage = 1;
+        const data = response.data || {};
+        currentPage = Number(data.page || currentPage || 1);
+        totalPages = Number(data.totalPages || 1);
+        filteredTotal = Number(data.total || 0);
+        fillStatusFilter(data.statuses || []);
+        $("projectTotal").textContent = filteredTotal;
+        $("projectVisible").textContent = allProjects.length;
+        $("projectWithRisks").textContent = Number(data.totalWithRisks || 0);
+        $("projectExported").textContent = Number(data.totalExported || 0);
         renderProjects();
         setProjectMessage("", true);
       } catch (error) {
@@ -137,28 +161,16 @@
     }
 
     function renderProjects() {
-      const visible = filteredProjects();
-      const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
-      if (currentPage > totalPages) {
-        currentPage = totalPages;
-      }
-      if (currentPage < 1) {
-        currentPage = 1;
-      }
-      const pageItems = visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+      const pageItems = allProjects;
       const tbody = $("projectTableBody");
       tbody.innerHTML = "";
-      $("projectTotal").textContent = allProjects.length;
-      $("projectVisible").textContent = visible.length;
-      $("projectWithRisks").textContent = allProjects.filter(function (item) { return item.issueCount > 0; }).length;
-      $("projectExported").textContent = allProjects.filter(function (item) { return item.exportStatus === "全部已导出"; }).length;
-      $("pageInfo").textContent = "第 " + currentPage + " / " + totalPages + " 页，共 " + visible.length + " 条";
+      $("pageInfo").textContent = "第 " + currentPage + " / " + totalPages + " 页，共 " + filteredTotal + " 条";
       updateSelectionState(pageItems);
-      if (!visible.length) {
+      if (!pageItems.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.className = "empty";
-        td.colSpan = 10;
+        td.colSpan = 11;
         td.textContent = "没有符合筛选条件的项目。";
         tr.appendChild(td);
         tbody.appendChild(tr);
@@ -168,7 +180,8 @@
         const tr = document.createElement("tr");
         tr.innerHTML =
           "<td class=\"project-check-cell\"><input type=\"checkbox\" " + (selectedProjectIds[project.projectId] ? "checked" : "") + " onchange=\"toggleProjectSelection('" + escapeJs(project.projectId) + "', this.checked)\" aria-label=\"选择项目\"></td>"
-          + "<td><b>" + escapeHtml(project.projectName || project.projectId) + "</b><span class=\"project-id\">" + escapeHtml(project.projectId) + "</span><span class=\"project-file\">" + escapeHtml(project.sourceFileName || "-") + "</span></td>"
+          + "<td><b>" + escapeHtml(project.projectName || project.projectId) + "</b><span class=\"project-id\">" + escapeHtml(project.projectId) + (project.batchId ? " · " + escapeHtml(project.batchId) : "") + "</span><span class=\"project-file\">" + escapeHtml(project.sourceFileName || "-") + "</span></td>"
+          + "<td>" + splitLevelBadge(project.splitLevel) + "</td>"
           + "<td>" + sourceBadge(project.sourceType) + "</td>"
           + "<td><span class=\"status-pill\">" + escapeHtml(project.status || "-") + "</span></td>"
           + "<td><b>" + escapeHtml(project.functionCount || 0) + "</b></td>"
@@ -176,80 +189,59 @@
           + "<td>" + exportSummary(project) + "</td>"
           + "<td>" + escapeHtml(project.createdAt || "-") + "</td>"
           + "<td>" + escapeHtml(project.updatedAt || "-") + "</td>"
-          + "<td><div class=\"project-row-actions\"><button type=\"button\" class=\"secondary\" onclick=\"openProject('" + escapeJs(project.projectId) + "')\">进入</button>"
+          + "<td><div class=\"project-row-actions\"><button type=\"button\" class=\"secondary\" onclick=\"openProject('" + escapeJs(project.projectId) + "','" + escapeJs(project.splitLevel) + "','" + escapeJs(project.batchId) + "')\">进入</button>"
           + "<button type=\"button\" class=\"ghost danger\" onclick=\"deleteProject('" + escapeJs(project.projectId) + "', '" + escapeJs(project.projectName || project.projectId) + "')\">删除</button></div></td>";
         tbody.appendChild(tr);
       });
     }
 
     function currentPageItems() {
-      const visible = filteredProjects();
-      const totalPages = Math.max(1, Math.ceil(visible.length / pageSize));
-      currentPage = Math.min(totalPages, Math.max(1, currentPage));
-      return visible.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+      return allProjects;
     }
 
-    function filteredProjects() {
-      const search = text($("projectSearch").value).toLowerCase();
-      const source = $("sourceFilter").value;
-      const status = $("statusFilter").value;
-      const risk = $("riskFilter").value;
-      const exportStatus = $("exportFilter").value;
-      return allProjects.filter(function (item) {
-        if (source && item.sourceType !== source) {
-          return false;
-        }
-        if (status && item.status !== status) {
-          return false;
-        }
-        if (exportStatus && item.exportStatus !== exportStatus) {
-          return false;
-        }
-        if (risk === "ERROR" && item.errorCount <= 0) {
-          return false;
-        }
-        if (risk === "RISK" && item.riskCount <= 0) {
-          return false;
-        }
-        if (risk === "OK" && item.issueCount > 0) {
-          return false;
-        }
-        if (!search) {
-          return true;
-        }
-        return [item.projectId, item.projectName, item.sourceFileName, item.status].some(function (value) {
-          return text(value).toLowerCase().indexOf(search) >= 0;
-        });
+    function buildProjectListUrl() {
+      const params = new URLSearchParams();
+      const values = {
+        search: $("projectSearch").value,
+        projectName: $("projectNameFilter").value,
+        splitLevel: $("splitLevelFilter").value,
+        sourceType: $("sourceFilter").value,
+        status: $("statusFilter").value,
+        risk: $("riskFilter").value,
+        exportStatus: $("exportFilter").value
+      };
+      Object.keys(values).forEach(function (key) {
+        if (text(values[key])) params.set(key, text(values[key]));
       });
+      params.set("page", currentPage);
+      params.set("pageSize", pageSize);
+      return "/api/projects?" + params.toString();
+    }
+
+    function scheduleProjectSearch() {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(resetProjectPage, 250);
     }
 
     function resetProjectPage() {
       currentPage = 1;
-      renderProjects();
+      loadProjects();
     }
 
     function changePageSize() {
       pageSize = parseInt($("pageSizeSelect").value, 10) || 20;
       currentPage = 1;
-      renderProjects();
+      loadProjects();
     }
 
     function goProjectPage(delta) {
-      const totalPages = Math.max(1, Math.ceil(filteredProjects().length / pageSize));
       currentPage = Math.min(totalPages, Math.max(1, currentPage + delta));
-      renderProjects();
+      loadProjects();
     }
 
-    function fillStatusFilter(projects) {
+    function fillStatusFilter(statuses) {
       const select = $("statusFilter");
       const current = select.value;
-      const statuses = [];
-      projects.forEach(function (item) {
-        if (item.status && statuses.indexOf(item.status) < 0) {
-          statuses.push(item.status);
-        }
-      });
-      statuses.sort();
       select.innerHTML = "<option value=\"\">全部状态</option>";
       statuses.forEach(function (status) {
         const option = document.createElement("option");
@@ -264,6 +256,8 @@
       return Object.assign({
         projectId: "",
         projectName: "",
+        splitLevel: "REQUIREMENT",
+        batchId: "",
         sourceFileName: "",
         sourceType: "",
         status: "",
@@ -282,6 +276,12 @@
       return "<span class=\"source-badge " + className + "\">" + textValue + "</span>";
     }
 
+    function splitLevelBadge(splitLevel) {
+      const projectLevel = splitLevel === "PROJECT";
+      return "<span class=\"split-level-badge " + (projectLevel ? "project" : "requirement") + "\">"
+        + (projectLevel ? "项目级" : "需求级") + "</span>";
+    }
+
     function riskSummary(project) {
       if (!project.issueCount) {
         return "<span class=\"risk-ok\">无提示</span>";
@@ -295,8 +295,10 @@
       return "<span class=\"export-pill " + (done ? "done" : "") + "\">" + escapeHtml(project.exportStatus || "未导出") + "</span>";
     }
 
-    function openProject(projectId) {
-      location.href = "/index.html?projectId=" + encodeURIComponent(projectId);
+    function openProject(projectId, splitLevel, batchId) {
+      location.href = splitLevel === "PROJECT" && batchId
+        ? "/index.html?batchId=" + encodeURIComponent(batchId)
+        : "/index.html?projectId=" + encodeURIComponent(projectId);
     }
 
     function toggleProjectSelection(projectId, checked) {
@@ -369,9 +371,8 @@
       setProjectMessage("正在删除项目...");
       try {
         await request("/api/projects/" + encodeURIComponent(projectId), { method: "DELETE" });
-        allProjects = allProjects.filter(function (item) { return item.projectId !== projectId; });
         delete selectedProjectIds[projectId];
-        renderProjects();
+        await loadProjects();
         setProjectMessage("项目已删除。");
       } catch (error) {
         setProjectMessage(error.message || "删除项目失败。", false, true);
@@ -396,9 +397,8 @@
           body: JSON.stringify(ids)
         });
         const deletedCount = response.data || ids.length;
-        allProjects = allProjects.filter(function (item) { return ids.indexOf(item.projectId) < 0; });
         selectedProjectIds = {};
-        renderProjects();
+        await loadProjects();
         setProjectMessage("已删除 " + deletedCount + " 个项目。");
       } catch (error) {
         setProjectMessage(error.message || "批量删除项目失败。", false, true);

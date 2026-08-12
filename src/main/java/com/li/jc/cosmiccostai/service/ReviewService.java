@@ -2,6 +2,7 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
+import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.model.CosmicMovement;
 import com.li.jc.cosmiccostai.model.CosmicResult;
 import com.li.jc.cosmiccostai.model.ExtractedFunction;
@@ -127,12 +128,28 @@ public class ReviewService {
 
         metadata.setFunctionSplitRowsPath(splitPath.toString());
         metadata.setRuleVersion(ruleValidationService.getRuleVersion());
+        updateListSummary(metadata, rows);
         metadata.setStatus(status);
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
         fileStorageService.saveMetadata(metadata);
         log.info("Saved review rows. projectId={}, status={}, rows={}, elapsedMs={}",
                 projectId, status, rows.size(), System.currentTimeMillis() - startedAt);
         return buildResponse(metadata, results, rows);
+    }
+
+    private void updateListSummary(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+        Set<String> processes = new LinkedHashSet<String>();
+        for (FunctionSplitRow row : rows) {
+            if (StringUtils.hasText(row.getFunctionProcess())) {
+                processes.add(row.getFunctionProcess().trim());
+            }
+        }
+        RuleValidationResponse validation = ruleValidationService.validate(rows);
+        metadata.setFunctionCount(processes.size());
+        metadata.setIssueCount(validation.getIssueCount());
+        metadata.setErrorCount(validation.getErrorCount());
+        metadata.setRiskCount(validation.getRiskCount());
+        metadata.setSuggestionCount(validation.getSuggestionCount());
     }
 
     private List<FunctionSplitRow> readOrCreateSplitRows(ProjectMetadata metadata) {

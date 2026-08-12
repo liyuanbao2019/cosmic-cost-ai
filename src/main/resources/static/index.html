@@ -99,7 +99,7 @@
       <div class="review-stage-dialog-header">
         <div>
           <h3 id="review-stage-dialog-title" class="dialog-title">AI 智能拆分内部流程</h3>
-          <p id="reviewStageSubtitle">查看 COSMIC 初拆、深度审核、复用度调整和规则初审的实时进度</p>
+          <p id="reviewStageSubtitle">查看 COSMIC 初拆、复用度调整和规则初审的实时进度</p>
         </div>
         <div class="review-stage-dialog-actions">
           <button id="smartSplitPromptBtn" type="button" class="secondary" onclick="openAiPromptFromProgress()">查看 / 修改提示词</button>
@@ -119,8 +119,8 @@
         <div class="smart-split-dialog-progress"><span id="smartSplitDialogProgressBar"></span></div>
         <p id="smartSplitDialogMessage">确认 AI 输入并开始拆分后，这里会显示每个内部环节的实时状态。</p>
         <div class="smart-split-dialog-stats">
-          <span>深审建议 <b id="smartSplitDialogSuggestions">-</b></span>
-          <span>自动采纳 <b id="smartSplitDialogApplied">-</b></span>
+          <span id="smartSplitDialogSuggestionStat" class="hidden">深审建议 <b id="smartSplitDialogSuggestions">-</b></span>
+          <span id="smartSplitDialogAppliedStat" class="hidden">自动采纳 <b id="smartSplitDialogApplied">-</b></span>
           <span>确定性错误 <b id="smartSplitDialogErrors">-</b></span>
           <span>结构风险 <b id="smartSplitDialogRisks">-</b></span>
         </div>
@@ -133,14 +133,14 @@
             <p id="stageAiSplitText">把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
           </div>
         </article>
-        <article id="smartStageDeepReview" class="smart-split-stage pending">
+        <article id="smartStageDeepReview" class="smart-split-stage pending hidden">
           <span class="review-stage-index">2</span>
           <div>
             <div class="smart-split-stage-title"><b id="stageDeepReviewTitle">AI 深度审核</b><span class="smart-split-stage-state">等待</span></div>
             <p id="stageDeepReviewText">对照原文审查漏拆、错拆、重复计量和 E/R/W/X 缏失；有证据、无冲突且不增加确定性错误的建议会自动采纳。</p>
           </div>
         </article>
-        <article id="smartStageApply" class="smart-split-stage pending">
+        <article id="smartStageApply" class="smart-split-stage pending hidden">
           <span class="review-stage-index">3</span>
           <div>
             <div class="smart-split-stage-title"><b>安全建议采纳</b><span class="smart-split-stage-state">等待</span></div>
@@ -148,14 +148,14 @@
           </div>
         </article>
         <article id="smartStageReuse" class="smart-split-stage pending">
-          <span class="review-stage-index">4</span>
+          <span id="smartStageReuseIndex" class="review-stage-index">2</span>
           <div>
             <div class="smart-split-stage-title"><b>复用度 AI 调整</b><span class="smart-split-stage-state">等待</span></div>
             <p>按最终全表比较功能目标、业务边界和审核三要素，统一校准新增、复用和利旧。</p>
           </div>
         </article>
         <article id="smartStageRules" class="smart-split-stage pending">
-          <span class="review-stage-index">5</span>
+          <span id="smartStageRulesIndex" class="review-stage-index">3</span>
           <div>
             <div class="smart-split-stage-title"><b>规则初审</b><span class="smart-split-stage-state">等待</span></div>
             <p>逐行检查必填项、E/R/W/X、过程结构、CFP 映射等确定性问题，并把其它结构风险带入人工审核。</p>
@@ -163,8 +163,8 @@
         </article>
       </div>
       <div class="review-stage-note">
-        <b>统一执行顺序：</b><span>COSMIC 初拆 → AI 深度审核 → 安全建议采纳 → 复用度调整 → 规则初审。</span>
-        <span id="reviewStageNoteText">页面只保留一个 AI 智能拆分节点；人工大幅修改表格后，仍可使用“重新执行深度审核”。</span>
+        <b>统一执行顺序：</b><span id="smartSplitStageOrder">COSMIC 初拆 → 复用度调整 → 规则初审。</span>
+        <span id="reviewStageNoteText">AI 深度审核已暂时关闭，流程不会发起深审模型请求。</span>
       </div>
     </div>
   </div>
@@ -189,8 +189,8 @@
         <div class="panel-title-row">
           <h2>上传需求文档</h2>
           <div class="panel-title-actions">
-            <button type="button" class="project-list-entry" onclick="location.href='/models.html'">大模型管理</button>
-            <button type="button" class="project-list-entry" onclick="location.href='/projects.html'">项目列表</button>
+            <a class="button-link project-list-entry" href="/models.html" target="_blank" rel="noopener noreferrer">大模型管理</a>
+            <a class="button-link project-list-entry" href="/projects.html" target="_blank" rel="noopener noreferrer">项目列表</a>
             <span id="projectBadge" class="badge muted">未上传</span>
           </div>
         </div>
@@ -492,7 +492,7 @@
         <span class="action-label">功能区域：</span>
         <div class="primary-tools">
           <button type="button" class="secondary" onclick="saveReview()">保存</button>
-            <button id="deepSplitBtn" type="button" class="deep-split-primary" title="智能拆分已自动执行过一次深度审核；仅在人工大幅修改表格后需要重新执行。" onclick="startDeepSplitReview()">重新执行深度审核</button>
+            <button id="deepSplitBtn" type="button" class="deep-split-primary hidden" title="AI 深度审核当前已关闭" onclick="startDeepSplitReview()">重新执行深度审核</button>
           <button type="button" onclick="insertReviewRow('above')">上方插入</button>
           <button type="button" onclick="insertReviewRow('below')">下方插入</button>
           <button type="button" class="ghost" onclick="copySelectedRows()">复制选中</button>
@@ -693,11 +693,43 @@
       showAiPrompt();
     }
 
+    function smartSplitDeepReviewEnabled(job) {
+      return !!(job && job.deepSplitStatus !== "DISABLED");
+    }
+
+    function applySmartSplitDeepReviewMode(job) {
+      const enabled = smartSplitDeepReviewEnabled(job);
+      ["smartStageDeepReview", "smartStageApply", "smartSplitDialogSuggestionStat",
+        "smartSplitDialogAppliedStat", "deepSplitBtn"].forEach(function (id) {
+        const element = $(id);
+        if (element) {
+          element.classList.toggle("hidden", !enabled);
+        }
+      });
+      if (!enabled && $("deepSplitPanel")) {
+        $("deepSplitPanel").classList.add("hidden");
+      }
+      if ($("smartStageReuseIndex")) {
+        $("smartStageReuseIndex").textContent = enabled ? "4" : "2";
+      }
+      if ($("smartStageRulesIndex")) {
+        $("smartStageRulesIndex").textContent = enabled ? "5" : "3";
+      }
+      if ($("smartSplitStageOrder")) {
+        const firstStage = isCurrentProjectExcelMode() ? "Excel 载入" : "COSMIC 初拆";
+        $("smartSplitStageOrder").textContent = enabled
+          ? firstStage + " → AI 深度审核 → 安全建议采纳 → 复用度调整 → 规则初审。"
+          : firstStage + " → 复用度调整 → 规则初审。";
+      }
+      return enabled;
+    }
+
     function renderSmartSplitDialog(job) {
       const statusElement = $("smartSplitDialogStatus");
       if (!statusElement) {
         return;
       }
+      const deepReviewEnabled = applySmartSplitDeepReviewMode(job);
       const status = job && job.status || "IDLE";
       const progress = job ? Math.max(0, Math.min(100, Number(job.progressPercent) || 0)) : 0;
       const statusText = {
@@ -720,8 +752,10 @@
       $("smartSplitDialogErrors").textContent = job ? Number(job.errorCount || 0) : "-";
       $("smartSplitDialogRisks").textContent = job ? Number(job.structureRiskCount || 0) : "-";
 
-      const stages = ["smartStageCosmic", "smartStageDeepReview", "smartStageApply", "smartStageReuse", "smartStageRules"];
-      let currentIndex = smartSplitInternalStageIndex(job && job.stage, progress);
+      const stages = deepReviewEnabled
+        ? ["smartStageCosmic", "smartStageDeepReview", "smartStageApply", "smartStageReuse", "smartStageRules"]
+        : ["smartStageCosmic", "smartStageReuse", "smartStageRules"];
+      let currentIndex = smartSplitInternalStageIndex(job && job.stage, progress, deepReviewEnabled);
       const completed = status === "COMPLETED" || status === "PARTIAL";
       stages.forEach(function (id, index) {
         let state = "pending";
@@ -736,7 +770,17 @@
       });
     }
 
-    function smartSplitInternalStageIndex(stage, progress) {
+    function smartSplitInternalStageIndex(stage, progress, deepReviewEnabled) {
+      if (!deepReviewEnabled) {
+        if (stage === "REUSE_ADJUSTING") return 1;
+        if (stage === "RULE_VALIDATING") return 2;
+        if (stage === "COMPLETED") return 3;
+        if (stage === "FAILED") {
+          if (progress >= 88) return 2;
+          if (progress >= 62) return 1;
+        }
+        return stage ? 0 : -1;
+      }
       if (stage === "DEEP_REVIEWING" || stage === "DEEP_REVIEW_RETRYING") return 1;
       if (stage === "APPLYING_DEEP_REVIEW") return 2;
       if (stage === "REUSE_ADJUSTING") return 3;
@@ -1015,11 +1059,8 @@
         // 没有智能拆分任务时，继续兼容升级前的 AI/COSMIC 阶段状态。
       }
       try {
-        const response = await request("/api/projects");
-        const projects = response.data && response.data.projects || [];
-        const project = projects.find(function (item) {
-          return item.projectId === projectId;
-        });
+        const response = await request("/api/projects/" + encodeURIComponent(projectId));
+        const project = response.data || {};
         const status = project && project.status || "";
         if (status === "AI_SPLITTING" || status === "EXTRACTED" || status === "COSMIC_SPLITTING") {
           setAiCosmicSplitRunning(true, status === "AI_SPLITTING" ? "ai" : "cosmic");
@@ -1055,11 +1096,8 @@
         } catch (error) {
           // 没有持久化智能拆分任务时，继续使用旧阶段状态恢复逻辑。
         }
-        const response = await request("/api/projects");
-        const projects = response.data && response.data.projects || [];
-        const project = projects.find(function (item) {
-          return item.projectId === currentProjectId;
-        });
+        const response = await request("/api/projects/" + encodeURIComponent(currentProjectId));
+        const project = response.data || {};
         const status = project && project.status || "";
         if (status === "AI_SPLITTING") {
           setAiCosmicSplitRunning(true, "ai", false);
@@ -1133,10 +1171,15 @@
 
     function updateReviewStageGuide() {
       const excelMode = isCurrentProjectExcelMode();
+      const deepReviewEnabled = applySmartSplitDeepReviewMode(currentSmartSplitJob);
       if ($("reviewStageSubtitle")) {
-        $("reviewStageSubtitle").textContent = excelMode
-          ? "一次启动，自动完成表格深审、复用度调整和规则校验"
-          : "一次启动，自动完成 COSMIC 初拆、原文深审、复用度调整和规则校验";
+        $("reviewStageSubtitle").textContent = deepReviewEnabled
+          ? (excelMode
+            ? "一次启动，自动完成表格深审、复用度调整和规则校验"
+            : "一次启动，自动完成 COSMIC 初拆、原文深审、复用度调整和规则校验")
+          : (excelMode
+            ? "一次启动，自动完成 Excel 载入、复用度调整和规则校验"
+            : "一次启动，自动完成 COSMIC 初拆、复用度调整和规则校验");
       }
       if ($("stageAiSplitTitle")) {
         $("stageAiSplitTitle").textContent = excelMode
@@ -1159,11 +1202,13 @@
           : "AI 对照原文检查漏功能、错拆、重复计量和 E/R/W/X 缺失；有证据、无冲突且不增加确定性错误的建议会自动采纳。";
       }
       if ($("reviewStageNoteText")) {
-        $("reviewStageNoteText").textContent = excelMode
-          ? "以上内部步骤使用同一规则自动执行；Excel 模式的深度审核仅依据当前表格。"
-          : "以上内部步骤使用同一规则自动执行；人工大幅修改表格后可重新执行深度审核。";
+        $("reviewStageNoteText").textContent = deepReviewEnabled
+          ? (excelMode
+            ? "以上内部步骤使用同一规则自动执行；Excel 模式的深度审核仅依据当前表格。"
+            : "以上内部步骤使用同一规则自动执行；人工大幅修改表格后可重新执行深度审核。")
+          : "AI 深度审核已暂时关闭，流程不会发起深审模型请求。";
       }
-      if ($("deepSplitBtn")) {
+      if (deepReviewEnabled && $("deepSplitBtn")) {
         $("deepSplitBtn").title = excelMode
           ? "智能拆分已自动深审；人工修改后可重新依据当前 Excel/审核表执行结构审核。"
           : "智能拆分已自动深审；人工修改后可重新结合原文证据审核整张表。";
@@ -1524,10 +1569,13 @@
       markDone("ai");
       markActive("review");
       setAiCosmicSplitRunning(false);
+      const deepReviewEnabled = smartSplitDeepReviewEnabled(currentSmartSplitJob);
       const summary = "AI 智能拆分" + (currentSmartSplitJob.status === "PARTIAL" ? "部分" : "全部")
-        + "完成：深度审核提出 " + Number(currentSmartSplitJob.deepSuggestionCount || 0)
-        + " 条建议，自动采纳 " + Number(currentSmartSplitJob.appliedSuggestionCount || 0)
-        + " 条；确定性错误 " + Number(currentSmartSplitJob.errorCount || 0)
+        + "完成：" + (deepReviewEnabled
+          ? "深度审核提出 " + Number(currentSmartSplitJob.deepSuggestionCount || 0)
+            + " 条建议，自动采纳 " + Number(currentSmartSplitJob.appliedSuggestionCount || 0) + " 条；"
+          : "AI 深度审核已关闭；")
+        + "确定性错误 " + Number(currentSmartSplitJob.errorCount || 0)
         + " 条，结构风险 " + Number(currentSmartSplitJob.structureRiskCount || 0) + " 条。";
       setMessage(summary, currentSmartSplitJob.status === "PARTIAL" ? "error" : "success");
       return currentSmartSplitJob;
@@ -1702,6 +1750,7 @@
         const formData = new FormData();
         formData.append("file", file);
         formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
+        formData.append("splitLevel", selectedSplitLevel());
         setMessage("正在上传文档...");
         const upload = await request("/api/files/upload", { method: "POST", body: formData });
         currentProjectId = upload.data.projectId;
@@ -1781,6 +1830,7 @@
             const formData = new FormData();
             formData.append("file", files[index]);
             formData.append("projectName", projectName || files[index].name.replace(/\.[^.]+$/, ""));
+            formData.append("splitLevel", selectedSplitLevel());
             const upload = await request("/api/files/upload", { method: "POST", body: formData });
             results[index] = upload.data.projectId;
             setMessage("正在上传需求文档... " + results.filter(Boolean).length + "/" + files.length);
@@ -2488,7 +2538,7 @@
           });
           markActive("ai");
           setAiCosmicSplitRunning(true, "ai");
-          setMessage("正在启动 AI 智能拆分：将自动完成初拆、深度审核、复用度调整和规则初审...");
+          setMessage("正在启动 AI 智能拆分：将自动完成初拆、复用度调整和规则初审...");
           setParseInputPanelsExpanded(false, false);
           await executeSmartSplitWorkflow("DOCUMENT", "");
         });
@@ -2515,6 +2565,7 @@
           const formData = new FormData();
           formData.append("file", file);
           formData.append("projectName", $("projectName").value || file.name.replace(/\.[^.]+$/, ""));
+          formData.append("splitLevel", selectedSplitLevel());
           setMessage("正在导入 Excel，并解析到审核界面...");
           const imported = await request("/api/files/upload-split-excel", { method: "POST", body: formData });
           currentProjectId = imported.data.projectId;
@@ -2522,11 +2573,11 @@
           $("projectBadge").className = "badge";
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
-          $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n系统将自动执行深度审核、复用度调整和规则初审，再进入人工审核。";
+          $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n系统将自动执行复用度调整和规则初审，再进入人工审核。";
           $("parsePanel").classList.add("hidden");
           $("chapterSelectionPanel").classList.add("hidden");
           await loadReview();
-          setMessage("Excel 已导入，正在自动执行深度审核、复用度调整和规则初审...");
+          setMessage("Excel 已导入，正在自动执行复用度调整和规则初审...");
           await executeSmartSplitWorkflow("EXCEL", "");
         });
       } catch (error) {
