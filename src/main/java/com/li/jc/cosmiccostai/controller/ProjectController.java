@@ -20,6 +20,8 @@ import com.li.jc.cosmiccostai.dto.ReviewResponse;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentRequest;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
+import com.li.jc.cosmiccostai.dto.SmartSplitJobResponse;
+import com.li.jc.cosmiccostai.dto.SmartSplitStartRequest;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageApplyRequest;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageResponse;
 import com.li.jc.cosmiccostai.dto.RequirementInputRequest;
@@ -41,6 +43,7 @@ import com.li.jc.cosmiccostai.service.ReuseDegreeAiAdjustmentService;
 import com.li.jc.cosmiccostai.service.RequirementCoverageService;
 import com.li.jc.cosmiccostai.service.RequirementInputService;
 import com.li.jc.cosmiccostai.service.RuleValidationService;
+import com.li.jc.cosmiccostai.service.SingleSmartSplitService;
 import com.li.jc.cosmiccostai.service.WordExportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -84,6 +87,7 @@ public class ProjectController {
     private final RequirementInputService requirementInputService;
     private final DocumentChapterSelectionService documentChapterSelectionService;
     private final ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService;
+    private final SingleSmartSplitService singleSmartSplitService;
 
     public ProjectController(DocumentParseService documentParseService,
                              AiExtractionService aiExtractionService,
@@ -101,7 +105,8 @@ public class ProjectController {
                              RequirementCoverageService requirementCoverageService,
                              RequirementInputService requirementInputService,
                              DocumentChapterSelectionService documentChapterSelectionService,
-                             ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService) {
+                             ReuseDegreeAiAdjustmentService reuseDegreeAiAdjustmentService,
+                             SingleSmartSplitService singleSmartSplitService) {
         this.documentParseService = documentParseService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
@@ -119,6 +124,7 @@ public class ProjectController {
         this.requirementInputService = requirementInputService;
         this.documentChapterSelectionService = documentChapterSelectionService;
         this.reuseDegreeAiAdjustmentService = reuseDegreeAiAdjustmentService;
+        this.singleSmartSplitService = singleSmartSplitService;
     }
 
     @Operation(summary = "List projects", description = "List historical projects from local storage.")
@@ -237,6 +243,21 @@ public class ProjectController {
             @RequestBody ReuseDegreeAdjustmentRequest request) {
         return ApiResponse.ok(reuseDegreeAiAdjustmentService.adjust(projectId,
                 request == null ? null : request.getRows()));
+    }
+
+    @Operation(summary = "Start unified AI smart split",
+            description = "Run extraction/COSMIC, deep evidence review, safe suggestion application, reuse adjustment and deterministic validation as one persisted background workflow.")
+    @PostMapping("/{projectId}/smart-split")
+    public ApiResponse<SmartSplitJobResponse> startSmartSplit(
+            @PathVariable String projectId,
+            @RequestBody(required = false) SmartSplitStartRequest request) {
+        return ApiResponse.ok(singleSmartSplitService.start(projectId, request));
+    }
+
+    @Operation(summary = "Get unified AI smart split progress")
+    @GetMapping("/{projectId}/smart-split")
+    public ApiResponse<SmartSplitJobResponse> getSmartSplit(@PathVariable String projectId) {
+        return ApiResponse.ok(singleSmartSplitService.get(projectId));
     }
 
     @Operation(summary = "AI validate selected review risks", description = "Use AI to review selected high-risk rows after deterministic validation.")

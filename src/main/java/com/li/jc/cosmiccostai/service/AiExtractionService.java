@@ -162,7 +162,22 @@ public class AiExtractionService {
                 projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
         String aiResult = callAi(prompt);
         log.info("AI extraction completed, projectId={}, responseLength={}", projectId, aiResult == null ? 0 : aiResult.length());
-        List<ExtractedFunction> functions = parseFunctions(aiResult);
+        List<ExtractedFunction> functions;
+        try {
+            functions = parseFunctions(aiResult);
+        } catch (BusinessException firstParseFailure) {
+            log.warn("AI extraction returned malformed structured output; retrying once with compact-output constraints. "
+                            + "projectId={}, responseLength={}, error={}",
+                    projectId, aiResult == null ? 0 : aiResult.length(), firstParseFailure.getMessage());
+            String recoveryPrompt = prompt + System.lineSeparator()
+                    + System.lineSeparator()
+                    + "【结构化输出恢复要求】上一次响应未形成完整 JSON。本次请适当压缩 description、evidence、attributes，"
+                    + "但不得遗漏功能；只输出一个完整闭合的 {\"functions\":[...]} JSON 对象，禁止在 JSON 后追加解释。";
+            aiResult = callAi(recoveryPrompt);
+            log.info("AI extraction recovery completed, projectId={}, responseLength={}",
+                    projectId, aiResult == null ? 0 : aiResult.length());
+            functions = parseFunctions(aiResult);
+        }
         if (functions.isEmpty()) {
             log.warn("AI returned no functions, projectId={}, using local fallback extraction", projectId);
             functions = fallbackFunctions(requirementDetail);
@@ -709,8 +724,19 @@ public class AiExtractionService {
             }
             throw new BusinessException("AI result is not a function array");
         } catch (IOException ex) {
-            throw new BusinessException("Parse AI json result failed: " + aiResult, ex);
+            throw new BusinessException("AI 返回的功能清单 JSON 不完整或格式错误（响应 "
+                    + (aiResult == null ? 0 : aiResult.length()) + " 字符）："
+                    + compactAiResult(aiResult), ex);
         }
+    }
+
+    private String compactAiResult(String value) {
+        String text = value == null ? "" : value.replaceAll("\\s+", " ").trim();
+        if (text.length() <= 600) {
+            return text;
+        }
+        return text.substring(0, 360) + " ...[已省略 " + (text.length() - 560)
+                + " 字符]... " + text.substring(text.length() - 200);
     }
 
     private List<ExtractedFunction> fallbackFunctions(String requirementDetail) {

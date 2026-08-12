@@ -11,6 +11,62 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiTaskConfigTest {
 
     @Test
+    void batchSplitExecutorUsesConfiguredProjectParallelism() throws InterruptedException {
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor)
+                new AiTaskConfig().batchSplitExecutor(3, 10);
+        CountDownLatch started = new CountDownLatch(3);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            for (int i = 0; i < 3; i++) {
+                executor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        started.countDown();
+                        try {
+                            release.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                });
+            }
+            assertTrue(started.await(2, TimeUnit.SECONDS),
+                    "three confirmed documents should be able to split concurrently");
+        } finally {
+            release.countDown();
+            executor.shutdown();
+        }
+    }
+
+    @Test
+    void batchPreparationExecutorUsesIndependentConfiguredParallelism() throws InterruptedException {
+        ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor)
+                new AiTaskConfig().batchPreparationExecutor(4, 20);
+        CountDownLatch started = new CountDownLatch(4);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            for (int i = 0; i < 4; i++) {
+                executor.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        started.countDown();
+                        try {
+                            release.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException ex) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                });
+            }
+            assertTrue(started.await(2, TimeUnit.SECONDS),
+                    "document preparation workers should run independently from AI split workers");
+        } finally {
+            release.countDown();
+            executor.shutdown();
+        }
+    }
+
+    @Test
     void deepSplitExecutorRunsSeveralProjectsAtTheSameTime() throws InterruptedException {
         ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor)
                 new AiTaskConfig().deepSplitExecutor(32, 50);

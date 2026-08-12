@@ -75,13 +75,15 @@ public class DocumentChapterSelectionService {
         DocumentChapterSelectionResponse response = new DocumentChapterSelectionResponse();
         response.setDocumentLength(documentText.length());
         response.setAiInput(currentInput == null ? "" : currentInput);
+        Set<String> selectedIds = explicitSelection == null
+                ? inferredSelection(chapters, documentText, currentInput)
+                : explicitSelection;
+        String recommendedId = recommendedChapterId(chapters);
         int selectedLength = 0;
         List<DocumentChapterItem> items = new ArrayList<DocumentChapterItem>();
         for (ChapterBlock chapter : chapters) {
-            boolean recommended = isRecommended(chapter.title);
-            boolean selected = explicitSelection != null
-                    ? explicitSelection.contains(chapter.id)
-                    : isPresentInInput(currentInput, chapter) || recommended;
+            boolean recommended = chapter.id.equals(recommendedId);
+            boolean selected = selectedIds.contains(chapter.id);
             DocumentChapterItem item = new DocumentChapterItem();
             item.setId(chapter.id);
             item.setNumber(chapter.number);
@@ -95,9 +97,32 @@ public class DocumentChapterSelectionService {
             }
         }
         response.setChapters(items);
-        response.setSelectedLength(explicitSelection == null && StringUtils.hasText(currentInput)
-                ? currentInput.length() : selectedLength);
+        response.setSelectedLength(selectedLength);
         return response;
+    }
+
+    private Set<String> inferredSelection(List<ChapterBlock> chapters,
+                                          String documentText,
+                                          String currentInput) {
+        Set<String> selected = new HashSet<String>();
+        String normalizedInput = normalizeForComparison(currentInput);
+        String normalizedDocument = normalizeForComparison(documentText);
+        boolean wholeDocumentInput = StringUtils.hasText(normalizedInput)
+                && normalizedInput.length() >= normalizedDocument.length() * 0.85D;
+        if (!wholeDocumentInput) {
+            for (ChapterBlock chapter : chapters) {
+                if (isPresentInInput(currentInput, chapter)) {
+                    selected.add(chapter.id);
+                }
+            }
+        }
+        if (selected.isEmpty()) {
+            String recommendedId = recommendedChapterId(chapters);
+            if (StringUtils.hasText(recommendedId)) {
+                selected.add(recommendedId);
+            }
+        }
+        return selected;
     }
 
     private List<ChapterBlock> parseChapters(String projectId, String documentText) {
@@ -119,46 +144,111 @@ public class DocumentChapterSelectionService {
         } catch (IOException ex) {
             return Collections.emptyList();
         }
-        List<Heading> topHeadings = new ArrayList<Heading>();
+        List<OutlineHeading> outlineHeadings = new ArrayList<OutlineHeading>();
         for (String outlineLine : outlineLines) {
             String[] parts = outlineLine.split("\\t", 2);
-            if (parts.length != 2 || !"1".equals(parts[0]) || !StringUtils.hasText(parts[1])) {
+            if (parts.length != 2 || !parts[0].matches("[1-9]") || !StringUtils.hasText(parts[1])) {
                 continue;
             }
-            topHeadings.add(parseOutlineHeading(parts[1].trim()));
+            outlineHeadings.add(new OutlineHeading(Integer.parseInt(parts[0]),
+                    parseOutlineHeading(parts[1].trim())));
         }
-        if (topHeadings.isEmpty()) {
+        if (outlineHeadings.isEmpty()) {
             return Collections.emptyList();
         }
         String[] lines = documentText.split("\\r?\\n");
-        List<Integer> starts = new ArrayList<Integer>();
-        List<Heading> located = new ArrayList<Heading>();
+        List<OutlineHeading> located = new ArrayList<OutlineHeading>();
         int searchFrom = 0;
-        for (Heading heading : topHeadings) {
-            int found = findExactLine(lines, heading.originalTitle, searchFrom);
+        for (OutlineHeading outlineHeading : outlineHeadings) {
+            int found = findExactLine(lines, outlineHeading.heading.originalTitle, searchFrom);
             if (found >= 0) {
-                starts.add(found);
-                located.add(heading);
+                outlineHeading.lineIndex = found;
+                located.add(outlineHeading);
                 searchFrom = found + 1;
             }
         }
-        if (starts.isEmpty()) {
+        if (located.isEmpty()) {
+            return Collections.emptyList();
+        }
+        int shallowestLevel = shallowestLevel(located);
+        int selectionLevel = selectionLevel(located, shallowestLevel);
+        List<OutlineHeading> selectedHeadings = headingsAtLevel(located, selectionLevel);
+        if (selectedHeadings.isEmpty()) {
             return Collections.emptyList();
         }
         List<ChapterBlock> chapters = new ArrayList<ChapterBlock>();
-        if (starts.get(0) > 0) {
-            String preface = join(lines, 0, starts.get(0));
+        boolean skippedSingleDocumentTitle = selectionLevel > shallowestLevel
+                && countAtLevel(located, shallowestLevel) == 1;
+        if (!skippedSingleDocumentTitle && selectedHeadings.get(0).lineIndex > 0) {
+            String preface = join(lines, 0, selectedHeadings.get(0).lineIndex);
             if (StringUtils.hasText(preface)) {
                 chapters.add(new ChapterBlock("PREFACE", "", "章节前置内容", preface));
             }
         }
-        for (int i = 0; i < starts.size(); i++) {
-            int end = i + 1 < starts.size() ? starts.get(i + 1) : lines.length;
-            Heading heading = located.get(i);
-            chapters.add(new ChapterBlock("OUTLINE" + (i + 1), heading.number, heading.title,
-                    join(lines, starts.get(i), end)));
+        for (int i = 0; i < selectedHeadings.size(); i++) {
+            OutlineHeading selected = selectedHeadings.get(i);
+            int end = outlineSectionEnd(located, selected, lines.length);
+            chapters.add(new ChapterBlock("OUTLINE" + (i + 1), selected.heading.number,
+                    selected.heading.title, join(lines, selected.lineIndex, end)));
         }
         return chapters;
+    }
+
+    private int shallowestLevel(List<OutlineHeading> headings) {
+        int level = Integer.MAX_VALUE;
+        for (OutlineHeading heading : headings) {
+            level = Math.min(level, heading.level);
+        }
+        return level;
+    }
+
+    private int selectionLevel(List<OutlineHeading> headings, int shallowestLevel) {
+        if (countAtLevel(headings, shallowestLevel) > 1) {
+            return shallowestLevel;
+        }
+        for (int level = shallowestLevel + 1; level <= 9; level++) {
+            if (countAtLevel(headings, level) > 0) {
+                return level;
+            }
+        }
+        return shallowestLevel;
+    }
+
+    private int countAtLevel(List<OutlineHeading> headings, int level) {
+        int count = 0;
+        for (OutlineHeading heading : headings) {
+            if (heading.level == level) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private List<OutlineHeading> headingsAtLevel(List<OutlineHeading> headings, int level) {
+        List<OutlineHeading> result = new ArrayList<OutlineHeading>();
+        for (OutlineHeading heading : headings) {
+            if (heading.level == level) {
+                result.add(heading);
+            }
+        }
+        return result;
+    }
+
+    private int outlineSectionEnd(List<OutlineHeading> headings,
+                                  OutlineHeading selected,
+                                  int documentEnd) {
+        boolean afterSelected = false;
+        for (OutlineHeading heading : headings) {
+            if (heading == selected) {
+                afterSelected = true;
+                continue;
+            }
+            if (afterSelected && heading.lineIndex > selected.lineIndex
+                    && heading.level <= selected.level) {
+                return heading.lineIndex;
+            }
+        }
+        return documentEnd;
     }
 
     private Heading parseOutlineHeading(String title) {
@@ -262,21 +352,58 @@ public class DocumentChapterSelectionService {
         return line != null && line.trim().matches(".*\\s+\\d+$");
     }
 
-    private boolean isRecommended(String title) {
-        String text = title == null ? "" : title;
-        return containsAny(text, "业务功能", "功能需求", "需求细则", "需求内容", "业务需求",
-                "方案说明", "需求方案", "流程", "数据填报", "数据汇总");
+    private String recommendedChapterId(List<ChapterBlock> chapters) {
+        ChapterBlock best = null;
+        int bestScore = 0;
+        for (ChapterBlock chapter : chapters) {
+            int score = recommendationScore(chapter.title);
+            if (score > bestScore || (score == bestScore && score > 0
+                    && best != null && chapter.text.length() > best.text.length())) {
+                best = chapter;
+                bestScore = score;
+            }
+        }
+        return best == null ? "" : best.id;
+    }
+
+    private int recommendationScore(String title) {
+        String text = title == null ? "" : title.replaceAll("\\s+", "");
+        if (!StringUtils.hasText(text) || containsAny(text, "非功能", "调整因子", "需求背景", "需求目标")) {
+            return 0;
+        }
+        if (text.contains("功能说明")) return 1200;
+        if (text.contains("功能需求")) return 1150;
+        if (text.contains("需求描述")) return 1100;
+        if (text.contains("业务功能")) return 1050;
+        if (text.contains("需求细则")) return 1000;
+        if (text.contains("需求内容")) return 950;
+        if (text.contains("业务需求")) return 900;
+        if (text.contains("需求方案")) return 850;
+        if (text.contains("方案说明")) return 800;
+        if (text.contains("功能")) return 700;
+        if (containsAny(text, "业务流程", "数据填报", "数据汇总")) return 600;
+        return 0;
     }
 
     private boolean isPresentInInput(String input, ChapterBlock chapter) {
         if (!StringUtils.hasText(input)) {
             return false;
         }
-        String heading = StringUtils.hasText(chapter.number)
-                ? chapter.number + (chapter.number.matches("\\d+") ? "." : "、") : "";
-        return input.contains(heading + " " + chapter.title)
-                || input.contains(heading + chapter.title)
-                || input.contains(chapter.title);
+        String normalizedInput = normalizeForComparison(input);
+        String normalizedChapter = normalizeForComparison(chapter.text);
+        if (!StringUtils.hasText(normalizedChapter)) {
+            return false;
+        }
+        if (normalizedInput.contains(normalizedChapter)) {
+            return true;
+        }
+        return normalizedInput.length() >= 80
+                && normalizedChapter.contains(normalizedInput)
+                && normalizedInput.length() >= normalizedChapter.length() * 0.40D;
+    }
+
+    private String normalizeForComparison(String text) {
+        return text == null ? "" : text.replaceAll("\\s+", "").trim();
     }
 
     private boolean containsAny(String text, String... keywords) {
@@ -327,6 +454,16 @@ public class DocumentChapterSelectionService {
             this.number = number;
             this.title = title;
             this.originalTitle = originalTitle;
+        }
+    }
+
+    private static class OutlineHeading {
+        private final int level;
+        private final Heading heading;
+        private int lineIndex;
+        private OutlineHeading(int level, Heading heading) {
+            this.level = level;
+            this.heading = heading;
         }
     }
 

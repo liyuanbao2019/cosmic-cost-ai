@@ -23,4 +23,34 @@ public class AiTaskConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean(name = "batchSplitExecutor")
+    public TaskExecutor batchSplitExecutor(
+            @Value("${cosmic.ai.batch-split.worker-count:24}") int workerCount,
+            @Value("${cosmic.ai.batch-split.queue-capacity:100}") int queueCapacity) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        int size = Math.max(1, workerCount);
+        executor.setCorePoolSize(size);
+        executor.setMaxPoolSize(size);
+        executor.setQueueCapacity(Math.max(1, queueCapacity));
+        executor.setThreadNamePrefix("batch-split-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean(name = "batchPreparationExecutor")
+    public TaskExecutor batchPreparationExecutor(
+            @Value("${cosmic.ai.batch-split.preparation-worker-count:4}") int workerCount,
+            @Value("${cosmic.ai.batch-split.preparation-queue-capacity:100}") int queueCapacity) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        int size = Math.max(1, workerCount);
+        executor.setCorePoolSize(size);
+        executor.setMaxPoolSize(size);
+        executor.setQueueCapacity(Math.max(1, queueCapacity));
+        executor.setThreadNamePrefix("batch-prepare-");
+        executor.setWaitForTasksToCompleteOnShutdown(false);
+        executor.initialize();
+        return executor;
+    }
 }

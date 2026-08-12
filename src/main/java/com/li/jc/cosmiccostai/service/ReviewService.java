@@ -88,6 +88,15 @@ public class ReviewService {
         return saveReview(projectId, rows, "REUSE_ADJUSTED", false);
     }
 
+    /**
+     * Persists suggestions that have already passed the smart-split before/after
+     * deterministic safety gate. Existing unrelated errors remain available for
+     * the final rule-review stage instead of preventing a safe structural fix.
+     */
+    public ReviewResponse saveSmartSplitAdjustedReview(String projectId, List<FunctionSplitRow> rows) {
+        return saveReview(projectId, rows, "SMART_SPLIT_ADJUSTED", false);
+    }
+
     private ReviewResponse saveReview(String projectId, List<FunctionSplitRow> rows, String status) {
         return saveReview(projectId, rows, status, false);
     }
@@ -105,6 +114,7 @@ public class ReviewService {
         normalizeRows(metadata, rows, polishFunctionDescription);
         RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         if (!"EXCEL_IMPORTED".equals(status) && !"REUSE_ADJUSTED".equals(status)
+                && !"SMART_SPLIT_ADJUSTED".equals(status)
                 && "DOCUMENT".equals(sourceType(metadata))) {
             ruleValidationService.ensureNoErrors(rows, "保存审核结果");
         }

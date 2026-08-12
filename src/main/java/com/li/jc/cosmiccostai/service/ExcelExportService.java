@@ -168,6 +168,87 @@ public class ExcelExportService {
         return response;
     }
 
+    /**
+     * Builds the two project-level spreadsheets from one already-reviewed aggregate row set.
+     * This deliberately does not mutate any individual requirement metadata.
+     */
+    public ProjectExcelExportResult exportProjectMaterial(String materialId,
+                                                          String projectName,
+                                                          List<FunctionSplitRow> rows,
+                                                          Path outputDir) {
+        if (rows == null || rows.isEmpty()) {
+            throw new BusinessException("项目级送审材料没有可导出的功能点拆分行。");
+        }
+        RuleValidationResponse validation = ruleValidationService.validate(rows);
+        ruleValidationService.ensureReadyForExport(validation, "导出项目级送审 Excel");
+
+        ProjectMetadata metadata = projectMaterialMetadata(materialId, projectName);
+        Path attachment3Template = resolveTemplatePath(zh("\u9644\u4ef63"));
+        Path attachment2Template = resolveTemplatePath(zh("\u9644\u4ef62"));
+        Path attachment3 = outputDir.resolve(zh("\u9644\u4ef63-") + sanitizeFileName(projectName)
+                + zh("\u529f\u80fd\u70b9\u62c6\u5206\u8868V1.0.xlsx"));
+        Path attachment2 = outputDir.resolve(zh("\u9644\u4ef62-") + sanitizeFileName(projectName)
+                + zh("\u4e1a\u52a1\u9700\u6c42\u4fe1\u606f\u6c47\u603b\u8868V1.0.xlsx"));
+
+        int movementRows;
+        try {
+            Files.createDirectories(outputDir);
+            try (InputStream inputStream = Files.newInputStream(attachment3Template);
+                 Workbook workbook = new XSSFWorkbook(inputStream)) {
+                Sheet sheet = workbook.getSheet(zh("\u0032\u3001\u529f\u80fd\u70b9\u62c6\u5206\u8868"));
+                if (sheet == null) {
+                    sheet = workbook.getSheetAt(2);
+                }
+                movementRows = fillSheet(sheet, metadata, rows, validation);
+                try (OutputStream outputStream = Files.newOutputStream(attachment3)) {
+                    workbook.write(outputStream);
+                }
+            }
+            try (InputStream inputStream = Files.newInputStream(attachment2Template);
+                 Workbook workbook = new XSSFWorkbook(inputStream)) {
+                fillBusinessRequirementSheet(workbook, metadata, rows);
+                try (OutputStream outputStream = Files.newOutputStream(attachment2)) {
+                    workbook.write(outputStream);
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("导出项目级送审 Excel 失败：" + ex.getMessage(), ex);
+        }
+
+        ProjectExcelExportResult result = new ProjectExcelExportResult();
+        result.attachment2Path = attachment2;
+        result.attachment3Path = attachment3;
+        result.requirementCount = groupBusinessRequirements(metadata, rows).size();
+        result.movementRowCount = movementRows;
+        for (FunctionSplitRow row : rows) {
+            result.totalCfp += row.getCfp();
+        }
+        return result;
+    }
+
+    private ProjectMetadata projectMaterialMetadata(String materialId, String projectName) {
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(materialId);
+        metadata.setName(projectName);
+        metadata.setSourceFileName(projectName + ".docx");
+        metadata.setFileType("docx");
+        return metadata;
+    }
+
+    public static class ProjectExcelExportResult {
+        private Path attachment2Path;
+        private Path attachment3Path;
+        private int requirementCount;
+        private int movementRowCount;
+        private double totalCfp;
+
+        public Path getAttachment2Path() { return attachment2Path; }
+        public Path getAttachment3Path() { return attachment3Path; }
+        public int getRequirementCount() { return requirementCount; }
+        public int getMovementRowCount() { return movementRowCount; }
+        public double getTotalCfp() { return totalCfp; }
+    }
+
     private void validateMetadata(ProjectMetadata metadata) {
         if (metadata == null) {
             throw new BusinessException("Project metadata is empty");
@@ -497,7 +578,11 @@ public class ExcelExportService {
             }
             for (int c = 0; c <= 8; c++) {
                 Cell cell = row.getCell(c);
-                if (cell != null && (r >= 10 || (r == 3 && c <= 4) || (r == 5 && (c == 3 || c == 4)))) {
+                boolean summaryPlaceholder = (r == 3 && c <= 6)
+                        || (r == 4 && c <= 6)
+                        || (r == 5 && (c == 0 || (c >= 2 && c <= 5)))
+                        || r == 8;
+                if (cell != null && (r >= 10 || summaryPlaceholder)) {
                     cell.setBlank();
                 }
             }
@@ -890,7 +975,11 @@ public class ExcelExportService {
         if (cell == null) {
             cell = row.createCell(col);
         }
-        cell.setCellValue(value == null ? "" : value);
+        if (StringUtils.hasText(value)) {
+            cell.setCellValue(value);
+        } else {
+            cell.setBlank();
+        }
     }
 
     private void setOptionalCell(Row row, int col, String value) {

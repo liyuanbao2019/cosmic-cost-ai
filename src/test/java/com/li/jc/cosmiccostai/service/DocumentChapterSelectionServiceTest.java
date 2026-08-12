@@ -87,6 +87,52 @@ class DocumentChapterSelectionServiceTest {
         assertFalse(applied.getAiInput().contains("调整因子内容"));
     }
 
+    @Test
+    void skipsSingleDocumentTitleAndRecommendsOnlyHighestConfidenceChapter() throws Exception {
+        FileStorageService storage = new FileStorageService("target/test-wrapper-title-selection-storage");
+        RequirementInputService inputService = new RequirementInputService(storage);
+        String projectId = "wrapper-title-selection-project";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path documentText = projectDir.resolve("document-text.txt");
+        Path requirementInput = projectDir.resolve("requirement-detail.txt");
+        String fullText = "家客终端管理系统接口需求说明书\n"
+                + "1需求背景\n背景内容。\n"
+                + "2需求目标\n目标内容。\n"
+                + "3需求描述\n3.1归属系统\n家客终端管理系统\n"
+                + "3.2业务规则\n完成接口数据推送、失败重试和日志查询。\n";
+        Files.write(documentText, fullText.getBytes(StandardCharsets.UTF_8));
+        Files.write(requirementInput, ("3.1归属系统\n家客终端管理系统\n"
+                + "3.2业务规则\n完成接口数据推送、失败重试和日志查询。")
+                .getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("document-outline.tsv"), Arrays.asList(
+                "1\t家客终端管理系统接口需求说明书",
+                "2\t1需求背景",
+                "2\t2需求目标",
+                "2\t3需求描述",
+                "3\t3.1归属系统",
+                "3\t3.2业务规则"), StandardCharsets.UTF_8);
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setDocumentTextPath(documentText.toString());
+        metadata.setRequirementDetailPath(requirementInput.toString());
+        storage.saveMetadata(metadata);
+
+        DocumentChapterSelectionResponse response =
+                new DocumentChapterSelectionService(storage, inputService).get(projectId);
+
+        assertEquals(3, response.getChapters().size());
+        assertEquals("需求背景", response.getChapters().get(0).getTitle());
+        assertEquals("需求目标", response.getChapters().get(1).getTitle());
+        assertEquals("需求描述", response.getChapters().get(2).getTitle());
+        assertFalse(hasChapter(response, "接口需求说明书"));
+        assertTrue(response.getChapters().get(2).getCharCount() > 40);
+        assertEquals(1, selectedCount(response));
+        assertEquals(1, recommendedCount(response));
+        assertTrue(response.getChapters().get(2).isSelected());
+        assertTrue(response.getChapters().get(2).isRecommended());
+    }
+
     private boolean hasChapter(DocumentChapterSelectionResponse response, String title) {
         for (DocumentChapterItem chapter : response.getChapters()) {
             if (chapter.getTitle().contains(title)) {
@@ -94,5 +140,25 @@ class DocumentChapterSelectionServiceTest {
             }
         }
         return false;
+    }
+
+    private int selectedCount(DocumentChapterSelectionResponse response) {
+        int count = 0;
+        for (DocumentChapterItem chapter : response.getChapters()) {
+            if (chapter.isSelected()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private int recommendedCount(DocumentChapterSelectionResponse response) {
+        int count = 0;
+        for (DocumentChapterItem chapter : response.getChapters()) {
+            if (chapter.isRecommended()) {
+                count++;
+            }
+        }
+        return count;
     }
 }

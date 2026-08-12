@@ -115,7 +115,7 @@ public class DeepSplitAiService {
                               @Value("${cosmic.ai.deep-split.chunk-prompt-chars:9000}") int chunkPromptChars,
                               @Value("${cosmic.ai.deep-split.evidence-chars:5000}") int evidenceChars,
                                @Value("${cosmic.ai.deep-split.max-request-rows:10000}") int maxRequestRows,
-                               @Value("${cosmic.ai.deep-split.chunk-parallelism:10}") int chunkParallelism,
+                               @Value("${cosmic.ai.deep-split.chunk-parallelism:4}") int chunkParallelism,
                                AiModelConfigService aiModelConfigService,
                                RuleValidationService ruleValidationService,
                                SplitRuleConfigService splitRuleConfigService) {

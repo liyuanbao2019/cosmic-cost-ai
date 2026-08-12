@@ -144,6 +144,63 @@ public class WordExportService {
         return response;
     }
 
+    /**
+     * Builds one cohesive project requirement specification from reviewed rows of
+     * multiple requirement documents, without changing their individual metadata.
+     */
+    public ProjectWordExportResult exportProjectMaterial(String materialId,
+                                                         String projectName,
+                                                         List<FunctionSplitRow> rows,
+                                                         Path outputDir) {
+        if (rows == null || rows.isEmpty()) {
+            throw new BusinessException("项目级需求说明书没有可导出的功能点拆分行。");
+        }
+        ruleValidationService.ensureReadyForExport(rows, "导出项目级需求说明书");
+
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(materialId);
+        metadata.setName(projectName);
+        metadata.setSourceFileName(projectName + zh("\u9700\u6c42\u8bf4\u660e\u4e66.docx"));
+        metadata.setFileType("docx");
+        List<FunctionGroup> groups = groupRows(rows);
+        applyExportFunctionDescriptions(metadata, groups);
+        Path outputPath = outputDir.resolve(buildWordOutputFileName(metadata));
+
+        try {
+            Files.createDirectories(outputDir);
+            XWPFDocument document = createDocument();
+            try {
+                replaceCoverTitle(document, metadata);
+                replaceFunctionRequirementSection(document, groups);
+                try (OutputStream outputStream = Files.newOutputStream(outputPath)) {
+                    document.write(outputStream);
+                }
+            } finally {
+                document.close();
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("导出项目级需求说明书失败：" + ex.getMessage(), ex);
+        }
+
+        ProjectWordExportResult result = new ProjectWordExportResult();
+        result.attachment1Path = outputPath;
+        result.functionCount = groups.size();
+        for (FunctionSplitRow row : rows) {
+            result.totalCfp += row.getCfp();
+        }
+        return result;
+    }
+
+    public static class ProjectWordExportResult {
+        private Path attachment1Path;
+        private int functionCount;
+        private double totalCfp;
+
+        public Path getAttachment1Path() { return attachment1Path; }
+        public int getFunctionCount() { return functionCount; }
+        public double getTotalCfp() { return totalCfp; }
+    }
+
     private void validateMetadata(ProjectMetadata metadata) {
         if (metadata == null) {
             throw new BusinessException("Project metadata is empty");

@@ -32,11 +32,36 @@ final class DeepSeekChatClient {
                     String prompt,
                     long timeoutSeconds,
                     int maxRetries) {
+        int initialMaxTokens = outputTokenLimit(task);
+        try {
+            return generateWithRetries(profile, apiKey, task, prompt, timeoutSeconds,
+                    maxRetries, initialMaxTokens);
+        } catch (OutputTruncatedException ex) {
+            int expandedMaxTokens = Math.min(131072, initialMaxTokens * 2);
+            if (expandedMaxTokens <= initialMaxTokens) {
+                throw ex;
+            }
+            return generateWithRetries(profile, apiKey, task, prompt, timeoutSeconds,
+                    maxRetries, expandedMaxTokens);
+        }
+    }
+
+    private String generateWithRetries(AiModelProfile profile,
+                                       String apiKey,
+                                       AiPromptTask task,
+                                       String prompt,
+                                       long timeoutSeconds,
+                                       int maxRetries,
+                                       int maxTokens) {
         RuntimeException last = null;
         int attempts = Math.max(0, maxRetries) + 1;
         for (int attempt = 1; attempt <= attempts; attempt++) {
             try {
-                return execute(profile, apiKey, task, prompt, timeoutSeconds);
+                return execute(profile, apiKey, task, prompt, timeoutSeconds, maxTokens);
+            } catch (OutputTruncatedException ex) {
+                // Retrying the same token ceiling only repeats a costly incomplete response.
+                // Let the outer call retry once with a larger output budget instead.
+                throw ex;
             } catch (RuntimeException ex) {
                 last = ex;
                 if (attempt < attempts) {
@@ -51,7 +76,8 @@ final class DeepSeekChatClient {
                            String apiKey,
                            AiPromptTask task,
                            String prompt,
-                           long timeoutSeconds) {
+                           long timeoutSeconds,
+                           int maxTokens) {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(chatCompletionsUrl(profile.getBaseUrl())).openConnection();
@@ -64,7 +90,7 @@ final class DeepSeekChatClient {
             connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
             connection.setRequestProperty("Accept", "application/json");
 
-            byte[] requestBytes = objectMapper.writeValueAsBytes(requestBody(profile, task, prompt));
+            byte[] requestBytes = objectMapper.writeValueAsBytes(requestBody(profile, task, prompt, maxTokens));
             connection.setFixedLengthStreamingMode(requestBytes.length);
             try (OutputStream output = connection.getOutputStream()) {
                 output.write(requestBytes);
@@ -77,6 +103,13 @@ final class DeepSeekChatClient {
                 throw new BusinessException("DeepSeek API 调用失败（HTTP " + status + "）：" + compact(responseText));
             }
             JsonNode root = objectMapper.readTree(responseText);
+            String finishReason = root.path("choices").path(0).path("finish_reason").asText("");
+            if ("length".equalsIgnoreCase(finishReason)) {
+                throw new OutputTruncatedException("DeepSeek 结构化输出达到长度上限，系统将扩大输出额度后自动重试。");
+            }
+            if ("content_filter".equalsIgnoreCase(finishReason)) {
+                throw new BusinessException("DeepSeek 因内容过滤未能返回完整结构化结果，请检查输入内容后重试。");
+            }
             JsonNode content = root.path("choices").path(0).path("message").path("content");
             if (!content.isTextual() || content.asText().trim().isEmpty()) {
                 throw new BusinessException("DeepSeek 返回了空的结构化结果，请重试。");
@@ -91,20 +124,46 @@ final class DeepSeekChatClient {
         }
     }
 
-    private Map<String, Object> requestBody(AiModelProfile profile, AiPromptTask task, String prompt) {
+    private Map<String, Object> requestBody(AiModelProfile profile,
+                                            AiPromptTask task,
+                                            String prompt,
+                                            int maxTokens) {
         Map<String, Object> body = new LinkedHashMap<String, Object>();
         body.put("model", profile.getModel());
         body.put("stream", false);
         body.put("response_format", singleton("type", "json_object"));
+        body.put("max_tokens", maxTokens);
 
-        body.put("thinking", singleton("type", "enabled"));
-        body.put("reasoning_effort", "max");
+        boolean reasoningTask = task == AiPromptTask.DEEP_REVIEW
+                || task == AiPromptTask.REUSE_ADJUSTMENT
+                || task == AiPromptTask.INITIAL_REVIEW;
+        body.put("thinking", singleton("type", reasoningTask ? "enabled" : "disabled"));
+        if (reasoningTask) {
+            // Deep review and cross-row reuse decisions need reasoning, but max effort
+            // multiplies latency when a project batch fans out several long prompts.
+            body.put("reasoning_effort", "high");
+        }
 
         List<Map<String, String>> messages = new ArrayList<Map<String, String>>();
         messages.add(message("system", DeepSeekPromptProfile.systemPrompt(task)));
         messages.add(message("user", prompt));
         body.put("messages", messages);
         return body;
+    }
+
+    private int outputTokenLimit(AiPromptTask task) {
+        if (task == AiPromptTask.EXTRACTION) {
+            return 65536;
+        }
+        if (task == AiPromptTask.DEEP_REVIEW
+                || task == AiPromptTask.REUSE_ADJUSTMENT
+                || task == AiPromptTask.INITIAL_REVIEW) {
+            return 32768;
+        }
+        if (task == AiPromptTask.FUNCTION_DESCRIPTION) {
+            return 8192;
+        }
+        return 16384;
     }
 
     private Map<String, Object> singleton(String key, Object value) {
@@ -161,6 +220,12 @@ final class DeepSeekChatClient {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new BusinessException("等待重试 DeepSeek 调用时任务被中断。", ex);
+        }
+    }
+
+    private static final class OutputTruncatedException extends BusinessException {
+        private OutputTruncatedException(String message) {
+            super(message);
         }
     }
 }

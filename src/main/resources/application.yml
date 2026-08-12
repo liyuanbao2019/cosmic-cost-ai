@@ -71,7 +71,24 @@ cosmic:
     # 普通 AI 调用失败后的最大重试次数；网络抖动或模型服务短暂失败时使用
     max-retries: ${OPENAI_MAX_RETRIES:2}
     # 单个模型允许的全局在途请求数，所有 AI 场景共用这道并发保护
-    max-concurrency: ${OPENAI_MAX_CONCURRENCY:10}
+    max-concurrency: ${OPENAI_MAX_CONCURRENCY:100}
+    batch-split:
+      # 批量拆分按项目并发；单项目内部统一调用 smart-split 流水线并严格串行
+      worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:24}
+      # 等待执行的批量项目上限，配合单批最大文件数形成背压保护
+      queue-capacity: ${COSMIC_BATCH_SPLIT_QUEUE_CAPACITY:100}
+      # 单用户极速模式：一个批次最多同时运行 23 份文档；仍保留 1 个全局槽给其他批次
+      max-concurrency-per-batch: ${COSMIC_BATCH_MAX_CONCURRENCY_PER_BATCH:23}
+      # 文档解析与章节识别是本地代码任务，使用独立线程池，不能被长时间等待 AI 的拆分线程阻塞
+      preparation-worker-count: ${COSMIC_BATCH_PREPARATION_WORKERS:4}
+      preparation-queue-capacity: ${COSMIC_BATCH_PREPARATION_QUEUE_CAPACITY:100}
+      # 单个批次允许包含的最大需求文档数
+      max-items: ${COSMIC_BATCH_SPLIT_MAX_ITEMS:50}
+    smart-split:
+      # 单需求和批量需求共用：等待异步深度审核完成的最长时间，单位秒
+      deep-review-wait-seconds: ${COSMIC_SMART_SPLIT_DEEP_REVIEW_WAIT_SECONDS:1800}
+      # 深度审核存在失败分批时自动重试轮数；每轮仅重试失败批次
+      deep-review-retry-rounds: ${COSMIC_SMART_SPLIT_DEEP_REVIEW_RETRY_ROUNDS:2}
     deep-split:
       # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
       worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:32}
@@ -88,7 +105,7 @@ cosmic:
       # AI 深度审核单次任务允许处理的最大审核表行数；防止超大表格误触发导致长时间占用资源
       max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}
       # AI 分批并发数；同时用于 AI 深度审核分批并发，以及 Excel 导出 Word 时功能描述生成的批次并发
-      chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:10}
+      chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:4}
     # 可在 YAML 中预置多个 OpenAI 兼容模型；首次启动后也可在“大模型管理”页面维护
     models:
       - id: deepseek-default
@@ -99,10 +116,10 @@ cosmic:
         model: ${OPENAI_MODEL:deepseek-v4-pro}
         timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
         max-retries: ${OPENAI_MAX_RETRIES:2}
-        max-concurrency: ${OPENAI_MAX_CONCURRENCY:10}
+        max-concurrency: ${OPENAI_MAX_CONCURRENCY:100}
         chunk-timeout-seconds: ${COSMIC_DEEP_SPLIT_CHUNK_TIMEOUT_SECONDS:500}
         chunk-max-retries: ${COSMIC_DEEP_SPLIT_MAX_RETRIES:1}
-        chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:10}
+        chunk-parallelism: ${COSMIC_DEEP_SPLIT_CHUNK_PARALLELISM:4}
         chunk-prompt-chars: ${COSMIC_DEEP_SPLIT_CHUNK_PROMPT_CHARS:9000}
         evidence-chars: ${COSMIC_DEEP_SPLIT_EVIDENCE_CHARS:5000}
         max-request-rows: ${COSMIC_DEEP_SPLIT_MAX_REQUEST_ROWS:10000}

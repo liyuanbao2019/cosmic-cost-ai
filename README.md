@@ -1,10 +1,12 @@
 # cosmic-cost-ai
 
-基于 COSMIC 功能点方法的软件造价 AI 辅助系统。系统支持从需求说明书或已拆分 Excel 导入项目，完成文档解析、AI 功能过程提取、COSMIC 数据移动拆分、复用度 AI 全表调整、人工审核和规则初审，并一键导出附件1 / 附件2 / 附件3 送审材料。
+基于 COSMIC 功能点方法的软件造价 AI 辅助系统。系统支持从需求说明书或已拆分 Excel 导入项目，以同一条 AI 智能拆分流水线自动完成 COSMIC 初拆、深度审核、安全建议采纳、复用度全表调整和规则初审，再由人工审核并一键导出附件1 / 附件2 / 附件3 送审材料。
 
 ## 当前能力
 
 - 支持上传 `doc` / `docx` 需求文档，并为每次上传生成独立项目档案。
+- 支持一次选择多份需求文档；先逐份确认送给 AI 的章节和最终正文，全部确认后再按项目并发执行拆分。
+- 首页提供“需求级 / 项目级”拆分级别；项目级在保留每份需求原有送审材料的同时，自动汇总项目附件1至附件5及完整 ZIP。
 - 支持直接导入已拆分的 `xls` / `xlsx` 附件3功能点拆分表，进入同一套审核、初审和导出流程。
 - 提供需求说明书标准模板下载：`src/main/resources/static/templates/requirement-standard-template.docx`。
 - 自动解析 Word 正文和表格文本，截取“需求内容 / 需求细则 / 业务功能 / 功能描述”等章节作为 AI 拆分输入。
@@ -33,6 +35,24 @@
 - 支持按项目名称、源文件名、项目 ID 搜索。
 - 支持按来源类型、导出状态、初审状态筛选。
 - 支持单个删除和批量删除；删除会移除项目存储目录下的上传文件、拆分结果和导出路径记录。
+
+### 批量拆分
+
+- “拆分级别”默认选择需求级；项目级支持一份或多份需求文档，统一按备案项目名称组织送审材料。
+- 首页需求文档选择框支持同时选择多份 `doc` / `docx`。
+- 批次创建后只执行上传和解析，不会提前调用 AI。
+- 文档解析与章节识别使用独立的本地准备线程池，不会被其他批次中长时间运行或等待 AI 的智能拆分任务阻塞。
+- 批量确认面板逐份展示推荐章节、章节字数、解析警告和最终 AI 输入，支持人工修改。
+- 每份文档确认时保存输入快照和内容哈希；全部文档确认且内容未变化后才允许启动。
+- 文档之间按配置并发；单个文档内部与单需求模式共用 `SmartSplitPipelineService`，严格按 COSMIC 初拆、AI 深度审核、安全建议采纳、复用度调整、规则初审顺序执行。
+- 多个批次同时运行时采用轮转调度；单用户极速模式默认全局 24 个文档执行槽、单批最多占 23 个，并由模型级 100 个在途请求额度统一保护；单文档深度审核最多并发 4 个分批请求。
+- 服务重启只恢复批次进度展示，不会静默恢复解析、AI 拆分或项目材料生成；重启前未完成项标记为“已中断”，必须由用户点击“恢复中断项”后才重新排队，已完成结果继续保留。
+- 某份文档失败不会中断其他文档，可只重试失败项；刷新页面可通过批次 ID 恢复进度。
+- 项目级批次只要仍有失败需求，就将项目材料标记为“已阻断”，不会生成不完整的附件或 ZIP；已成功需求的结果继续保留，失败项全部重试成功后自动续接项目材料汇总。
+- 项目级会先生成各需求原有附件1 / 2 / 3，再把全部最终审核行整合为一份项目需求说明书、业务需求汇总表和功能点拆分表。
+- 项目级整合时会自动移除原始文件名开头用于文件排序的序号（如 `1.`、`13 `、`十一、`、`（15）`），再作为需求章节名称，避免与 Word 自动章节编号重复；原始文件名和单需求材料名称保持不变。
+- 项目级附件4项目台账和附件5工作量评估申请表按项目总 CFP 汇总送审工作量；负责人、联系方式、预算、单价、供应商和签字等未知信息保持为空，送审前人工补充。
+- 项目级五个附件生成后自动打包为 `项目名称-COSMIC送审材料.zip`；材料生成失败可单独重试，不重复运行已完成的 AI 拆分。
 
 ### 已拆分 Excel 导入
 
@@ -83,7 +103,7 @@
 
 ### 复用度 AI 调整
 
-- 这是拆分流程末尾的独立节点，不依赖已屏蔽的逐行 AI 复核功能。
+- 这是 AI 智能拆分的内部质量阶段，不依赖已屏蔽的逐行 AI 复核功能；页面不再把它作为必须人工点击的独立流程节点。
 - 每次把当前完整拆分表作为同一判断范围，先识别功能级重复/包含，再识别子过程级复用，最后识别真实跨层、跨边界的新增。
 - 目标是让送审口径与设计院最终评审更一致、降低后续核减率，不以提高或压低 CFP 为目标。
 - 初审的“两项相同”只作为候选线索，不提供直接批量改成复用的操作。
@@ -95,7 +115,7 @@
 - 当前模型的 `provider`、`model` 或 `baseUrl` 识别为 DeepSeek 时，拆分、复用度 AI 调整和深度审核自动切换到 `deepseek-cosmic-v1`；其他模型继续使用通用提示词和调用方式。
 - DeepSeek 专项版不保存第二份 COSMIC 业务规则。各任务仍只引用 `SplitRuleConfigService` 提供的当前完整 v2.0 规则及同一规则版本号，专项执行协议仅规定处理顺序和输出格式。
 - 拆分固定返回 `{"functions":[]}`，复用度 AI 调整固定返回 `{"decisions":[]}`，深度审核固定返回 `{"suggestions":[]}`；功能描述也返回严格 JSON 对象，调用统一启用 DeepSeek `json_object`。
-- 选择 DeepSeek 后，拆分、复用度 AI 调整、深度审核和功能描述生成全程开启 Thinking，并统一使用 `reasoning_effort=max`；不再以速度或 token 消耗优先。最终结果只读取 JSON `content`，不接收推理过程。
+- 选择 DeepSeek 后按任务复杂度控制 Thinking：初次功能抽取和功能描述生成使用结构化非 Thinking 模式，AI 深度审核、初审复核和复用度全表判断保留 Thinking，并使用官方常规请求默认的 `reasoning_effort=high`。统一流水线、安全采纳和规则初审不减少，同时避免项目级并发把每个长提示词都按代理任务的 `max` 强度执行。最终结果只读取 JSON `content`，不接收推理过程。
 - DeepSeek 请求使用独立 System/User 消息：System 约束唯一规则源和 JSON 输出，User 携带当前任务、完整规则、审核数据及原文证据。
 - 初审“复用与 CFP”两项相同候选不会改值，也不提供围绕提示逐条降 CFP 的快捷操作；由独立的复用度 AI 调整节点基于全表证据统一处理。
 - E 类描述按真实发起方自然表达：用户/UI 主动触发使用“发起/提交”，外部平台上报或回调使用“接收”，外部同步响应使用“获取同步响应数据”；本地保存时会修正明确的“接收+功能过程名+请求”机械模板。
@@ -269,12 +289,14 @@ DEEPSEEK_API_KEY=your-api-key
 ```text
 上传 doc/docx 需求文档
   -> 解析文档并预览需求细则
-  -> 查看 / 编辑 AI 提示词
-  -> AI 拆分功能过程
-  -> COSMIC 分析
-  -> 复用度 AI 全表调整
-  -> 自动执行规则初审
-  -> 人工审核
+  -> 确认 AI 输入（可查看 / 编辑提示词）
+  -> AI 智能拆分
+       COSMIC 初拆
+       AI 深度审核
+       安全建议自动采纳
+       复用度 AI 全表调整
+       规则初审
+  -> 人工审核与导出
   -> 导出附件3与附件2
   -> 导出附件1
   -> 下载或打开送审材料目录
@@ -284,10 +306,12 @@ DEEPSEEK_API_KEY=your-api-key
 
 ```text
 上传 xls/xlsx 附件3拆分表
-  -> 导入拆分行并进入审核表
-  -> 复用度 AI 全表调整
-  -> 规则初审
-  -> 人工审核
+  -> AI 智能校准
+       AI 深度审核（仅依据当前表格）
+       安全建议自动采纳
+       复用度 AI 全表调整
+       规则初审
+  -> 人工审核与导出
   -> 导出附件3与附件2
   -> 导出附件1
   -> 下载或打开送审材料目录
@@ -304,18 +328,18 @@ DEEPSEEK_API_KEY=your-api-key
 - 上传需求文档并选择项目名称。
 - 下载标准需求说明书模板。
 - 导入已拆分 Excel。
-- 点击“开始拆分”串行完成上传、解析、AI 拆分、COSMIC 分析、复用度 AI 调整和审核数据加载。
+- 单文档点击“开始拆分”后先解析并确认 AI 输入，再由持久化后台任务串行完成 COSMIC 初拆、深度审核、安全建议采纳、复用度调整和规则初审；刷新页面可恢复进度。
+- 多文档点击“导入并确认”后进入批量确认面板；所有 AI 输入确认完成后，点击“开始并发拆分”。
 - 点击流程中的“解析”可展开 / 收起解析预览。
-- 点击流程中的“AI 拆分”可查看提示词、复制提示词、编辑提示词并重新发起拆分。
+- 页面流程收敛为“上传与解析 → AI 智能拆分 → 人工审核与导出”；点击“AI 智能拆分”默认查看五个内部环节的实时进度和结果统计，提示词查看/编辑保留为进度面板中的次要入口。
 - 点击“初审规则管理”可查看和保存拆分规则。
-- 点击“规则初审”可将风险原因和修改建议写入审核表。
-- 点击流程中的“复用度 AI 调整”可基于当前完整表重新执行整体校准，随后自动刷新规则初审。
+- 规则初审和复用度调整由 AI 智能拆分自动执行；人工修改表格后仍可按需重新校准。
 - 在审核表中可直接编辑单元格；长文本字段会打开编辑弹窗。
 - 支持新增行、复制单行、复制选中、删除选中和批量修改。
 - 修改复用度后自动刷新 CFP。
 - 点击“导出送审材料”会依次生成附件3、附件2和附件1。
 - 三份送审材料全部生成后会自动打包为 ZIP；ZIP 使用需求说明书的文件名，仅将 `.docx` 扩展名替换为 `.zip`。
-- 点击“AI 深度审校”会创建异步分批任务，按完整功能过程检查拆分、漏项数据移动、历史判例、功能级重复和子过程级复用。
+- 首次智能拆分会自动执行异步分批深度审核；“重新执行深度审核”仅用于人工大幅修改审核表后的复查。
 - 长需求文本会先检索与当前功能过程相关的原文证据，再按字符预算分批调用模型；单批超时不会丢失其他批次结果。
 - 每个深审批次都会附带从全表筛选出的跨批次高相似功能过程，支持按 `ADJUST_REUSE_CLASSIFICATION` 给出复用度与 CFP 调整建议。
 - 深度审校建议包含原表行号、原文证据编号、替换后的完整拆分行、置信度和 CFP 变化，采纳后自动保存审核表。
@@ -329,6 +353,13 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects` | GET | 获取本地历史项目列表 |
 | `/api/projects/{projectId}` | DELETE | 删除单个项目 |
 | `/api/projects/batch-delete` | POST | 批量删除项目 |
+| `/api/projects/batch-split` | POST | 创建批量拆分任务并异步解析所选需求文档 |
+| `/api/projects/batch-split/{batchId}` | GET | 查询批次准备、确认及并发执行进度 |
+| `/api/projects/batch-split/{batchId}/items/{projectId}/ai-input` | PUT | 保存并确认单份文档的章节和最终 AI 输入 |
+| `/api/projects/batch-split/{batchId}/start` | POST | 全部文档确认后启动并发拆分 |
+| `/api/projects/batch-split/{batchId}/retry` | POST | 仅重试批次中的失败文档 |
+| `/api/projects/batch-split/{batchId}/materials/retry` | POST | 仅重试失败的项目级送审材料生成 |
+| `/api/projects/batch-split/{batchId}/materials/{type}/download` | GET | 下载项目级附件1至附件5或完整 ZIP |
 | `/api/projects/{projectId}/parse` | POST | 解析需求说明书 |
 | `/api/projects/{projectId}/extract` | POST | 使用默认提示词执行 AI 功能点提取 |
 | `/api/projects/{projectId}/ai-prompt` | GET | 获取当前项目 AI 提示词和模型名 |
@@ -338,6 +369,8 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects/{projectId}/review` | PUT | 保存人工审核后的拆分表 |
 | `/api/projects/{projectId}/review/validate` | POST | 对当前审核行执行规则初审 |
 | `/api/projects/{projectId}/reuse-degree/adjust` | POST | 对完整拆分表执行复用度 AI 调整并保存证据充分的变更 |
+| `/api/projects/{projectId}/smart-split` | POST | 创建单需求持久化 AI 智能拆分任务；文档与 Excel 模式共用统一流水线 |
+| `/api/projects/{projectId}/smart-split` | GET | 查询智能拆分内部阶段、进度、深审采纳数和最终初审结果 |
 | `/api/projects/{projectId}/review/deep-split` | POST | 创建异步、分批的 AI 深度审校任务 |
 | `/api/projects/{projectId}/review/deep-split/{jobId}` | GET | 查询任务进度和已完成建议 |
 | `/api/projects/{projectId}/review/deep-split/{jobId}/retry` | POST | 仅重试超时或失败批次 |
@@ -439,6 +472,15 @@ curl -O -J http://localhost:8080/api/projects/{projectId}/exports/business/downl
 curl -O -J http://localhost:8080/api/projects/{projectId}/exports/word/download
 ```
 
+创建项目级批次并下载完整送审材料：
+
+```bash
+curl -X POST http://localhost:8080/api/projects/batch-split \
+  -H "Content-Type: application/json" \
+  -d '{"projectIds":["projectId-1","projectId-2"],"splitLevel":"PROJECT"}'
+curl -O -J http://localhost:8080/api/projects/batch-split/{batchId}/materials/archive/download
+```
+
 ## 存储文件
 
 上传并处理后会在项目目录下生成：
@@ -470,6 +512,10 @@ storage/projects/{projectId}
 - `function-split-rows.json`：人工审核后的功能点拆分表行数据。
 - `split-review.{xls|xlsx}`：从已拆分 Excel 导入项目时保存的源文件。
 - `deep-split/{jobId}/state.json`：AI 深度审校的原始审核行、分批状态、失败原因和累计建议，用于进度查询与失败批次重试。
+- `smart-split/state.json`：单需求 AI 智能拆分的当前阶段、进度、深度审核任务、自动采纳结果和最终规则初审统计。
+- `storage/batch-split/{batchId}/state.json`：批量拆分的逐文档准备、确认和执行状态。
+- `storage/batch-split/{batchId}/inputs/{projectId}.txt`：人工确认后冻结的 AI 输入快照。
+- 项目级材料状态、汇总 CFP、三级需求数量及附件下载路径也持久化在批次 `state.json`，服务重启后可恢复或重试材料生成。
 
 导出文件生成在：
 
@@ -478,6 +524,18 @@ output/{projectId}
 |-- 附件3-...的需求功能点拆分表V1.0.xlsx
 |-- 附件2-...的业务需求信息汇总表V1.0.xlsx
 `-- 附件1-....docx
+```
+
+项目级批次还会生成：
+
+```text
+output/project-materials/{batchId}
+|-- 附件1-{项目名称}需求说明书.docx
+|-- 附件2-{项目名称}业务需求信息汇总表V1.0.xlsx
+|-- 附件3-{项目名称}功能点拆分表V1.0.xlsx
+|-- 附件4-{项目名称}台账V1.0.xlsx
+|-- 附件5-{项目名称}定制化软件工作量评估申请表V1.0.xlsx
+`-- {项目名称}-COSMIC送审材料.zip
 ```
 
 如果同名文件已存在，会生成：

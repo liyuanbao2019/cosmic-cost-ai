@@ -17,7 +17,7 @@ public class AiModelProperties {
     private String model = "gpt-4o-mini";
     private long timeoutSeconds = 360;
     private int maxRetries = 2;
-    private int maxConcurrency = 10;
+    private int maxConcurrency = 100;
     private String configPath = "storage/config/ai-models.json";
     private DeepSplit deepSplit = new DeepSplit();
     private List<Model> models = new ArrayList<Model>();
@@ -48,7 +48,7 @@ public class AiModelProperties {
     public static class DeepSplit {
         private long chunkTimeoutSeconds = 180;
         private int maxRetries = 1;
-        private int chunkParallelism = 10;
+        private int chunkParallelism = 4;
         private int chunkPromptChars = 9000;
         private int evidenceChars = 5000;
         private int maxRequestRows = 10000;
