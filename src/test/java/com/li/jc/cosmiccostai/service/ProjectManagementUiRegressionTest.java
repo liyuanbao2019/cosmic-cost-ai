@@ -35,6 +35,21 @@ class ProjectManagementUiRegressionTest {
         assertTrue(projects.contains("$(\"projectVisible\").textContent = allProjects.length"));
     }
 
+    @Test
+    void requirementAndProjectLevelManagementAreSeparated() throws Exception {
+        String projects = read("src/main/resources/static/projects.html");
+
+        assertTrue(projects.contains("需求级拆分") && projects.contains("项目级材料"));
+        assertTrue(projects.contains("splitLevel: \"REQUIREMENT\""));
+        assertTrue(projects.contains("整合为项目级材料"));
+        assertTrue(projects.contains("/api/projects/batch-split/project-groups"));
+        assertTrue(projects.contains("projectGroupCreateDialogOverlay")
+                && projects.contains("reuseCompletedResults: true"));
+        assertFalse(projects.contains("targetBatchId"));
+        assertTrue(projects.contains("再次确认") && projects.contains("全部成员需求、拆分结果"));
+        assertTrue(projects.contains("project-group-id-button") && projects.contains("openProjectGroup"));
+    }
+
     private String read(String path) throws Exception {
         return new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8);
     }

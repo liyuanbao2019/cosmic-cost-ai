@@ -234,6 +234,7 @@ public class ProjectListService {
         item.setExcelExported(fileExists(metadata.getExcelOutputPath()));
         item.setBusinessExported(fileExists(metadata.getBusinessRequirementOutputPath()));
         item.setWordExported(fileExists(metadata.getWordOutputPath()));
+        item.setSplitResultReady(fileExists(metadata.getFunctionSplitRowsPath()));
         item.setExportStatus(exportStatus(item));
         if (metadata.getFunctionCount() != null) item.setFunctionCount(metadata.getFunctionCount());
         if (metadata.getIssueCount() != null) item.setIssueCount(metadata.getIssueCount());
@@ -298,6 +299,13 @@ public class ProjectListService {
             CachedBatch cached = batchCache.get(batchId);
             if (cached != null && cached.modified == modified && cached.size == size) return cached;
             JsonNode root = objectMapper.readTree(statePath.toFile());
+            // Project-group members remain requirement-level projects. The PJ entity,
+            // rather than every member row, represents the project-level aggregate.
+            if (StringUtils.hasText(text(root.get("projectGroupId")))) {
+                cached = new CachedBatch(modified, size, new HashMap<String, BatchAssociation>());
+                batchCache.put(batchId, cached);
+                return cached;
+            }
             String level = normalizeSplitLevel(text(root.get("splitLevel")));
             Map<String, BatchAssociation> values = new HashMap<String, BatchAssociation>();
             JsonNode items = root.get("items");

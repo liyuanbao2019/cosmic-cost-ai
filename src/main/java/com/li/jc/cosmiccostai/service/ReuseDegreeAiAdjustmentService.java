@@ -41,6 +41,8 @@ public class ReuseDegreeAiAdjustmentService {
     private static final double LEGACY_CONFIDENCE = 0.95D;
     private static final double NEW_CONFIDENCE = 0.90D;
     private static final String MODULE_ANCHOR_DEFAULT_SCOPE = "MODULE_ANCHOR_DEFAULT";
+    private static final String CROSS_FUNCTION_TWO_DIMENSIONS_SCOPE = "CROSS_FUNCTION_TWO_DIMENSIONS";
+    private static final String CROSS_FUNCTION_SHARED_MOVEMENT_SCOPE = "CROSS_FUNCTION_SHARED_MOVEMENT";
     private static final String KEY_SEPARATOR = "\u001f";
 
     private final AiModelConfigService aiModelConfigService;
@@ -75,6 +77,7 @@ public class ReuseDegreeAiAdjustmentService {
                     prompt, AiPromptTask.REUSE_ADJUSTMENT, false);
             List<ReuseDegreeAdjustmentDecision> decisions = parseDecisions(aiText);
             ModuleReusePlan moduleReusePlan = moduleReusePlan(rows);
+            addCrossFunctionSharedMovementTargets(rows, moduleReusePlan);
             List<ReuseDegreeAdjustmentDecision> modelDecisionsToApply =
                     excludeModuleReuseModelDecisions(decisions, moduleReusePlan);
             ApplySummary summary = applyDecisions(rows, modelDecisionsToApply);
@@ -82,7 +85,7 @@ public class ReuseDegreeAiAdjustmentService {
             if (governedModelDecisions > 0) {
                 summary.skipped += governedModelDecisions;
                 summary.warnings.add("有 " + governedModelDecisions
-                        + " 条模型建议属于同模块基准功能默认规则范围，已由服务端统一接管。");
+                        + " 条模型建议属于服务端确定性复用规则范围，已由服务端统一接管。");
             }
             List<ReuseDegreeAdjustmentDecision> moduleRuleDecisions =
                     applyModuleReusePlan(rows, moduleReusePlan);
@@ -120,8 +123,8 @@ public class ReuseDegreeAiAdjustmentService {
         builder.append("业务目标：依据完整规则和全表证据给出最接近最终设计院评审的复用度，降低后续核减率；不追求 CFP 多，也不追求 CFP 少。\n");
         builder.append("必须遵守：\n");
         builder.append("1. 必须把整张表作为同一判断范围，先识别功能级重复/包含，再识别子过程级复用，最后识别真实跨层、跨边界的新增。\n");
-        builder.append("2. 同一一级/二级/三级模块路径内，只要存在新增、查询、导入任意一种独立功能过程，就将这些基准功能过程的全部子过程设为新增，并将同模块修改、删除、导出、下载功能过程的全部子过程设为复用；不要求增删改查四类齐全。该规则由服务端统一落地，模型不要为这些行输出 decision，也不得提出相反值。\n");
-        builder.append("3. 不得为了消除初审提示而改值。两项相似只能进入候选；证据不足时保持原复用度且不要输出 decision。\n");
+        builder.append("2. 同一一级/二级/三级模块路径内，新增和查询功能过程的全部子过程设为新增；导入或上传若是同模块新增数据功能的配套能力，全部子过程设为复用，若同模块不存在新增功能则可作为新增基准；同模块修改、删除、导出、下载功能过程的全部子过程设为复用。不要求增删改查四类齐全。该规则由服务端统一落地，模型不要为这些行输出 decision，也不得提出相反值。\n");
+        builder.append("3. 服务端先判断整个功能过程是否重复/包含，再按表格顺序判断跨功能共享子过程：后置功能过程中审核三要素恰有两项相同，或三项完全相同但整个功能过程并不重复，且未发现跨层/跨边界差异时，当前行自动设为复用/0.33；模型不要为这些行输出 decision，也不得提出相反值。\n");
         builder.append("4. 新增=1、复用=0.33、利旧=0。你只判断 suggestedReuseDegree，CFP 由服务端统一映射。\n");
         builder.append("5. 建议复用时 duplicateScope=MOVEMENT，必须给出有效 referenceRowIndexes，并在 matchedDimensions 中列出审核三要素中至少两项：subProcessDescription、movementType、dataAttributes。\n");
         builder.append("6. 建议利旧时 duplicateScope=FUNCTION，必须证明整个用户目标重复/被包含，并为该功能过程的每一行分别输出 decision；matchedDimensions 必须包含全部三项。\n");
@@ -219,7 +222,9 @@ public class ReuseDegreeAiAdjustmentService {
     }
 
     List<ReuseDegreeAdjustmentDecision> applyModuleReuseDefaults(List<FunctionSplitRow> rows) {
-        return applyModuleReusePlan(rows, moduleReusePlan(rows));
+        ModuleReusePlan plan = moduleReusePlan(rows);
+        addCrossFunctionSharedMovementTargets(rows, plan);
+        return applyModuleReusePlan(rows, plan);
     }
 
     private List<ReuseDegreeAdjustmentDecision> excludeModuleReuseModelDecisions(
@@ -228,7 +233,7 @@ public class ReuseDegreeAiAdjustmentService {
         for (ReuseDegreeAdjustmentDecision decision : decisions == null
                 ? Collections.<ReuseDegreeAdjustmentDecision>emptyList() : decisions) {
             if (decision != null && plan.targets.containsKey(decision.getRowIndex())) {
-                reject(decision, "该行属于同模块基准功能默认规则范围，模型建议不参与落地。 ");
+                reject(decision, "该行属于服务端确定性复用规则范围，模型建议不参与落地。 ");
                 continue;
             }
             result.add(decision);
@@ -276,31 +281,147 @@ public class ReuseDegreeAiAdjustmentService {
             }
             List<Integer> anchors = firstRows(processGroups,
                     ModuleAction.CREATE, ModuleAction.QUERY, ModuleAction.IMPORT);
+            List<Integer> createAnchors = firstRows(processGroups, ModuleAction.CREATE);
+            boolean hasCreate = actions.contains(ModuleAction.CREATE);
             for (ProcessGroup group : processGroups.values()) {
                 String target;
-                if (group.action == ModuleAction.CREATE || group.action == ModuleAction.QUERY
-                        || group.action == ModuleAction.IMPORT) {
+                String reason;
+                List<Integer> referenceAnchors = anchors;
+                if (group.action == ModuleAction.CREATE || group.action == ModuleAction.QUERY) {
                     target = "新增";
+                    reason = "新增或查询属于同模块基准功能";
+                } else if (group.action == ModuleAction.IMPORT) {
+                    target = hasCreate ? "复用" : "新增";
+                    reason = hasCreate
+                            ? "同模块已存在新增数据功能，当前导入或上传属于其配套能力"
+                            : "同模块不存在新增数据功能，当前导入或上传可作为独立新增基准";
+                    referenceAnchors = hasCreate
+                            ? createAnchors : Collections.<Integer>emptyList();
                 } else if (group.action == ModuleAction.DELETE || group.action == ModuleAction.MODIFY
                         || group.action == ModuleAction.EXPORT) {
                     target = "复用";
+                    reason = "同模块存在新增、查询、导入或上传基准功能";
                 } else {
                     continue;
                 }
                 for (Integer rowIndex : group.rowIndexes) {
                     List<Integer> references = new ArrayList<Integer>();
-                    for (Integer anchor : anchors) {
+                    for (Integer anchor : referenceAnchors) {
                         if (!anchor.equals(rowIndex)) {
                             references.add(anchor);
                         }
                     }
                     plan.targets.put(rowIndex,
                             new ModuleReuseTarget(target, group.moduleLabel, group.process,
-                                    references));
+                                    references, reason));
                 }
             }
         }
         return plan;
+    }
+
+    private void addCrossFunctionSharedMovementTargets(List<FunctionSplitRow> rows,
+                                                        ModuleReusePlan plan) {
+        Set<String> duplicateProcessKeys = duplicateProcessKeys(rows);
+        Map<String, List<IndexedRow>> exactIndex = new LinkedHashMap<String, List<IndexedRow>>();
+        Map<String, List<IndexedRow>> pairIndex = new LinkedHashMap<String, List<IndexedRow>>();
+        for (int index = 0; index < rows.size(); index++) {
+            FunctionSplitRow row = rows.get(index);
+            if (!ReuseAuditSimilarity.hasCompleteAuditElements(row)) {
+                continue;
+            }
+            int rowIndex = index + 1;
+            String processKey = FunctionProcessKey.of(row);
+            IndexedRow exact = firstDifferentProcess(exactIndex.get(
+                    ReuseAuditSimilarity.exactKey(row)), processKey, row, true);
+            if ("新增".equals(normalizeReuse(row.getReuseDegree()))
+                    && !duplicateProcessKeys.contains(processKey)) {
+                if (exact != null) {
+                    plan.targets.put(rowIndex, new ModuleReuseTarget(
+                            "复用", moduleLabel(row), text(row.getFunctionProcess()),
+                            Collections.singletonList(exact.rowIndex),
+                            "与拆分数据第 " + exact.rowIndex
+                                    + " 条跨功能过程的审核三要素完全相同，但两个完整功能过程并不重复，当前行为后置功能共享子过程",
+                            CROSS_FUNCTION_SHARED_MOVEMENT_SCOPE,
+                            Arrays.asList("subProcessDescription", "movementType", "dataAttributes")));
+                } else {
+                String[] pairKeys = ReuseAuditSimilarity.pairKeys(row);
+                for (int pair = 0; pair < pairKeys.length; pair++) {
+                    IndexedRow previous = firstDifferentProcess(
+                            pairIndex.get(pairKeys[pair]), processKey, row, true);
+                    if (previous == null) {
+                        continue;
+                    }
+                    plan.targets.put(rowIndex, new ModuleReuseTarget(
+                            "复用", moduleLabel(row), text(row.getFunctionProcess()),
+                            Collections.singletonList(previous.rowIndex),
+                            "与拆分数据第 " + previous.rowIndex
+                                    + " 条跨功能过程的审核三要素恰有两项相同，且未发现跨层/跨边界差异",
+                            CROSS_FUNCTION_TWO_DIMENSIONS_SCOPE,
+                            ReuseAuditSimilarity.pairDimensions(pair)));
+                    break;
+                }
+                }
+            }
+            addIndex(exactIndex, ReuseAuditSimilarity.exactKey(row),
+                    new IndexedRow(rowIndex, processKey, row));
+            for (String pairKey : ReuseAuditSimilarity.pairKeys(row)) {
+                addIndex(pairIndex, pairKey, new IndexedRow(rowIndex, processKey, row));
+            }
+        }
+    }
+
+    private Set<String> duplicateProcessKeys(List<FunctionSplitRow> rows) {
+        Map<String, List<FunctionSplitRow>> processRows = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        for (FunctionSplitRow row : rows) {
+            String processKey = FunctionProcessKey.of(row);
+            List<FunctionSplitRow> group = processRows.get(processKey);
+            if (group == null) {
+                group = new ArrayList<FunctionSplitRow>();
+                processRows.put(processKey, group);
+            }
+            group.add(row);
+        }
+        Map<String, String> firstByFingerprint = new LinkedHashMap<String, String>();
+        Set<String> duplicates = new HashSet<String>();
+        for (Map.Entry<String, List<FunctionSplitRow>> entry : processRows.entrySet()) {
+            String fingerprint = ReuseAuditSimilarity.processFingerprint(entry.getValue());
+            String previous = firstByFingerprint.get(fingerprint);
+            if (previous == null) {
+                firstByFingerprint.put(fingerprint, entry.getKey());
+            } else if (!previous.equals(entry.getKey())) {
+                duplicates.add(entry.getKey());
+            }
+        }
+        return duplicates;
+    }
+
+    private IndexedRow firstDifferentProcess(List<IndexedRow> candidates,
+                                             String processKey,
+                                             FunctionSplitRow current,
+                                             boolean requireComparableObject) {
+        for (IndexedRow candidate : candidates == null
+                ? Collections.<IndexedRow>emptyList() : candidates) {
+            if (candidate.processKey.equals(processKey)) {
+                continue;
+            }
+            if (!requireComparableObject
+                    || ReuseAuditSimilarity.isComparableAcrossFunctions(candidate.row, current)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private void addIndex(Map<String, List<IndexedRow>> index,
+                          String key,
+                          IndexedRow row) {
+        List<IndexedRow> values = index.get(key);
+        if (values == null) {
+            values = new ArrayList<IndexedRow>();
+            index.put(key, values);
+        }
+        values.add(row);
     }
 
     private List<Integer> firstRows(Map<String, ProcessGroup> groups, ModuleAction... actions) {
@@ -339,16 +460,18 @@ public class ReuseDegreeAiAdjustmentService {
             decision.setOriginalReuseDegree(original);
             decision.setSuggestedReuseDegree(target.reuseDegree);
             decision.setSuggestedCfp(expectedCfp);
-            decision.setDuplicateScope(MODULE_ANCHOR_DEFAULT_SCOPE);
+            decision.setDuplicateScope(target.scope);
             decision.setReferenceRowIndexes(target.referenceRowIndexes);
-            decision.setMatchedDimensions(Collections.<String>emptyList());
-            decision.setReason("同一功能模块“" + target.moduleLabel
-                    + "”存在新增、查询或导入基准功能过程；当前“"
-                    + target.process + "”按同模块默认规则判为" + target.reuseDegree + "。");
+            decision.setMatchedDimensions(target.matchedDimensions);
+            decision.setReason("同一功能模块“" + target.moduleLabel + "”中，"
+                    + target.ruleReason + "；当前“" + target.process
+                    + "”按同模块默认规则判为" + target.reuseDegree + "。");
             decision.setEvidenceSufficient(true);
             decision.setConfidence(1D);
             decision.setApplied(true);
-            decision.setApplyMessage("已按同模块基准功能默认规则调整为"
+            decision.setApplyMessage((MODULE_ANCHOR_DEFAULT_SCOPE.equals(target.scope)
+                    ? "已按同模块基准功能默认规则调整为"
+                    : "已按跨功能两项相同确定性规则调整为")
                     + target.reuseDegree + "，CFP=" + formatCfp(expectedCfp) + "。");
             decisions.add(decision);
         }
@@ -376,6 +499,9 @@ public class ReuseDegreeAiAdjustmentService {
             } else if ("导出".equals(label)) {
                 actions.add(ModuleAction.EXPORT);
             }
+        }
+        if (actions.isEmpty() && process.contains("上传")) {
+            actions.add(ModuleAction.IMPORT);
         }
         return actions.size() == 1 ? actions.iterator().next() : null;
     }
@@ -645,13 +771,38 @@ public class ReuseDegreeAiAdjustmentService {
         private final String moduleLabel;
         private final String process;
         private final List<Integer> referenceRowIndexes;
+        private final String ruleReason;
+        private final String scope;
+        private final List<String> matchedDimensions;
 
         private ModuleReuseTarget(String reuseDegree, String moduleLabel, String process,
-                                  List<Integer> referenceRowIndexes) {
+                                  List<Integer> referenceRowIndexes, String ruleReason) {
+            this(reuseDegree, moduleLabel, process, referenceRowIndexes, ruleReason,
+                    MODULE_ANCHOR_DEFAULT_SCOPE, Collections.<String>emptyList());
+        }
+
+        private ModuleReuseTarget(String reuseDegree, String moduleLabel, String process,
+                                  List<Integer> referenceRowIndexes, String ruleReason,
+                                  String scope, List<String> matchedDimensions) {
             this.reuseDegree = reuseDegree;
             this.moduleLabel = moduleLabel;
             this.process = process;
             this.referenceRowIndexes = referenceRowIndexes;
+            this.ruleReason = ruleReason;
+            this.scope = scope;
+            this.matchedDimensions = matchedDimensions;
+        }
+    }
+
+    private static final class IndexedRow {
+        private final int rowIndex;
+        private final String processKey;
+        private final FunctionSplitRow row;
+
+        private IndexedRow(int rowIndex, String processKey, FunctionSplitRow row) {
+            this.rowIndex = rowIndex;
+            this.processKey = processKey;
+            this.row = row;
         }
     }
 

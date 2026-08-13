@@ -129,8 +129,10 @@ class ReuseDegreeAiAdjustmentServiceTest {
 
         assertTrue(prompt.contains("降低后续核减率"));
         assertTrue(prompt.contains("不追求 CFP 多，也不追求 CFP 少"));
-        assertTrue(prompt.contains("不得为了消除初审提示而改值"));
-        assertTrue(prompt.contains("只要存在新增、查询、导入任意一种独立功能过程"));
+        assertTrue(prompt.contains("三项完全相同但整个功能过程并不重复"));
+        assertTrue(prompt.contains("当前行自动设为复用/0.33"));
+        assertTrue(prompt.contains("导入或上传若是同模块新增数据功能的配套能力"));
+        assertTrue(prompt.contains("若同模块不存在新增功能则可作为新增基准"));
         assertTrue(prompt.contains("同模块修改、删除、导出、下载功能过程的全部子过程设为复用"));
         assertTrue(prompt.contains("不要求增删改查四类齐全"));
         assertTrue(prompt.contains("该规则由服务端统一落地"));
@@ -208,6 +210,41 @@ class ReuseDegreeAiAdjustmentServiceTest {
     }
 
     @Test
+    void importAndUploadSupportingNewDataAreReuse() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                moduleRow("客户资料", "新增客户资料", "新增"),
+                moduleRow("客户资料", "导入客户资料", "新增"),
+                moduleRow("客户资料", "上传客户资料", "新增"));
+
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertEquals(2, decisions.size());
+        assertEquals("新增", rows.get(0).getReuseDegree());
+        assertEquals("复用", rows.get(1).getReuseDegree());
+        assertEquals("复用", rows.get(2).getReuseDegree());
+        assertEquals(0.33D, rows.get(1).getCfp(), 0.0001D);
+        assertEquals(0.33D, rows.get(2).getCfp(), 0.0001D);
+        assertEquals(Collections.singletonList(1), decisions.get(0).getReferenceRowIndexes());
+        assertTrue(decisions.get(0).getReason().contains("配套能力"));
+    }
+
+    @Test
+    void uploadWithoutNewDataCanRemainNewAnchor() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                moduleRow("客户资料", "上传客户资料", "复用"),
+                moduleRow("客户资料", "修改客户资料", "新增"));
+
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertEquals(2, decisions.size());
+        assertEquals("新增", rows.get(0).getReuseDegree());
+        assertEquals("复用", rows.get(1).getReuseDegree());
+        assertTrue(decisions.get(0).getReason().contains("可作为独立新增基准"));
+    }
+
+    @Test
     void workflowWordInsideManagedObjectDoesNotBlockWholeProcessReuseAdjustment() {
         ReuseDegreeAiAdjustmentService service = service(null, null, null);
         List<FunctionSplitRow> rows = Arrays.asList(
@@ -256,6 +293,76 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals("新增", rows.get(0).getReuseDegree());
         assertEquals("新增", rows.get(1).getReuseDegree());
         assertEquals("新增", rows.get(2).getReuseDegree());
+    }
+
+    @Test
+    void crossFunctionTwoMatchingAuditDimensionsAreAutomaticallyReuse() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        FunctionSplitRow previous = row("查询客户资料", "读取客户资料", "R",
+                "客户资料", "客户编号、客户名称", "新增");
+        FunctionSplitRow current = row("展示客户资料", "获取客户资料", "R",
+                "客户资料", "客户名称、客户编号", "新增");
+        previous.setLevel3Module("客户资料管理");
+        current.setLevel3Module("客户资料管理");
+
+        List<FunctionSplitRow> rows = Arrays.asList(previous, current);
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertEquals(1, decisions.size());
+        assertEquals("新增", rows.get(0).getReuseDegree());
+        assertEquals("复用", rows.get(1).getReuseDegree());
+        assertEquals(0.33D, rows.get(1).getCfp(), 0.0001D);
+        assertEquals("CROSS_FUNCTION_TWO_DIMENSIONS", decisions.get(0).getDuplicateScope());
+        assertEquals(Collections.singletonList(1), decisions.get(0).getReferenceRowIndexes());
+        assertTrue(decisions.get(0).getMatchedDimensions().contains("movementType"));
+        assertTrue(decisions.get(0).getMatchedDimensions().contains("dataAttributes"));
+    }
+
+    @Test
+    void crossFunctionThreeMatchingDimensionsRemainFunctionDuplicateRisk() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        FunctionSplitRow previous = row("查询客户资料", "读取客户资料", "R",
+                "客户资料", "客户编号、客户名称", "新增");
+        FunctionSplitRow current = row("展示客户资料", "读取客户资料", "R",
+                "客户资料", "客户名称、客户编号", "新增");
+        previous.setLevel3Module("客户资料管理");
+        current.setLevel3Module("客户资料管理");
+
+        List<FunctionSplitRow> rows = Arrays.asList(previous, current);
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertTrue(decisions.isEmpty());
+        assertEquals("新增", rows.get(1).getReuseDegree());
+        assertEquals(1D, rows.get(1).getCfp(), 0.0001D);
+    }
+
+    @Test
+    void exactSharedMovementInOtherwiseDifferentLaterFunctionIsReuse() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        FunctionSplitRow firstEntry = row("查询客户资料", "接收客户查询条件", "E",
+                "客户查询条件", "查询关键字", "新增");
+        FunctionSplitRow firstRead = row("查询客户资料", "读取客户资料", "R",
+                "客户资料", "客户编号、客户名称", "新增");
+        FunctionSplitRow secondEntry = row("展示客户资料", "接收客户展示请求", "E",
+                "客户展示请求", "展示场景", "新增");
+        FunctionSplitRow secondRead = row("展示客户资料", "读取客户资料", "R",
+                "客户资料", "客户名称、客户编号", "新增");
+        FunctionSplitRow secondExit = row("展示客户资料", "返回客户展示结果", "X",
+                "客户展示结果", "客户编号、展示状态", "新增");
+        for (FunctionSplitRow row : Arrays.asList(firstEntry, firstRead, secondEntry, secondRead, secondExit)) {
+            row.setLevel3Module("客户资料管理");
+        }
+
+        List<FunctionSplitRow> rows = Arrays.asList(
+                firstEntry, firstRead, secondEntry, secondRead, secondExit);
+        List<ReuseDegreeAdjustmentDecision> decisions = service.applyModuleReuseDefaults(rows);
+
+        assertEquals(1, decisions.size());
+        assertEquals("复用", secondRead.getReuseDegree());
+        assertEquals(0.33D, secondRead.getCfp(), 0.0001D);
+        assertEquals("CROSS_FUNCTION_SHARED_MOVEMENT", decisions.get(0).getDuplicateScope());
+        assertEquals(Collections.singletonList(2), decisions.get(0).getReferenceRowIndexes());
+        assertEquals(3, decisions.get(0).getMatchedDimensions().size());
     }
 
     private ReuseDegreeAiAdjustmentService service(AiModelConfigService ai,

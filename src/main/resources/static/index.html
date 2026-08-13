@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260811-project-split-1">
+  <link rel="stylesheet" href="/app.css?v=20260812-requirement-warning-1">
 </head>
 
 <body>
@@ -94,6 +94,30 @@
     </div>
   </div>
 
+  <div id="projectGroupAddDialogOverlay" class="dialog-overlay hidden" onclick="closeProjectGroupAddDialogOnOverlay(event)">
+    <div class="dialog project-group-add-dialog" role="dialog" aria-modal="true" aria-labelledby="projectGroupAddDialogTitle">
+      <div class="project-group-dialog-header">
+        <div>
+          <h3 id="projectGroupAddDialogTitle" class="dialog-title">添加已拆分需求</h3>
+          <p>在当前项目中选择已有拆分结果，不跳转项目列表；添加后自动生成下一版项目级材料。</p>
+        </div>
+        <button type="button" class="ghost" onclick="closeProjectGroupAddDialog()">关闭</button>
+      </div>
+      <label class="project-group-dialog-search" for="projectGroupRequirementSearch">
+        <span>搜索需求名称、文件名或编号</span>
+        <input id="projectGroupRequirementSearch" type="search" placeholder="输入关键词筛选" oninput="renderProjectGroupRequirementCandidates()">
+      </label>
+      <div class="project-group-dialog-members">
+        <div class="project-group-dialog-members-title">已选 <b id="projectGroupRequirementSelectedCount">0</b> 个可复用需求</div>
+        <div id="projectGroupRequirementList" class="project-group-dialog-list"><div>正在加载...</div></div>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" onclick="closeProjectGroupAddDialog()">取消</button>
+        <button id="projectGroupRequirementSubmit" type="button" onclick="submitExistingRequirementsToProjectGroup()">添加到当前项目</button>
+      </div>
+    </div>
+  </div>
+
   <div id="review-stage-dialog-overlay" class="dialog-overlay hidden" onclick="closeReviewStageDialogOnOverlay(event)">
     <div class="dialog review-stage-dialog" role="dialog" aria-modal="true" aria-labelledby="review-stage-dialog-title">
       <div class="review-stage-dialog-header">
@@ -118,6 +142,10 @@
         </div>
         <div class="smart-split-dialog-progress"><span id="smartSplitDialogProgressBar"></span></div>
         <p id="smartSplitDialogMessage">确认 AI 输入并开始拆分后，这里会显示每个内部环节的实时状态。</p>
+        <div class="smart-split-dialog-times">
+          <span>开始时间 <b id="smartSplitDialogStartedAt">—</b></span>
+          <span>结束时间 <b id="smartSplitDialogCompletedAt">—</b></span>
+        </div>
         <div class="smart-split-dialog-stats">
           <span id="smartSplitDialogSuggestionStat" class="hidden">深审建议 <b id="smartSplitDialogSuggestions">-</b></span>
           <span id="smartSplitDialogAppliedStat" class="hidden">自动采纳 <b id="smartSplitDialogApplied">-</b></span>
@@ -131,6 +159,7 @@
           <div>
             <div class="smart-split-stage-title"><b id="stageAiSplitTitle">COSMIC 初拆</b><span class="smart-split-stage-state">等待</span></div>
             <p id="stageAiSplitText">把原始需求文档交给 AI，让它找出有哪些功能，并先按 E/R/W/X 拆成表格。相当于先出一版草稿，解决“从无到有”。</p>
+            <div class="smart-split-stage-times" data-stage-timing="COSMIC"><span>开始 <b data-time="start">—</b></span><span>结束 <b data-time="end">—</b></span></div>
           </div>
         </article>
         <article id="smartStageDeepReview" class="smart-split-stage pending hidden">
@@ -138,6 +167,7 @@
           <div>
             <div class="smart-split-stage-title"><b id="stageDeepReviewTitle">AI 深度审核</b><span class="smart-split-stage-state">等待</span></div>
             <p id="stageDeepReviewText">对照原文审查漏拆、错拆、重复计量和 E/R/W/X 缏失；有证据、无冲突且不增加确定性错误的建议会自动采纳。</p>
+            <div class="smart-split-stage-times" data-stage-timing="DEEP_REVIEW"><span>开始 <b data-time="start">—</b></span><span>结束 <b data-time="end">—</b></span></div>
           </div>
         </article>
         <article id="smartStageApply" class="smart-split-stage pending hidden">
@@ -145,6 +175,7 @@
           <div>
             <div class="smart-split-stage-title"><b>安全建议采纳</b><span class="smart-split-stage-state">等待</span></div>
             <p>按置信度和原文证据处理深审建议；发生行冲突或增加确定性错误的建议自动跳过。</p>
+            <div class="smart-split-stage-times" data-stage-timing="APPLY_DEEP_REVIEW"><span>开始 <b data-time="start">—</b></span><span>结束 <b data-time="end">—</b></span></div>
           </div>
         </article>
         <article id="smartStageReuse" class="smart-split-stage pending">
@@ -152,6 +183,7 @@
           <div>
             <div class="smart-split-stage-title"><b>复用度 AI 调整</b><span class="smart-split-stage-state">等待</span></div>
             <p>按最终全表比较功能目标、业务边界和审核三要素，统一校准新增、复用和利旧。</p>
+            <div class="smart-split-stage-times" data-stage-timing="REUSE"><span>开始 <b data-time="start">—</b></span><span>结束 <b data-time="end">—</b></span></div>
           </div>
         </article>
         <article id="smartStageRules" class="smart-split-stage pending">
@@ -159,6 +191,7 @@
           <div>
             <div class="smart-split-stage-title"><b>规则初审</b><span class="smart-split-stage-state">等待</span></div>
             <p>逐行检查必填项、E/R/W/X、过程结构、CFP 映射等确定性问题，并把其它结构风险带入人工审核。</p>
+            <div class="smart-split-stage-times" data-stage-timing="RULE_VALIDATION"><span>开始 <b data-time="start">—</b></span><span>结束 <b data-time="end">—</b></span></div>
           </div>
         </article>
       </div>
@@ -206,7 +239,7 @@
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
             <option value="2026年家客终端扩容">2026年家客终端扩容</option>
             <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
-            <option value="26年共享采集">26年共享采集</option>
+            <option value="2026年共享采集扩容">2026年共享采集扩容</option>
             <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
             <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
           </select>
@@ -261,11 +294,16 @@
         <div>
           <div class="batch-split-title-line">
             <h2>批量拆分确认面板</h2>
-            <span id="batchSplitBadge" class="badge muted">未创建</span>
+            <span id="batchProjectGroupBadge" class="badge hidden" title="项目级项目编号">-</span>
+            <span id="batchSplitBadge" class="badge muted" title="本次执行批次编号">未创建</span>
           </div>
           <p id="batchSplitSummary" class="batch-split-summary">先逐份确定送给 AI 的章节和正文，全部确认后才能并发拆分。</p>
         </div>
         <div class="batch-split-header-actions">
+          <button id="batchAddExistingBtn" type="button" class="ghost hidden" onclick="addExistingRequirementsToProjectGroup()">添加已拆分需求</button>
+          <button id="batchAddNewBtn" type="button" class="ghost hidden" onclick="chooseNewProjectGroupDocuments()">上传并添加新需求</button>
+          <input id="batchAddFileInput" class="hidden" type="file" accept=".doc,.docx" multiple onchange="uploadAndAddProjectGroupDocuments()">
+          <button id="batchRerunItemBtn" type="button" class="ghost hidden" onclick="rerunCurrentProjectGroupItem()">重新拆分当前需求</button>
           <button id="batchRetryBtn" type="button" class="ghost hidden" onclick="retryBatchSplitFailed()">恢复失败/中断项</button>
           <button id="batchStartBtn" type="button" onclick="startBatchSplitExecution()" disabled>等待全部确认</button>
         </div>
@@ -294,6 +332,10 @@
             <button id="batchOpenProjectBtn" type="button" class="ghost hidden" onclick="openBatchProject()">进入项目</button>
           </div>
           <div id="batchRequirementWarning" class="batch-requirement-warning hidden"></div>
+          <div id="batchSelectedItemError" class="batch-selected-item-error hidden">
+            <div><b>失败原因</b><button type="button" class="ghost" onclick="copyBatchSelectedItemError(this)">复制原因</button></div>
+            <p id="batchSelectedItemErrorText"></p>
+          </div>
           <div id="batchInputEmpty" class="batch-input-empty">文档解析完成后，可在这里逐份确认 AI 输入。</div>
           <div id="batchInputEditor" class="hidden">
             <div class="batch-chapter-toolbar">
@@ -622,6 +664,8 @@
     let batchSplitPollInFlight = false;
     let batchInputDirty = false;
     let batchChapterDirty = false;
+    let projectGroupRequirementCandidates = [];
+    let selectedProjectGroupRequirementIds = {};
     const reuseOptions = ["新增", "复用", "利旧"];
     const movementOptions = ["E", "R", "W", "X"];
     const sequenceDiagramOptions = ["UI->UI", "UI->后台服务", "后台服务->后台服务", "后台服务->UI"];
@@ -747,6 +791,9 @@
       $("smartSplitDialogMessage").textContent = job
         ? textOr(job.errorMessage, textOr(job.stageMessage, "正在执行 AI 智能拆分"))
         : "确认 AI 输入并开始拆分后，这里会显示每个内部环节的实时状态。";
+      $("smartSplitDialogStartedAt").textContent = smartSplitTime(job && (job.startedAt || job.createdAt));
+      $("smartSplitDialogCompletedAt").textContent = smartSplitTime(job && job.completedAt,
+        job && (status === "RUNNING" || status === "QUEUED") ? "进行中" : "—");
       $("smartSplitDialogSuggestions").textContent = job ? Number(job.deepSuggestionCount || 0) : "-";
       $("smartSplitDialogApplied").textContent = job ? Number(job.appliedSuggestionCount || 0) : "-";
       $("smartSplitDialogErrors").textContent = job ? Number(job.errorCount || 0) : "-";
@@ -768,6 +815,24 @@
         }
         setSmartSplitStageState(id, state);
       });
+      renderSmartSplitStageTimes(job);
+    }
+
+    function renderSmartSplitStageTimes(job) {
+      const timings = job && job.stageTimings || {};
+      document.querySelectorAll(".smart-split-stage-times[data-stage-timing]").forEach(function (element) {
+        const timing = timings[element.getAttribute("data-stage-timing")] || {};
+        const start = element.querySelector('[data-time="start"]');
+        const end = element.querySelector('[data-time="end"]');
+        if (start) start.textContent = smartSplitTime(timing.startedAt);
+        if (end) end.textContent = smartSplitTime(timing.completedAt,
+          timing.startedAt && !timing.completedAt ? "进行中" : "—");
+      });
+    }
+
+    function smartSplitTime(value, emptyText) {
+      const normalized = value == null ? "" : String(value).trim();
+      return normalized || emptyText || "—";
     }
 
     function smartSplitInternalStageIndex(stage, progress, deepReviewEnabled) {
@@ -1915,8 +1980,13 @@
         return;
       }
       setBatchModeActive(true);
-      $("batchSplitBadge").textContent = job.batchId || "-";
+      const projectLevel = job.splitLevel === "PROJECT" && !!job.projectGroupId;
+      $("batchProjectGroupBadge").textContent = job.projectGroupId || "-";
+      $("batchProjectGroupBadge").classList.toggle("hidden", !projectLevel);
+      $("batchSplitBadge").textContent = projectLevel ? "执行 " + (job.batchId || "-") : (job.batchId || "-");
       $("batchSplitBadge").className = "badge";
+      $("batchAddExistingBtn").classList.toggle("hidden", !projectLevel);
+      $("batchAddNewBtn").classList.toggle("hidden", !projectLevel);
       $("batchTotalCount").textContent = job.total || 0;
       $("batchAwaitingCount").textContent = job.awaitingConfirmation || 0;
       $("batchConfirmedCount").textContent = job.confirmed || 0;
@@ -1934,16 +2004,20 @@
         return item.status === "FAILED" && item.stage === "RESTART_INTERRUPTED";
       }).length;
       const executionStarted = !!job.startedAt;
-      const ready = !executionStarted && job.total > 0 && job.confirmed === job.total && !batchInputDirty;
+      const preparationBlockers = Number(job.parseQueued || 0) + Number(job.preparing || 0)
+        + Number(job.awaitingConfirmation || 0);
+      const ready = Number(job.confirmed || 0) > 0 && preparationBlockers === 0 && !batchInputDirty;
       const startButton = $("batchStartBtn");
       startButton.disabled = !ready;
-      startButton.textContent = executionStarted
-        ? (job.status === "COMPLETED" ? "批量拆分已完成"
+      startButton.textContent = ready
+        ? (executionStarted ? "开始新增需求拆分（" + job.confirmed + "）" : "开始并发拆分（" + job.confirmed + "）")
+        : (executionStarted
+        ? (job.status === "COMPLETED" ? "当前无待拆分需求"
           : (job.status === "GENERATING_MATERIALS" ? "正在生成送审材料"
             : (job.status === "PARTIAL_COMPLETED"
               ? (interruptedCount > 0 ? "任务已中断，等待手动恢复" : "存在失败，等待重试")
               : "批量拆分进行中")))
-        : (ready ? "开始并发拆分（" + job.total + "）" : "等待全部确认");
+        : "等待全部确认");
       $("batchRetryBtn").textContent = job.failed > 0
         ? (interruptedCount === job.failed ? "恢复中断项（" + job.failed + "）"
           : (interruptedCount > 0 ? "恢复失败/中断项（" + job.failed + "）" : "重试失败项（" + job.failed + "）"))
@@ -1963,6 +2037,7 @@
           selectBatchItem(selectedItem.projectId, true);
         }
       }
+      updateBatchProjectActions();
     }
 
     function batchJobSummary(job) {
@@ -2008,7 +2083,8 @@
     function renderBatchDocumentList(items) {
       $("batchDocumentList").innerHTML = items.map(function (item, index) {
         const active = item.projectId === batchSelectedProjectId ? " active" : "";
-        const error = item.errorMessage ? "<span class=\"batch-document-error\">" + escapeHtml(item.errorMessage) + "</span>" : "";
+        const error = item.errorMessage ? "<span class=\"batch-document-error\" title=\""
+          + escapeHtml(item.errorMessage) + "\">" + escapeHtml(item.errorMessage) + "</span>" : "";
         return "<button type=\"button\" class=\"batch-document-item" + active + "\" onclick=\"selectBatchItem('"
           + item.projectId + "')\"><span class=\"batch-document-index\">" + (index + 1) + "</span>"
           + "<span class=\"batch-document-name\">" + escapeHtml(item.sourceFileName || item.projectId) + error + "</span>"
@@ -2031,6 +2107,7 @@
     }
 
     function batchStageText(stage) {
+      if (stage === "INPUT_COVERAGE_CHECK") return "正文完整性校验";
       if (stage === "AI_EXTRACTING") return "AI 识别功能";
       if (stage === "COSMIC_SPLITTING") return "COSMIC 初拆";
       if (stage === "DEEP_REVIEWING" || stage === "DEEP_REVIEW_RETRYING") return "AI 深度审核";
@@ -2049,7 +2126,7 @@
       const status = job.projectMaterialStatus || "PENDING";
       const summary = $("batchProjectMaterialsSummary");
       if (status === "COMPLETED") {
-        summary.textContent = "已汇总 " + Number(job.projectMaterialRequirementCount || 0)
+        summary.textContent = "V" + Number(job.projectMaterialVersion || 1) + " 已汇总 " + Number(job.projectMaterialRequirementCount || 0)
           + " 个三级需求、" + Number(job.projectMaterialTotalCfp || 0).toLocaleString() + " CFP。";
       } else if (status === "BLOCKED") {
         summary.textContent = job.projectMaterialMessage
@@ -2096,9 +2173,14 @@
         + (item.progressPercent ? " · " + Number(item.progressPercent) + "%" : "")
         + (item.inputLength ? " · 已确认 " + Number(item.inputLength).toLocaleString() + " 字" : "")
         + (item.stageMessage ? " · " + item.stageMessage : "");
-      $("batchRequirementWarning").textContent = item.requirementWarning || "";
-      $("batchRequirementWarning").classList.toggle("hidden", !item.requirementWarning);
+      const currentRequirementWarning = item.confirmedAt || Number(item.inputLength || 0) > 0
+        ? "" : (item.requirementWarning || "");
+      $("batchRequirementWarning").textContent = currentRequirementWarning;
+      $("batchRequirementWarning").classList.toggle("hidden", !currentRequirementWarning);
+      $("batchSelectedItemErrorText").textContent = item.errorMessage || "";
+      $("batchSelectedItemError").classList.toggle("hidden", !item.errorMessage);
       $("batchOpenProjectBtn").classList.toggle("hidden", item.status !== "COMPLETED");
+      updateBatchProjectActions();
 
       if (item.existingRows) {
         batchLoadedProjectId = "";
@@ -2143,6 +2225,19 @@
         if (batchLoadingProjectId === projectId) {
           batchLoadingProjectId = "";
         }
+      }
+    }
+
+    async function copyBatchSelectedItemError(button) {
+      const message = $("batchSelectedItemErrorText").textContent || "";
+      if (!message) return;
+      try {
+        await navigator.clipboard.writeText(message);
+        const original = button.textContent;
+        button.textContent = "已复制";
+        window.setTimeout(function () { button.textContent = original; }, 1200);
+      } catch (error) {
+        showDialog("复制失败", "请手动选择失败原因后复制。");
       }
     }
 
@@ -2300,8 +2395,9 @@
       if (!currentBatchSplitJob || batchInputDirty) {
         return;
       }
-      const confirmed = window.confirm("确认开始并发拆分 " + currentBatchSplitJob.total
-        + " 份需求文档？\n\n开始后本批次的章节和 AI 输入将锁定。"
+      const splitCount = Number(currentBatchSplitJob.confirmed || 0);
+      const confirmed = window.confirm("确认开始并发拆分 " + splitCount
+        + " 份已确认的需求文档？\n\n只会启动本次新增并已确认的需求，不会重复执行已完成成员。"
         + (currentBatchSplitJob.splitLevel === "PROJECT"
           ? "\n全部完成后将自动生成各需求送审材料和项目级附件 1–5。" : ""));
       if (!confirmed) {
@@ -2371,14 +2467,199 @@
 
     function updateBatchEditorLock() {
       const item = currentBatchItem();
-      const locked = !item || !!(currentBatchSplitJob && currentBatchSplitJob.startedAt)
-        || (item.status !== "AWAITING_CONFIRMATION" && item.status !== "CONFIRMED");
+      const locked = !item || (item.status !== "AWAITING_CONFIRMATION" && item.status !== "CONFIRMED");
       $("batchAiInput").readOnly = locked;
       $("batchConfirmInputBtn").disabled = locked;
       $("batchApplyChaptersBtn").disabled = locked;
       document.querySelectorAll(".batch-chapter-check").forEach(function (element) {
         element.disabled = locked;
       });
+    }
+
+    function updateBatchProjectActions() {
+      const item = currentBatchItem();
+      const rerunnable = currentBatchSplitJob && item
+        && (item.status === "COMPLETED" || item.status === "FAILED");
+      $("batchRerunItemBtn").classList.toggle("hidden", !rerunnable);
+    }
+
+    async function addExistingRequirementsToProjectGroup() {
+      if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
+      selectedProjectGroupRequirementIds = {};
+      projectGroupRequirementCandidates = [];
+      $("projectGroupRequirementSearch").value = "";
+      $("projectGroupRequirementSelectedCount").textContent = "0";
+      $("projectGroupRequirementList").innerHTML = "<div>正在加载可复用需求...</div>";
+      $("projectGroupAddDialogOverlay").classList.remove("hidden");
+      try {
+        const existingIds = {};
+        (currentBatchSplitJob.items || []).forEach(function (item) { existingIds[item.projectId] = true; });
+        const occupiedIds = {};
+        const groupsResponse = await request("/api/projects/batch-split/project-groups");
+        (Array.isArray(groupsResponse.data) ? groupsResponse.data : []).forEach(function (group) {
+          if (group.batchId === currentBatchSplitJob.batchId) return;
+          (group.items || []).forEach(function (item) { occupiedIds[item.projectId] = true; });
+        });
+        const expectedProjectName = String(((currentBatchSplitJob.items || [])[0] || {}).projectName || "").trim();
+        const candidates = [];
+        let page = 1;
+        let totalPagesToLoad = 1;
+        do {
+          const response = await request("/api/projects?splitLevel=REQUIREMENT&page=" + page + "&pageSize=100");
+          const data = response.data || {};
+          (data.projects || []).forEach(function (project) {
+            if (!project || !project.projectId || existingIds[project.projectId]
+                || occupiedIds[project.projectId] || !project.splitResultReady) return;
+            if (expectedProjectName && String(project.projectName || "").trim() !== expectedProjectName) return;
+            candidates.push(project);
+          });
+          totalPagesToLoad = Number(data.totalPages || 1);
+          page++;
+        } while (page <= totalPagesToLoad);
+        projectGroupRequirementCandidates = candidates;
+        renderProjectGroupRequirementCandidates();
+      } catch (error) {
+        $("projectGroupRequirementList").innerHTML = "<div>" + escapeHtml(error.message || "可复用需求加载失败。") + "</div>";
+      }
+    }
+
+    function renderProjectGroupRequirementCandidates() {
+      const keyword = String($("projectGroupRequirementSearch").value || "").trim().toLowerCase();
+      const visible = projectGroupRequirementCandidates.filter(function (project) {
+        if (!keyword) return true;
+        return [project.projectName, project.sourceFileName, project.projectId].some(function (value) {
+          return String(value || "").toLowerCase().indexOf(keyword) >= 0;
+        });
+      });
+      const list = $("projectGroupRequirementList");
+      if (!visible.length) {
+        list.innerHTML = "<div>没有符合条件的已拆分需求。</div>";
+      } else {
+        list.innerHTML = visible.map(function (project) {
+          const checked = selectedProjectGroupRequirementIds[project.projectId] ? " checked" : "";
+          return "<label class=\"project-group-dialog-candidate\"><input type=\"checkbox\"" + checked
+            + " onchange=\"toggleProjectGroupRequirement('" + escapeHtml(project.projectId) + "', this.checked)\">"
+            + "<b>" + escapeHtml(project.sourceFileName || project.projectName || project.projectId) + "</b>"
+            + "<span>" + escapeHtml(project.projectId) + "</span></label>";
+        }).join("");
+      }
+      $("projectGroupRequirementSelectedCount").textContent = Object.keys(selectedProjectGroupRequirementIds).length;
+    }
+
+    function toggleProjectGroupRequirement(projectId, checked) {
+      if (checked) selectedProjectGroupRequirementIds[projectId] = true;
+      else delete selectedProjectGroupRequirementIds[projectId];
+      $("projectGroupRequirementSelectedCount").textContent = Object.keys(selectedProjectGroupRequirementIds).length;
+    }
+
+    function closeProjectGroupAddDialog() {
+      $("projectGroupAddDialogOverlay").classList.add("hidden");
+      projectGroupRequirementCandidates = [];
+      selectedProjectGroupRequirementIds = {};
+    }
+
+    function closeProjectGroupAddDialogOnOverlay(event) {
+      if (event.target === $("projectGroupAddDialogOverlay")) closeProjectGroupAddDialog();
+    }
+
+    async function submitExistingRequirementsToProjectGroup() {
+      if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
+      const projectIds = Object.keys(selectedProjectGroupRequirementIds);
+      if (!projectIds.length) {
+        showDialog("尚未选择需求", "请至少勾选一个已有拆分结果的需求。");
+        return;
+      }
+      const button = $("projectGroupRequirementSubmit");
+      button.disabled = true;
+      button.textContent = "正在添加...";
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectIds: projectIds, reuseCompletedResults: true })
+        });
+        currentBatchSplitJob = response.data || currentBatchSplitJob;
+        closeProjectGroupAddDialog();
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("已添加 " + projectIds.length + " 个已拆分需求，正在生成下一版项目级材料。", "success");
+      } catch (error) {
+        showDialog("添加已有需求失败", error.message || "请稍后重试。");
+      } finally {
+        button.disabled = false;
+        button.textContent = "添加到当前项目";
+      }
+    }
+
+    function chooseNewProjectGroupDocuments() {
+      const input = $("batchAddFileInput");
+      input.value = "";
+      input.click();
+    }
+
+    async function uploadAndAddProjectGroupDocuments() {
+      if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
+      const input = $("batchAddFileInput");
+      const files = Array.prototype.slice.call(input.files || []);
+      if (!files.length) return;
+      const invalid = files.filter(function (file) { return !/\.(doc|docx)$/i.test(file.name || ""); });
+      if (invalid.length) {
+        showDialog("文件格式不支持", "只能添加 doc 或 docx 需求文档。");
+        return;
+      }
+      const projectName = currentBatchSplitJob.projectGroupName
+        || ((currentBatchSplitJob.items || [])[0] || {}).projectName || "未命名项目";
+      try {
+        setMessage("正在上传新增需求... 0/" + files.length);
+        const projectIds = [];
+        for (let index = 0; index < files.length; index++) {
+          const formData = new FormData();
+          formData.append("file", files[index]);
+          formData.append("projectName", projectName);
+          formData.append("splitLevel", "REQUIREMENT");
+          const upload = await request("/api/files/upload", { method: "POST", body: formData });
+          projectIds.push(upload.data.projectId);
+          setMessage("正在上传新增需求... " + projectIds.length + "/" + files.length);
+        }
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectIds: projectIds, reuseCompletedResults: false })
+        });
+        currentBatchSplitJob = response.data || currentBatchSplitJob;
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("新增需求已加入项目。解析完成后请逐份确认 AI 输入。", "success");
+      } catch (error) {
+        showDialog("添加新需求失败", error.message || "请稍后重试。");
+      } finally {
+        input.value = "";
+      }
+    }
+
+    async function rerunCurrentProjectGroupItem() {
+      const item = currentBatchItem();
+      if (!currentBatchSplitJob || !item) return;
+      if (!window.confirm("确认重新拆分“" + (item.sourceFileName || item.projectId)
+        + "”？\n\n只重跑这一项，其他需求结果保持不变。"
+        + (currentBatchSplitJob.splitLevel === "PROJECT" ? "完成后会生成下一版项目材料。" : ""))) return;
+      const button = $("batchRerunItemBtn");
+      button.disabled = true;
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/items/"
+          + encodeURIComponent(item.projectId) + "/rerun", { method: "POST" });
+        currentBatchSplitJob = response.data || currentBatchSplitJob;
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("该需求已独立进入重新拆分队列，其他需求不会重跑。", "success");
+      } catch (error) {
+        showDialog("重新拆分失败", error.message || "请稍后重试。");
+      } finally {
+        button.disabled = false;
+      }
     }
 
     function openBatchProject() {
@@ -5026,6 +5307,7 @@
       if (event.key === "Escape") {
         closeAiPromptDialog();
         closeReviewStageDialog();
+        closeProjectGroupAddDialog();
       }
     });
   </script>

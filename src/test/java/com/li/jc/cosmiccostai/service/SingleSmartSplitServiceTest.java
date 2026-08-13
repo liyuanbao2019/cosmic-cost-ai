@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -30,7 +31,11 @@ class SingleSmartSplitServiceTest {
         when(pipeline.runDocument(eq("P1"), eq(""), any(SmartSplitPipelineService.StageListener.class)))
                 .thenAnswer(invocation -> {
                     SmartSplitPipelineService.StageListener listener = invocation.getArgument(2);
+                    listener.onStage("AI_EXTRACTING", 8, "正在识别功能");
+                    listener.onStage("COSMIC_SPLITTING", 28, "正在初拆");
                     listener.onStage("REUSE_ADJUSTING", 62, "正在调整复用度");
+                    listener.onStage("RULE_VALIDATING", 88, "正在规则初审");
+                    listener.onStage("COMPLETED", 100, "已完成");
                     return new SmartSplitPipelineService.PipelineResult();
                 });
         SingleSmartSplitService service = new SingleSmartSplitService(
@@ -45,7 +50,18 @@ class SingleSmartSplitServiceTest {
         assertEquals("DISABLED", saved.getDeepSplitStatus());
         assertEquals(100, saved.getProgressPercent());
         assertEquals(started.getJobId(), saved.getJobId());
+        assertNotNull(saved.getStartedAt());
+        assertNotNull(saved.getCompletedAt());
+        assertStageCompleted(saved, "COSMIC");
+        assertStageCompleted(saved, "REUSE");
+        assertStageCompleted(saved, "RULE_VALIDATION");
         assertTrue(Files.exists(temporaryProject.resolve("smart-split/state.json")));
         verify(pipeline).runDocument(eq("P1"), eq(""), any(SmartSplitPipelineService.StageListener.class));
+    }
+
+    private void assertStageCompleted(SmartSplitJobResponse saved, String stage) {
+        assertNotNull(saved.getStageTimings().get(stage));
+        assertNotNull(saved.getStageTimings().get(stage).getStartedAt());
+        assertNotNull(saved.getStageTimings().get(stage).getCompletedAt());
     }
 }

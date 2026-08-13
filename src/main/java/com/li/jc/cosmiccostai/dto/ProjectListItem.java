@@ -20,6 +20,7 @@ public class ProjectListItem {
     private boolean businessExported;
     private boolean wordExported;
     private String exportStatus;
+    private boolean splitResultReady;
 
     public String getProjectId() {
         return projectId;
@@ -156,4 +157,8 @@ public class ProjectListItem {
     public void setExportStatus(String exportStatus) {
         this.exportStatus = exportStatus;
     }
+
+    public boolean isSplitResultReady() { return splitResultReady; }
+
+    public void setSplitResultReady(boolean splitResultReady) { this.splitResultReady = splitResultReady; }
 }

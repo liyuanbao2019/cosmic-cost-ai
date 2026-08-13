@@ -85,6 +85,7 @@ class SmartSplitPipelineServiceTest {
         assertEquals(1, result.getAppliedSuggestionCount());
         assertEquals("R-test", result.getRuleVersion());
         assertFalse(result.isPartial());
+        assertTrue(stages.indexOf("INPUT_COVERAGE_CHECK") < stages.indexOf("AI_EXTRACTING"));
         assertTrue(stages.indexOf("DEEP_REVIEWING") < stages.indexOf("REUSE_ADJUSTING"));
         assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
         assertEquals("COMPLETED", stages.get(stages.size() - 1));

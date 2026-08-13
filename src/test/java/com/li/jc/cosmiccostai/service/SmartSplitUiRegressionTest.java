@@ -33,6 +33,14 @@ class SmartSplitUiRegressionTest {
         assertTrue(html.contains("id=\"smartStageApply\""));
         assertTrue(html.contains("id=\"smartStageReuse\""));
         assertTrue(html.contains("id=\"smartStageRules\""));
+        assertTrue(html.contains("id=\"smartSplitDialogStartedAt\"")
+                && html.contains("id=\"smartSplitDialogCompletedAt\""));
+        assertTrue(html.contains("data-stage-timing=\"COSMIC\"")
+                && html.contains("data-stage-timing=\"REUSE\"")
+                && html.contains("data-stage-timing=\"RULE_VALIDATION\""));
+        assertTrue(html.contains("renderSmartSplitStageTimes(job)"));
+        assertTrue(html.contains("const normalized = value == null ? \"\" : String(value).trim();"));
+        assertFalse(html.contains("const normalized = text(value);"));
 
         int clickStart = html.indexOf("function handleStepClick");
         int clickEnd = html.indexOf("function showRuleValidationPanel", clickStart);

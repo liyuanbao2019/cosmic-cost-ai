@@ -18,7 +18,8 @@ class BatchSplitUiRegressionTest {
 
         assertTrue(html.contains("id=\"fileInput\" type=\"file\" accept=\".doc,.docx\" multiple"));
         assertTrue(html.contains("id=\"batchStartBtn\"") && html.contains("等待全部确认"));
-        assertTrue(html.contains("job.confirmed === job.total"));
+        assertTrue(html.contains("Number(job.confirmed || 0) > 0")
+                && html.contains("preparationBlockers === 0"));
         assertTrue(html.contains("/ai-input"));
         assertTrue(html.contains("/start"));
         assertTrue(html.contains("id=\"splitLevel\"") && html.contains("value=\"PROJECT\">项目级"));
@@ -44,5 +45,14 @@ class BatchSplitUiRegressionTest {
         assertTrue(html.contains("恢复中断项"));
         assertTrue(html.contains("RESTART_INTERRUPTED"));
         assertTrue(html.contains("跨批次公平调度"));
+        assertTrue(html.contains("id=\"batchProjectGroupBadge\""));
+        assertTrue(html.contains("添加已拆分需求") && html.contains("上传并添加新需求"));
+        assertTrue(html.contains("projectGroupAddDialogOverlay")
+                && html.contains("submitExistingRequirementsToProjectGroup"));
+        assertFalse(html.contains("/projects.html?targetBatchId="));
+        assertTrue(html.contains("/rerun") && html.contains("重新拆分当前需求"));
+        assertTrue(html.contains("id=\"batchSelectedItemError\"")
+                && html.contains("copyBatchSelectedItemError"));
+        assertTrue(html.contains("item.confirmedAt || Number(item.inputLength || 0) > 0"));
     }
 }

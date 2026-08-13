@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.dto.SmartSplitJobResponse;
+import com.li.jc.cosmiccostai.dto.SmartSplitStageTiming;
 import com.li.jc.cosmiccostai.dto.SmartSplitStartRequest;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.task.TaskExecutor;
@@ -87,6 +88,7 @@ public class SingleSmartSplitService {
                 state.setStatus("FAILED");
                 state.setStage("FAILED");
                 state.setErrorMessage("智能拆分队列已满，请稍后重试：" + rootMessage(ex));
+                state.setCompletedAt(now());
                 state.setUpdatedAt(now());
                 saveState(state);
                 throw new BusinessException(state.getErrorMessage(), ex);
@@ -106,6 +108,8 @@ public class SingleSmartSplitService {
                 state.setStatus("FAILED");
                 state.setStage("INTERRUPTED");
                 state.setErrorMessage("服务重启中断了本次智能拆分，请重新执行。已完成的项目数据仍会保留。");
+                state.setCompletedAt(now());
+                completeCurrentStageTiming(state);
                 state.setUpdatedAt(now());
                 saveState(state);
             }
@@ -124,6 +128,9 @@ public class SingleSmartSplitService {
                 state.setStage("STARTING");
                 state.setStageMessage("正在启动统一 AI 智能拆分流水线");
                 state.setProgressPercent(2);
+                if (!StringUtils.hasText(state.getStartedAt())) {
+                    state.setStartedAt(now());
+                }
             }
         });
         try {
@@ -136,6 +143,7 @@ public class SingleSmartSplitService {
                             state.setStage(stage);
                             state.setStageMessage(message);
                             state.setProgressPercent(Math.max(state.getProgressPercent(), progressPercent));
+                            updateStageTiming(state, stage);
                         }
                     });
                 }
@@ -169,6 +177,7 @@ public class SingleSmartSplitService {
                         state.setStructureRiskCount(validation.getStructureRiskCount());
                     }
                     state.setCompletedAt(now());
+                    completeCurrentStageTiming(state);
                 }
             });
         } catch (final RuntimeException ex) {
@@ -180,6 +189,7 @@ public class SingleSmartSplitService {
                     state.setStageMessage("AI 智能拆分未完成");
                     state.setErrorMessage(rootMessage(ex));
                     state.setCompletedAt(now());
+                    completeCurrentStageTiming(state);
                 }
             });
         } finally {
@@ -245,6 +255,56 @@ public class SingleSmartSplitService {
 
     private String normalizeSourceMode(String sourceMode) {
         return "EXCEL".equalsIgnoreCase(text(sourceMode)) ? "EXCEL" : "DOCUMENT";
+    }
+
+    private void updateStageTiming(SmartSplitJobResponse state, String pipelineStage) {
+        String visibleStage = visibleStage(pipelineStage);
+        if (!StringUtils.hasText(visibleStage)) {
+            if ("COMPLETED".equals(pipelineStage)) {
+                completeCurrentStageTiming(state);
+            }
+            return;
+        }
+        String timestamp = now();
+        for (java.util.Map.Entry<String, SmartSplitStageTiming> entry : state.getStageTimings().entrySet()) {
+            if (!entry.getKey().equals(visibleStage)
+                    && entry.getValue() != null
+                    && StringUtils.hasText(entry.getValue().getStartedAt())
+                    && !StringUtils.hasText(entry.getValue().getCompletedAt())) {
+                entry.getValue().setCompletedAt(timestamp);
+            }
+        }
+        SmartSplitStageTiming timing = state.getStageTimings().get(visibleStage);
+        if (timing == null) {
+            timing = new SmartSplitStageTiming();
+            state.getStageTimings().put(visibleStage, timing);
+        }
+        if (!StringUtils.hasText(timing.getStartedAt())) {
+            timing.setStartedAt(timestamp);
+        }
+    }
+
+    private void completeCurrentStageTiming(SmartSplitJobResponse state) {
+        String timestamp = now();
+        for (SmartSplitStageTiming timing : state.getStageTimings().values()) {
+            if (timing != null && StringUtils.hasText(timing.getStartedAt())
+                    && !StringUtils.hasText(timing.getCompletedAt())) {
+                timing.setCompletedAt(timestamp);
+            }
+        }
+    }
+
+    private String visibleStage(String pipelineStage) {
+        if ("INPUT_COVERAGE_CHECK".equals(pipelineStage) || "AI_EXTRACTING".equals(pipelineStage)
+                || "COSMIC_SPLITTING".equals(pipelineStage)
+                || "LOADING_ROWS".equals(pipelineStage)) return "COSMIC";
+        if ("DEEP_REVIEWING".equals(pipelineStage) || "DEEP_REVIEW_RETRYING".equals(pipelineStage)) {
+            return "DEEP_REVIEW";
+        }
+        if ("APPLYING_DEEP_REVIEW".equals(pipelineStage)) return "APPLY_DEEP_REVIEW";
+        if ("REUSE_ADJUSTING".equals(pipelineStage)) return "REUSE";
+        if ("RULE_VALIDATING".equals(pipelineStage)) return "RULE_VALIDATION";
+        return null;
     }
 
     private boolean active(String status) {

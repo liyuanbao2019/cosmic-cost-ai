@@ -11,13 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AiTaskConfigTest {
 
     @Test
-    void batchSplitExecutorUsesConfiguredProjectParallelism() throws InterruptedException {
+    void batchSplitExecutorCanStartFiftyProjectsWithoutApplicationQueueing() throws InterruptedException {
         ThreadPoolTaskExecutor executor = (ThreadPoolTaskExecutor)
-                new AiTaskConfig().batchSplitExecutor(3, 10);
-        CountDownLatch started = new CountDownLatch(3);
+                new AiTaskConfig().batchSplitExecutor(50, 100);
+        CountDownLatch started = new CountDownLatch(50);
         CountDownLatch release = new CountDownLatch(1);
         try {
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0; i < 50; i++) {
                 executor.execute(new Runnable() {
                     @Override
                     public void run() {
@@ -30,8 +30,8 @@ class AiTaskConfigTest {
                     }
                 });
             }
-            assertTrue(started.await(2, TimeUnit.SECONDS),
-                    "three confirmed documents should be able to split concurrently");
+            assertTrue(started.await(5, TimeUnit.SECONDS),
+                    "fifty confirmed documents should enter split execution without application queueing");
         } finally {
             release.countDown();
             executor.shutdown();

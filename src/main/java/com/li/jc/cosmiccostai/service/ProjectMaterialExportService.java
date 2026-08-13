@@ -23,11 +23,15 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -125,6 +129,84 @@ public class ProjectMaterialExportService {
         bundle.totalCfp = excel.getTotalCfp();
         bundle.files.putAll(files);
         return bundle;
+    }
+
+    /** Deletes every aggregate material version owned by one project-level group. */
+    public int deleteMaterialVersions(String projectGroupId, String batchId) {
+        String group = safeMaterialId(projectGroupId, "PJ");
+        String batch = safeMaterialId(batchId, "BS");
+        Path root = outputBaseDir.resolve("project-materials").toAbsolutePath().normalize();
+        if (!Files.isDirectory(root)) {
+            return 0;
+        }
+        int deleted = 0;
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(root)) {
+            for (Path directory : directories) {
+                if (!Files.isDirectory(directory)) continue;
+                String name = directory.getFileName().toString();
+                if (name.equals(group) || name.startsWith(group + "-V")
+                        || name.equals(batch) || name.startsWith(batch + "-V")) {
+                    deleteDirectory(directory, root);
+                    deleted++;
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("删除项目级材料版本失败。", ex);
+        }
+        return deleted;
+    }
+
+    /** Deletes the individual exported material folders for requirements owned by a deleted group. */
+    public int deleteRequirementOutputs(List<String> projectIds) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            return 0;
+        }
+        Path root = outputBaseDir.toAbsolutePath().normalize();
+        int deleted = 0;
+        Set<String> unique = new LinkedHashSet<String>();
+        for (String projectId : projectIds) {
+            unique.add(safeMaterialId(projectId, "P"));
+        }
+        try {
+            for (String projectId : unique) {
+                Path directory = root.resolve(projectId).normalize();
+                if (!Files.isDirectory(directory)) continue;
+                deleteDirectory(directory, root);
+                deleted++;
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("删除关联需求的导出材料失败。", ex);
+        }
+        return deleted;
+    }
+
+    private String safeMaterialId(String value, String prefix) {
+        String normalized = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+        if (!normalized.matches(prefix + "[0-9A-Z]+")) {
+            throw new BusinessException("无效的项目级材料编号。");
+        }
+        return normalized;
+    }
+
+    private void deleteDirectory(Path directory, Path allowedRoot) throws IOException {
+        Path root = allowedRoot.toAbsolutePath().normalize();
+        Path target = directory.toAbsolutePath().normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new BusinessException("项目级材料删除路径非法，已拒绝操作。");
+        }
+        try (Stream<Path> paths = Files.walk(target)) {
+            List<Path> ordered = new ArrayList<Path>();
+            paths.forEach(ordered::add);
+            Collections.sort(ordered, new Comparator<Path>() {
+                @Override
+                public int compare(Path left, Path right) {
+                    return right.compareTo(left);
+                }
+            });
+            for (Path path : ordered) {
+                Files.deleteIfExists(path);
+            }
+        }
     }
 
     private List<FunctionSplitRow> readAndMapRows(ProjectMetadata metadata, String projectName) {

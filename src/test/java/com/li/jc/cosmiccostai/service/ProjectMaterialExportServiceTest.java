@@ -38,6 +38,30 @@ class ProjectMaterialExportServiceTest {
     Path tempDir;
 
     @Test
+    void deletesAggregateVersionsAndIndividualRequirementOutputs() throws Exception {
+        ProjectMaterialExportService service = new ProjectMaterialExportService(
+                mock(FileStorageService.class), mock(ExcelExportService.class),
+                mock(WordExportService.class), tempDir.toString());
+        Path aggregateRoot = tempDir.resolve("project-materials");
+        Files.createDirectories(aggregateRoot.resolve("PJABC-V1"));
+        Files.createDirectories(aggregateRoot.resolve("PJABC-V2"));
+        Files.createDirectories(aggregateRoot.resolve("BSXYZ"));
+        Files.createDirectories(aggregateRoot.resolve("PJRETAIN-V1"));
+        Files.createDirectories(tempDir.resolve("P111"));
+        Files.createDirectories(tempDir.resolve("P222"));
+
+        assertEquals(3, service.deleteMaterialVersions("PJABC", "BSXYZ"));
+        assertEquals(2, service.deleteRequirementOutputs(Arrays.asList("P111", "P222")));
+
+        assertFalse(Files.exists(aggregateRoot.resolve("PJABC-V1")));
+        assertFalse(Files.exists(aggregateRoot.resolve("PJABC-V2")));
+        assertFalse(Files.exists(aggregateRoot.resolve("BSXYZ")));
+        assertTrue(Files.exists(aggregateRoot.resolve("PJRETAIN-V1")));
+        assertFalse(Files.exists(tempDir.resolve("P111")));
+        assertFalse(Files.exists(tempDir.resolve("P222")));
+    }
+
+    @Test
     void removesLeadingFileSequenceOnlyFromProjectRequirementChapterName() {
         ProjectMaterialExportService service = new ProjectMaterialExportService(
                 mock(FileStorageService.class), mock(ExcelExportService.class),

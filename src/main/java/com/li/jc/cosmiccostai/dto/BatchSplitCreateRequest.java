@@ -7,6 +7,8 @@ public class BatchSplitCreateRequest {
 
     private List<String> projectIds = new ArrayList<String>();
     private String splitLevel = "REQUIREMENT";
+    private boolean reuseCompletedResults;
+    private String projectGroupName;
 
     public List<String> getProjectIds() {
         return projectIds;
@@ -22,5 +24,21 @@ public class BatchSplitCreateRequest {
 
     public void setSplitLevel(String splitLevel) {
         this.splitLevel = splitLevel;
+    }
+
+    public boolean isReuseCompletedResults() {
+        return reuseCompletedResults;
+    }
+
+    public void setReuseCompletedResults(boolean reuseCompletedResults) {
+        this.reuseCompletedResults = reuseCompletedResults;
+    }
+
+    public String getProjectGroupName() {
+        return projectGroupName;
+    }
+
+    public void setProjectGroupName(String projectGroupName) {
+        this.projectGroupName = projectGroupName;
     }
 }

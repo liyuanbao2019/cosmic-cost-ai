@@ -3,6 +3,8 @@ package com.li.jc.cosmiccostai.service;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +22,25 @@ class DocumentParseServiceDiagnosisTest {
         Object diagnosis = diagnose("背景说明。\n按照原有既定规则优化字段去重逻辑。");
         assertFalse((Boolean) field(diagnosis, "recognized"));
         assertTrue(((String) field(diagnosis, "suggestion")).contains("需求细则"));
+    }
+
+    @Test
+    void recognizesFunctionExplanationFromWordOutlineEvenBeforeDefaultTextExtraction() throws Exception {
+        DocumentParseService service = new DocumentParseService(new FileStorageService("storage"));
+        Class<?> markerType = Class.forName(
+                "com.li.jc.cosmiccostai.service.DocumentParseService$HeadingMarker");
+        java.lang.reflect.Constructor<?> constructor = markerType.getDeclaredConstructor(int.class, String.class);
+        constructor.setAccessible(true);
+        List<Object> headings = new ArrayList<Object>();
+        headings.add(constructor.newInstance(1, "系统概述"));
+        headings.add(constructor.newInstance(1, "功能说明"));
+        Method method = DocumentParseService.class.getDeclaredMethod(
+                "diagnoseRequirementSection", String.class, List.class);
+        method.setAccessible(true);
+
+        Object diagnosis = method.invoke(service, "", headings);
+
+        assertTrue((Boolean) field(diagnosis, "recognized"));
     }
 
     private Object diagnose(String text) throws Exception {

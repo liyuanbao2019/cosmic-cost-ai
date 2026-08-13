@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.BatchSplitConfirmRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
+import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
@@ -22,11 +23,14 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -98,6 +102,23 @@ class BatchSplitServiceTest {
     }
 
     @Test
+    void confirmingValidSelectedContentClearsTheEarlyParseWarning() {
+        ParseResponse parsedWithWarning = new ParseResponse();
+        parsedWithWarning.setRequirementRecognized(false);
+        parsedWithWarning.setRequirementWarning("未识别到有效的需求内容。");
+        when(documentParseService.parseProject(metadata.getId())).thenReturn(parsedWithWarning);
+
+        BatchSplitJobResponse created = service.create(createRequest());
+        assertEquals("未识别到有效的需求内容。", created.getItems().get(0).getRequirementWarning());
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("功能说明\n查询并导出业务数据");
+
+        BatchSplitJobResponse confirmed = service.confirm(created.getBatchId(), metadata.getId(), confirmation);
+
+        assertEquals(null, confirmed.getItems().get(0).getRequirementWarning());
+    }
+
+    @Test
     void invalidatesConfirmationWhenCurrentInputChangesBeforeStart() throws Exception {
         BatchSplitJobResponse created = service.create(createRequest());
         BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
@@ -145,6 +166,37 @@ class BatchSplitServiceTest {
         assertEquals(0, manuallyRecovered.getFailed());
         assertEquals(1, manuallyRecovered.getAwaitingConfirmation());
         assertEquals("REVIEW_AI_INPUT", manuallyRecovered.getItems().get(0).getStage());
+    }
+
+    @Test
+    void missingHistoricalProjectDoesNotPreventServiceStartup() {
+        TaskExecutor pausedExecutor = new TaskExecutor() {
+            @Override
+            public void execute(Runnable task) {
+                // Persist an unfinished project-level batch without running preparation.
+            }
+        };
+        BatchSplitService firstProcess = new BatchSplitService(fileStorageService, documentParseService,
+                chapterSelectionService, requirementInputService, smartSplitPipelineService,
+                projectMaterialExportService, pausedExecutor, new SyncTaskExecutor(),
+                3, 2, tempDir.toString(), 10);
+        BatchSplitCreateRequest request = createRequest();
+        request.setSplitLevel("PROJECT");
+        BatchSplitJobResponse created = firstProcess.create(request);
+
+        when(fileStorageService.loadMetadata(metadata.getId()))
+                .thenThrow(new BusinessException("Project not found: " + metadata.getId()));
+        BatchSplitService restartedProcess = new BatchSplitService(fileStorageService, documentParseService,
+                chapterSelectionService, requirementInputService, smartSplitPipelineService,
+                projectMaterialExportService, new SyncTaskExecutor(), new SyncTaskExecutor(),
+                3, 2, tempDir.toString(), 10);
+
+        restartedProcess.recoverPersistedBatches();
+
+        BatchSplitJobResponse recovered = restartedProcess.get(created.getBatchId());
+        assertEquals(1, recovered.getFailed());
+        assertEquals("PROJECT_MISSING", recovered.getItems().get(0).getStage());
+        assertEquals("BLOCKED", recovered.getProjectMaterialStatus());
     }
 
     @Test
@@ -356,7 +408,7 @@ class BatchSplitServiceTest {
         assertEquals("COMPLETED", completed.getProjectMaterialStatus());
         assertEquals(3, completed.getProjectMaterialRequirementCount());
         assertEquals(12D, completed.getProjectMaterialTotalCfp());
-        verify(projectMaterialExportService).export(eq(created.getBatchId()),
+        verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
     }
 
@@ -413,8 +465,126 @@ class BatchSplitServiceTest {
         assertEquals(2, completed.getCompleted());
         assertEquals(0, completed.getFailed());
         assertEquals("COMPLETED", completed.getProjectMaterialStatus());
-        verify(projectMaterialExportService).export(eq(created.getBatchId()),
+        verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId(), second.getId())));
+    }
+
+    @Test
+    void completedRequirementCanCreateProjectGroupWithoutRerunningAi() throws Exception {
+        markSplitResultReady(metadata, "rows-1.json");
+        stubMaterialBundle(1, 8D);
+
+        BatchSplitCreateRequest request = createRequest();
+        request.setProjectGroupName("测试项目级项目");
+        BatchSplitJobResponse group = service.createProjectGroup(request);
+
+        assertTrue(group.getProjectGroupId().startsWith("PJ"));
+        assertEquals("测试项目级项目", group.getProjectGroupName());
+        assertEquals("COMPLETED", group.getStatus());
+        assertEquals(1, group.getCompleted());
+        assertEquals(1, group.getProjectMaterialVersion());
+        assertEquals("REUSED_COMPLETED", group.getItems().get(0).getStage());
+        verify(smartSplitPipelineService, never()).runDocument(eq(metadata.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+        verify(projectMaterialExportService).export(eq(group.getProjectGroupId() + "-V1"),
+                eq(Arrays.asList(metadata.getId())));
+    }
+
+    @Test
+    void deletingProjectGroupCascadesRequirementDataAndAllMaterials() throws Exception {
+        markSplitResultReady(metadata, "rows-delete.json");
+        stubMaterialBundle(1, 8D);
+        Path storedProject = tempDir.resolve("projects").resolve(metadata.getId());
+        Files.createDirectories(storedProject);
+        Files.write(storedProject.resolve("metadata.json"), "{}".getBytes(StandardCharsets.UTF_8));
+
+        BatchSplitJobResponse group = service.createProjectGroup(createRequest());
+        service.deleteProjectGroup(group.getProjectGroupId());
+
+        assertFalse(Files.exists(storedProject));
+        assertThrows(BusinessException.class, () -> service.get(group.getBatchId()));
+        verify(projectMaterialExportService).deleteMaterialVersions(
+                eq(group.getProjectGroupId()), eq(group.getBatchId()));
+        verify(projectMaterialExportService).deleteRequirementOutputs(
+                eq(Arrays.asList(metadata.getId())));
+    }
+
+    @Test
+    void requirementCannotBelongToTwoProjectGroups() throws Exception {
+        markSplitResultReady(metadata, "rows-exclusive.json");
+        stubMaterialBundle(1, 8D);
+        BatchSplitCreateRequest request = createRequest();
+
+        BatchSplitJobResponse first = service.createProjectGroup(request);
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.createProjectGroup(request));
+
+        assertTrue(first.getProjectGroupId().startsWith("PJ"));
+        assertTrue(error.getMessage().contains("已经属于项目级项目"));
+    }
+
+    @Test
+    void completedRequirementCanBeAddedAndCreatesNextMaterialVersion() throws Exception {
+        markSplitResultReady(metadata, "rows-1.json");
+        ProjectMetadata second = registerSecondProject();
+        second.setName(metadata.getName());
+        markSplitResultReady(second, "rows-2.json");
+        stubMaterialBundle(2, 16D);
+
+        BatchSplitJobResponse created = service.createProjectGroup(createRequest());
+        BatchSplitItemsRequest addRequest = new BatchSplitItemsRequest();
+        addRequest.setProjectIds(Arrays.asList(second.getId()));
+        BatchSplitJobResponse updated = service.addItems(created.getBatchId(), addRequest);
+
+        assertEquals(created.getProjectGroupId(), updated.getProjectGroupId());
+        assertEquals(2, updated.getTotal());
+        assertEquals(2, updated.getCompleted());
+        assertEquals(2, updated.getProjectMaterialVersion());
+        verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
+                eq(Arrays.asList(metadata.getId())));
+        verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V2"),
+                eq(Arrays.asList(metadata.getId(), second.getId())));
+        verify(smartSplitPipelineService, never()).runDocument(eq(second.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+    }
+
+    @Test
+    void rerunOneProjectMemberKeepsOthersAndCreatesNextMaterialVersion() throws Exception {
+        markSplitResultReady(metadata, "rows-1.json");
+        Path input = tempDir.resolve("rerun-input.txt");
+        Files.write(input, "需要重新拆分的正文".getBytes(StandardCharsets.UTF_8));
+        metadata.setRequirementDetailPath(input.toString());
+        stubMaterialBundle(1, 8D);
+
+        BatchSplitJobResponse created = service.createProjectGroup(createRequest());
+        BatchSplitJobResponse rerun = service.rerunItem(created.getBatchId(), metadata.getId());
+
+        assertEquals("COMPLETED", rerun.getStatus());
+        assertEquals(1, rerun.getTotal());
+        assertEquals(1, rerun.getCompleted());
+        assertEquals(2, rerun.getProjectMaterialVersion());
+        verify(smartSplitPipelineService, times(1)).runDocument(eq(metadata.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+        verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V2"),
+                eq(Arrays.asList(metadata.getId())));
+    }
+
+    @Test
+    void completedRequirementBatchCanRerunOnlySelectedItem() {
+        BatchSplitJobResponse created = service.create(createRequest());
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("需要拆分的需求正文");
+        service.confirm(created.getBatchId(), metadata.getId(), confirmation);
+        service.start(created.getBatchId());
+
+        BatchSplitJobResponse rerun = service.rerunItem(created.getBatchId(), metadata.getId());
+
+        assertEquals("COMPLETED", rerun.getStatus());
+        assertEquals(1, rerun.getCompleted());
+        verify(smartSplitPipelineService, times(2)).runDocument(eq(metadata.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+        verify(projectMaterialExportService, never()).export(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
     }
 
     private BatchSplitCreateRequest createRequest() {
@@ -446,6 +616,22 @@ class BatchSplitServiceTest {
                 any(SmartSplitPipelineService.StageListener.class)))
                 .thenReturn(new SmartSplitPipelineService.PipelineResult());
         return second;
+    }
+
+    private void markSplitResultReady(ProjectMetadata project, String fileName) throws Exception {
+        Path rows = tempDir.resolve(fileName);
+        Files.write(rows, "[]".getBytes(StandardCharsets.UTF_8));
+        project.setFunctionSplitRowsPath(rows.toString());
+    }
+
+    private void stubMaterialBundle(int requirementCount, double totalCfp) {
+        ProjectMaterialExportService.ProjectMaterialBundle bundle =
+                mock(ProjectMaterialExportService.ProjectMaterialBundle.class);
+        when(bundle.getFiles()).thenReturn(Collections.emptyMap());
+        when(bundle.getRequirementCount()).thenReturn(requirementCount);
+        when(bundle.getTotalCfp()).thenReturn(totalCfp);
+        when(projectMaterialExportService.export(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList())).thenReturn(bundle);
     }
 
     private static class PausedTaskExecutor implements TaskExecutor {

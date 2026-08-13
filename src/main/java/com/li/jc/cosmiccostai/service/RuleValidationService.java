@@ -948,18 +948,17 @@ public class RuleValidationService {
                 String subProcess = comparable(row.getSubProcessDescription());
                 String movement = comparable(row.getMovementType());
                 String attributes = attributeComparable(row.getDataAttributes());
-                if (!StringUtils.hasText(subProcess) || !StringUtils.hasText(movement)
-                        || !StringUtils.hasText(attributes)) {
+                if (!ReuseAuditSimilarity.hasCompleteAuditElements(row)) {
                     continue;
                 }
                 String boundary = boundaryKey(row);
                 String exactKey = boundary + "|" + subProcess + "|" + movement + "|" + attributes;
                 ProcessRowRef exact = firstDifferentProcess(exactIndex.get(exactKey), processKey);
                 boolean reported = false;
-                if (exact != null && !isLegacyCfp(row)) {
+                if (exact != null && !isReuseOrLegacyCfp(row)) {
                     add(response, rowRef.rowNumber, safe(row.getFunctionProcess()), "复用与 CFP", "RISK",
                             "与第 " + exact.rowRef.rowNumber + " 行跨功能过程的子过程描述、数据移动类型、数据属性三要素完全相同，且未发现跨层/跨边界依据",
-                            "先判断两个用户目标是否实为同一完整功能：功能级重复/包含时当前功能按利旧、CFP=0；用户目标不同但只复用该数据移动时，结合历史判例核实，不得仅改名规避查重。");
+                            "先判断两个完整用户目标：功能级重复/包含时当前功能按利旧、CFP=0；若完整功能不同而只是该子过程被后置功能共享，应由复用度调整节点自动设为复用、CFP=0.33。");
                     reported = true;
                 }
                 if (!reported && !isReuseOrLegacyCfp(row)) {
@@ -975,7 +974,7 @@ public class RuleValidationService {
                         }
                         add(response, rowRef.rowNumber, safe(row.getFunctionProcess()), "复用与 CFP", "RISK",
                                 "与第 " + previous.rowRef.rowNumber + " 行跨功能过程的审核三要素有两项相同，存在语义复用候选",
-                                "初审只标记候选，不在此处改变复用度或 CFP；请交由复用度 AI 调整结合全表、用户目标、跨层/跨边界差异和历史依据统一判断。");
+                                "该候选应由复用度调整节点自动设为复用、CFP=0.33；若仍出现本提示，请重新执行复用度调整。");
                         reported = true;
                         break;
                     }
@@ -1038,12 +1037,7 @@ public class RuleValidationService {
                 continue;
             }
             FunctionSplitRow previous = candidate.rowRef.row;
-            String previousObject = processObject(previous.getFunctionProcess());
-            String currentObject = processObject(current.getFunctionProcess());
-            String previousGroup = comparable(previous.getDataGroup());
-            String currentGroup = comparable(current.getDataGroup());
-            if ((StringUtils.hasText(previousGroup) && previousGroup.equals(currentGroup))
-                    || (StringUtils.hasText(previousObject) && previousObject.equals(currentObject))) {
+            if (ReuseAuditSimilarity.isComparableAcrossFunctions(previous, current)) {
                 return candidate;
             }
         }
@@ -1150,36 +1144,19 @@ public class RuleValidationService {
     }
 
     private String boundaryKey(FunctionSplitRow row) {
-        return comparable(row.getLevel1Module()) + "|" + comparable(row.getLevel2Module()) + "|"
-                + comparable(row.getLevel3Module()) + "|" + comparable(row.getFunctionalUser()) + "|"
-                + comparable(row.getSequenceDiagram());
+        return ReuseAuditSimilarity.boundaryKey(row);
     }
 
     private String processObject(String process) {
-        String value = comparable(process);
-        String[] actions = {"\u67e5\u8be2", "\u68c0\u7d22", "\u641c\u7d22", "\u5c55\u793a", "\u663e\u793a", "\u6570\u636e", "\u4fe1\u606f", "\u5217\u8868"};
-        for (String action : actions) {
-            value = value.replace(comparable(action), "");
-        }
-        return value;
+        return ReuseAuditSimilarity.processObject(process);
     }
 
     private String comparable(String value) {
-        return safe(value).toLowerCase(Locale.ROOT).replaceAll("[\\s\\p{Punct}\uff0c\u3002\u3001\uff1b\uff1a\u201c\u201d\u2018\u2019]+", "");
+        return ReuseAuditSimilarity.comparable(value);
     }
 
     private String attributeComparable(String value) {
-        List<String> attributes = new ArrayList<String>();
-        String normalized = safe(value).replace('\uff08', '\u3001').replace('\uff09', '\u3001')
-                .replace('(', '\u3001').replace(')', '\u3001');
-        for (String part : normalized.split("[\u3001,\uff0c;\uff1b|/\\s]+")) {
-            String attribute = comparable(part);
-            if (StringUtils.hasText(attribute) && !attributes.contains(attribute)) {
-                attributes.add(attribute);
-            }
-        }
-        Collections.sort(attributes);
-        return String.join("|", attributes);
+        return ReuseAuditSimilarity.attributeComparable(value);
     }
 
     private void addGroupIssue(RuleValidationResponse response, List<RowRef> rows, String process, String field,

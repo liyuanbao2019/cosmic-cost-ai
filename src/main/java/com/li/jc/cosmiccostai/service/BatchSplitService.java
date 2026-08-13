@@ -6,6 +6,7 @@ import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.BatchSplitConfirmRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitItemResponse;
+import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DocumentChapterItem;
 import com.li.jc.cosmiccostai.dto.DocumentChapterSelectionResponse;
@@ -18,6 +19,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.PostConstruct;
 import java.io.IOException;
@@ -35,6 +38,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,6 +51,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Stream;
 
 /**
  * Coordinates the two-phase multi-document split workflow. Preparation only parses
@@ -55,6 +60,8 @@ import java.util.concurrent.ConcurrentMap;
  */
 @Service
 public class BatchSplitService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(BatchSplitService.class);
 
     private static final DateTimeFormatter DATE_TIME_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -91,8 +98,8 @@ public class BatchSplitService {
                              ProjectMaterialExportService projectMaterialExportService,
                              @Qualifier("batchPreparationExecutor") TaskExecutor batchPreparationExecutor,
                              @Qualifier("batchSplitExecutor") TaskExecutor batchSplitExecutor,
-                             @Value("${cosmic.ai.batch-split.worker-count:24}") int maxConcurrentExecutions,
-                             @Value("${cosmic.ai.batch-split.max-concurrency-per-batch:23}") int maxConcurrentExecutionsPerBatch,
+                             @Value("${cosmic.ai.batch-split.worker-count:50}") int maxConcurrentExecutions,
+                             @Value("${cosmic.ai.batch-split.max-concurrency-per-batch:50}") int maxConcurrentExecutionsPerBatch,
                              @Value("${cosmic.storage.base-dir:storage}") String storageBaseDir,
                              @Value("${cosmic.ai.batch-split.max-items:50}") int maxItems) {
         this.fileStorageService = fileStorageService;
@@ -123,48 +130,77 @@ public class BatchSplitService {
                     continue;
                 }
                 String batchId = directory.getFileName().toString();
-                synchronized (lockFor(batchId)) {
-                    BatchSplitState state;
-                    try {
-                        state = loadStateUnlocked(batchId);
-                    } catch (BusinessException ex) {
-                        continue;
-                    }
-                    boolean stateChanged = false;
-                    if ("GENERATING".equals(state.getProjectMaterialStatus())
-                            || ("PENDING".equals(state.getProjectMaterialStatus())
-                            && allItemsCompleted(state))) {
-                        state.setProjectMaterialStatus("FAILED");
-                        state.setProjectMaterialMessage("服务重启已停止项目级送审材料生成，未自动恢复；请手动点击重试。");
-                        stateChanged = true;
-                    }
-                    for (BatchSplitItemState item : state.getItems()) {
-                        if (!"COMPLETED".equals(item.getStatus())) {
-                            assignedProjects.putIfAbsent(item.getProjectId(), batchId);
+                try {
+                    synchronized (lockFor(batchId)) {
+                        BatchSplitState state;
+                        try {
+                            state = loadStateUnlocked(batchId);
+                        } catch (BusinessException ex) {
+                            continue;
                         }
-                        if ("PARSE_QUEUED".equals(item.getStatus())
-                                || "PREPARING".equals(item.getStatus())
-                                || "QUEUED".equals(item.getStatus())
-                                || "RUNNING".equals(item.getStatus())) {
-                            item.setStatus("FAILED");
-                            item.setStage("RESTART_INTERRUPTED");
-                            item.setStageMessage("服务重启后保持停止，等待手动恢复");
-                            item.setErrorMessage("服务重启已停止该任务，未自动恢复；点击“恢复中断项”后才会重新排队。");
-                            item.setFinishedAt(now());
+                        boolean stateChanged = false;
+                        if ("PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                                && !StringUtils.hasText(state.getProjectGroupId())) {
+                            state.setProjectGroupId(generateProjectGroupId());
+                            state.setProjectGroupName(resolveProjectGroupName(state, null));
+                            if ("COMPLETED".equals(state.getProjectMaterialStatus())
+                                    && state.getProjectMaterialVersion() <= 0) {
+                                state.setProjectMaterialVersion(1);
+                            }
                             stateChanged = true;
-                        } else if ("FAILED".equals(item.getStatus())
-                                && StringUtils.hasText(item.getErrorMessage())) {
-                            String compactError = compactErrorMessage(item.getErrorMessage());
-                            if (!compactError.equals(item.getErrorMessage())) {
-                                item.setErrorMessage(compactError);
+                        }
+                        if ("GENERATING".equals(state.getProjectMaterialStatus())
+                                || ("PENDING".equals(state.getProjectMaterialStatus())
+                                && allItemsCompleted(state))) {
+                            state.setProjectMaterialStatus("FAILED");
+                            state.setProjectMaterialMessage("服务重启已停止项目级送审材料生成，未自动恢复；请手动点击重试。");
+                            stateChanged = true;
+                        }
+                        for (BatchSplitItemState item : state.getItems()) {
+                            if (!projectMetadataExists(item.getProjectId())) {
+                                assignedProjects.remove(item.getProjectId(), batchId);
+                                item.setStatus("FAILED");
+                                item.setStage("PROJECT_MISSING");
+                                item.setStageMessage("需求项目已被删除，无法继续处理");
+                                item.setErrorMessage("本地需求项目不存在：" + item.getProjectId()
+                                        + "。其他需求和服务启动不受影响；如仍需该需求，请重新上传后加入项目。");
+                                item.setFinishedAt(now());
                                 stateChanged = true;
+                                continue;
+                            }
+                            if (!"COMPLETED".equals(item.getStatus())) {
+                                assignedProjects.putIfAbsent(item.getProjectId(), batchId);
+                            }
+                            if ("PARSE_QUEUED".equals(item.getStatus())
+                                    || "PREPARING".equals(item.getStatus())
+                                    || "QUEUED".equals(item.getStatus())
+                                    || "RUNNING".equals(item.getStatus())) {
+                                item.setStatus("FAILED");
+                                item.setStage("RESTART_INTERRUPTED");
+                                item.setStageMessage("服务重启后保持停止，等待手动恢复");
+                                item.setErrorMessage("服务重启已停止该任务，未自动恢复；点击“恢复中断项”后才会重新排队。");
+                                item.setFinishedAt(now());
+                                stateChanged = true;
+                            } else if ("FAILED".equals(item.getStatus())
+                                    && StringUtils.hasText(item.getErrorMessage())) {
+                                String compactError = compactErrorMessage(item.getErrorMessage());
+                                if (!compactError.equals(item.getErrorMessage())) {
+                                    item.setErrorMessage(compactError);
+                                    stateChanged = true;
+                                }
                             }
                         }
+                        if (stateChanged) {
+                            recomputeState(state);
+                            saveStateUnlocked(state);
+                        }
+                        if (StringUtils.hasText(state.getProjectGroupId())) {
+                            associateProjectsForRecovery(state);
+                        }
                     }
-                    if (stateChanged) {
-                        recomputeState(state);
-                        saveStateUnlocked(state);
-                    }
+                } catch (RuntimeException ex) {
+                    LOGGER.error("Skipping unreadable persisted batch during startup recovery. batchId={}",
+                            batchId, ex);
                 }
             }
         } catch (IOException ex) {
@@ -185,32 +221,43 @@ public class BatchSplitService {
         BatchSplitState state = new BatchSplitState();
         state.setBatchId(batchId);
         state.setSplitLevel(normalizeSplitLevel(request == null ? null : request.getSplitLevel()));
+        if ("PROJECT".equals(state.getSplitLevel())) {
+            state.setProjectGroupId(generateProjectGroupId());
+            state.setProjectGroupName(resolveProjectGroupName(null,
+                    request == null ? null : request.getProjectGroupName(), projectIds));
+            assertProjectGroupProjectsAvailable(projectIds, batchId);
+        }
         state.setProjectMaterialStatus("PROJECT".equals(state.getSplitLevel()) ? "PENDING" : "NOT_REQUIRED");
         state.setStatus("PREPARING");
         state.setCreatedAt(now());
         state.setUpdatedAt(state.getCreatedAt());
 
         List<String> reserved = new ArrayList<String>();
+        List<String> preparationIds = new ArrayList<String>();
         try {
             for (String projectId : projectIds) {
                 ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
                 validateBatchProject(metadata);
-                String existingBatch = assignedProjects.putIfAbsent(projectId, batchId);
+                validateProjectGroupMembership(state, metadata);
+                String existingBatch = assignedProjects.get(projectId);
                 if (existingBatch != null && !batchId.equals(existingBatch)) {
                     throw new BusinessException("文档正在另一个批次中处理：" + metadata.getSourceFileName());
                 }
-                reserved.add(projectId);
-                BatchSplitItemState item = new BatchSplitItemState();
-                item.setProjectId(projectId);
-                item.setProjectName(metadata.getName());
-                item.setSourceFileName(metadata.getSourceFileName());
-                item.setExistingRows(isExistingRowsProject(metadata));
-                item.setStatus("PARSE_QUEUED");
-                item.setStage("WAITING_PARSE");
-                item.setStageMessage("等待进入文档解析队列");
+                boolean reuse = request != null && request.isReuseCompletedResults()
+                        && hasReusableSplitResult(metadata);
+                BatchSplitItemState item = newItemState(metadata, reuse);
                 state.getItems().add(item);
+                if (!reuse) {
+                    String raced = assignedProjects.putIfAbsent(projectId, batchId);
+                    if (raced != null && !batchId.equals(raced)) {
+                        throw new BusinessException("文档正在另一个批次中处理：" + metadata.getSourceFileName());
+                    }
+                    reserved.add(projectId);
+                    preparationIds.add(projectId);
+                }
             }
             associateProjects(state);
+            recomputeState(state);
             saveState(state);
         } catch (RuntimeException ex) {
             for (String projectId : reserved) {
@@ -219,18 +266,283 @@ public class BatchSplitService {
             throw ex;
         }
 
-        for (String projectId : projectIds) {
+        for (String projectId : preparationIds) {
             submitPreparation(batchId, projectId);
         }
+        if (preparationIds.isEmpty() && "PROJECT".equals(state.getSplitLevel())) {
+            submitProjectMaterialGeneration(batchId);
+        }
         return get(batchId);
+    }
+
+    public BatchSplitJobResponse createProjectGroup(BatchSplitCreateRequest request) {
+        BatchSplitCreateRequest normalized = request == null ? new BatchSplitCreateRequest() : request;
+        normalized.setSplitLevel("PROJECT");
+        normalized.setReuseCompletedResults(true);
+        return create(normalized);
     }
 
     private void associateProjects(BatchSplitState state) {
         for (BatchSplitItemState item : state.getItems()) {
             ProjectMetadata metadata = fileStorageService.loadMetadata(item.getProjectId());
-            metadata.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
-            metadata.setBatchId(state.getBatchId());
+            if (StringUtils.hasText(state.getProjectGroupId())) {
+                metadata.setSplitLevel("REQUIREMENT");
+                metadata.setBatchId(null);
+            } else {
+                metadata.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
+                metadata.setBatchId(state.getBatchId());
+            }
             fileStorageService.saveMetadata(metadata);
+        }
+    }
+
+    private void associateProjectsForRecovery(BatchSplitState state) {
+        for (BatchSplitItemState item : state.getItems()) {
+            try {
+                ProjectMetadata metadata = fileStorageService.loadMetadata(item.getProjectId());
+                metadata.setSplitLevel("REQUIREMENT");
+                metadata.setBatchId(null);
+                fileStorageService.saveMetadata(metadata);
+            } catch (RuntimeException ex) {
+                LOGGER.warn("Persisted batch member is unavailable; association migration skipped. batchId={}, projectId={}",
+                        state.getBatchId(), item.getProjectId());
+            }
+        }
+    }
+
+    public List<BatchSplitJobResponse> listProjectGroups() {
+        List<BatchSplitJobResponse> groups = new ArrayList<BatchSplitJobResponse>();
+        if (!Files.exists(batchBaseDir)) {
+            return groups;
+        }
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(batchBaseDir, "BS*")) {
+            for (Path directory : directories) {
+                if (!Files.isRegularFile(directory.resolve("state.json"))) {
+                    continue;
+                }
+                try {
+                    BatchSplitState state = loadState(directory.getFileName().toString());
+                    if ("PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                            && StringUtils.hasText(state.getProjectGroupId())) {
+                        groups.add(toResponse(state));
+                    }
+                } catch (BusinessException ignored) {
+                    // Keep other readable project groups visible.
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("读取项目级项目列表失败。", ex);
+        }
+        Collections.sort(groups, new Comparator<BatchSplitJobResponse>() {
+            @Override
+            public int compare(BatchSplitJobResponse left, BatchSplitJobResponse right) {
+                return trim(right.getUpdatedAt()).compareTo(trim(left.getUpdatedAt()));
+            }
+        });
+        return groups;
+    }
+
+    public BatchSplitJobResponse getProjectGroup(String projectGroupId) {
+        String expected = normalizeProjectGroupId(projectGroupId);
+        for (BatchSplitJobResponse group : listProjectGroups()) {
+            if (expected.equals(group.getProjectGroupId())) {
+                return group;
+            }
+        }
+        throw new BusinessException("项目级项目不存在：" + expected);
+    }
+
+    public void deleteProjectGroup(String projectGroupId) {
+        deleteProjectGroups(Collections.singletonList(projectGroupId));
+    }
+
+    public int deleteProjectGroups(List<String> projectGroupIds) {
+        Set<String> unique = new LinkedHashSet<String>();
+        if (projectGroupIds != null) {
+            for (String projectGroupId : projectGroupIds) {
+                unique.add(normalizeProjectGroupId(projectGroupId));
+            }
+        }
+        if (unique.isEmpty()) {
+            throw new BusinessException("请先选择要删除的项目级项目。");
+        }
+        Map<String, BatchSplitState> states = new LinkedHashMap<String, BatchSplitState>();
+        Set<String> deletingBatchIds = new HashSet<String>();
+        Set<String> deletingProjectIds = new LinkedHashSet<String>();
+        for (String projectGroupId : unique) {
+            BatchSplitState state = findProjectGroupState(projectGroupId);
+            assertProjectGroupDeletable(state);
+            states.put(projectGroupId, state);
+            deletingBatchIds.add(state.getBatchId());
+            for (BatchSplitItemState item : state.getItems()) {
+                deletingProjectIds.add(item.getProjectId());
+            }
+        }
+        assertRequirementsNotSharedWithRetainedGroups(deletingBatchIds, deletingProjectIds);
+
+        for (Map.Entry<String, BatchSplitState> entry : states.entrySet()) {
+            BatchSplitState located = entry.getValue();
+            String batchId = located.getBatchId();
+            synchronized (lockFor(batchId)) {
+                BatchSplitState state = loadStateUnlocked(batchId);
+                if (!entry.getKey().equals(state.getProjectGroupId())) {
+                    throw new BusinessException("项目级项目状态已变化，请刷新后重试。");
+                }
+                assertProjectGroupDeletable(state);
+                deleteProjectGroupData(state);
+            }
+            batchLocks.remove(batchId);
+        }
+        return states.size();
+    }
+
+    private void deleteProjectGroupData(BatchSplitState state) {
+        List<String> projectIds = new ArrayList<String>();
+        for (BatchSplitItemState item : state.getItems()) {
+            projectIds.add(item.getProjectId());
+        }
+        projectMaterialExportService.deleteMaterialVersions(state.getProjectGroupId(), state.getBatchId());
+        projectMaterialExportService.deleteRequirementOutputs(projectIds);
+        for (String projectId : projectIds) {
+            deleteRequirementProjectDirectory(projectId);
+            assignedProjects.remove(projectId, state.getBatchId());
+        }
+        deleteBatchDirectory(state.getBatchId());
+    }
+
+    private void assertRequirementsNotSharedWithRetainedGroups(Set<String> deletingBatchIds,
+                                                                Set<String> deletingProjectIds) {
+        if (!Files.exists(batchBaseDir) || deletingProjectIds.isEmpty()) return;
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(batchBaseDir, "BS*")) {
+            for (Path directory : directories) {
+                String batchId = directory.getFileName().toString();
+                if (deletingBatchIds.contains(batchId) || !Files.isRegularFile(directory.resolve("state.json"))) {
+                    continue;
+                }
+                BatchSplitState state;
+                try {
+                    state = loadState(batchId);
+                } catch (BusinessException ignored) {
+                    continue;
+                }
+                if (!"PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                        || !StringUtils.hasText(state.getProjectGroupId())) continue;
+                for (BatchSplitItemState item : state.getItems()) {
+                    if (deletingProjectIds.contains(item.getProjectId())) {
+                        throw new BusinessException("需求“" + item.getSourceFileName() + "”同时属于未删除的项目级项目“"
+                                + state.getProjectGroupName() + "”（" + state.getProjectGroupId()
+                                + "）。请同时勾选该项目级项目后再删除，避免留下失效项目。");
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("检查项目级项目关联关系失败。", ex);
+        }
+    }
+
+    private void deleteRequirementProjectDirectory(String projectId) {
+        String safeProjectId = trim(projectId).toUpperCase(Locale.ROOT);
+        if (!safeProjectId.matches("P[0-9A-Z]+")) {
+            throw new BusinessException("关联需求编号非法，已拒绝级联删除：" + projectId);
+        }
+        Path root = batchBaseDir.getParent().resolve("projects").toAbsolutePath().normalize();
+        Path target = root.resolve(safeProjectId).normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new BusinessException("关联需求删除路径非法，已拒绝操作。");
+        }
+        deleteDirectoryTree(target, "删除关联需求失败：" + safeProjectId);
+    }
+
+    private void assertProjectGroupProjectsAvailable(List<String> projectIds, String targetBatchId) {
+        if (!Files.exists(batchBaseDir) || projectIds == null || projectIds.isEmpty()) return;
+        Set<String> requested = new HashSet<String>(projectIds);
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(batchBaseDir, "BS*")) {
+            for (Path directory : directories) {
+                String batchId = directory.getFileName().toString();
+                if (batchId.equals(targetBatchId) || !Files.isRegularFile(directory.resolve("state.json"))) continue;
+                BatchSplitState state;
+                try {
+                    state = loadState(batchId);
+                } catch (BusinessException ignored) {
+                    continue;
+                }
+                if (!"PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                        || !StringUtils.hasText(state.getProjectGroupId())) continue;
+                for (BatchSplitItemState item : state.getItems()) {
+                    if (requested.contains(item.getProjectId())) {
+                        throw new BusinessException("需求“" + item.getSourceFileName() + "”已经属于项目级项目“"
+                                + state.getProjectGroupName() + "”（" + state.getProjectGroupId() + "），不能重复加入。");
+                    }
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("检查需求的项目级归属失败。", ex);
+        }
+    }
+
+    private BatchSplitState findProjectGroupState(String projectGroupId) {
+        if (!Files.exists(batchBaseDir)) {
+            throw new BusinessException("项目级项目不存在：" + projectGroupId);
+        }
+        try (DirectoryStream<Path> directories = Files.newDirectoryStream(batchBaseDir, "BS*")) {
+            for (Path directory : directories) {
+                if (!Files.isRegularFile(directory.resolve("state.json"))) continue;
+                try {
+                    BatchSplitState state = loadState(directory.getFileName().toString());
+                    if (projectGroupId.equals(state.getProjectGroupId())) {
+                        return state;
+                    }
+                } catch (BusinessException ignored) {
+                    // A corrupt unrelated historical batch must not hide a valid project group.
+                }
+            }
+        } catch (IOException ex) {
+            throw new BusinessException("查找项目级项目失败：" + projectGroupId, ex);
+        }
+        throw new BusinessException("项目级项目不存在：" + projectGroupId);
+    }
+
+    private void assertProjectGroupDeletable(BatchSplitState state) {
+        if (state == null || !StringUtils.hasText(state.getProjectGroupId())) {
+            throw new BusinessException("项目级项目不存在。");
+        }
+        if ("GENERATING".equals(state.getProjectMaterialStatus())) {
+            throw new BusinessException("项目“" + state.getProjectGroupName() + "”正在生成材料，暂不能删除。");
+        }
+        for (BatchSplitItemState item : state.getItems()) {
+            if ("PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())
+                    || "QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())) {
+                throw new BusinessException("项目“" + state.getProjectGroupName()
+                        + "”仍有需求正在处理，完成或中断后才能删除。");
+            }
+        }
+    }
+
+    private void deleteBatchDirectory(String batchId) {
+        Path root = batchBaseDir.toAbsolutePath().normalize();
+        Path target = batchDir(batchId).toAbsolutePath().normalize();
+        if (!target.startsWith(root) || target.equals(root)) {
+            throw new BusinessException("批次删除路径非法，已拒绝操作。");
+        }
+        deleteDirectoryTree(target, "删除项目级项目失败：" + batchId);
+    }
+
+    private void deleteDirectoryTree(Path target, String errorMessage) {
+        if (!Files.exists(target)) return;
+        try (Stream<Path> paths = Files.walk(target)) {
+            List<Path> ordered = new ArrayList<Path>();
+            paths.forEach(ordered::add);
+            Collections.sort(ordered, new Comparator<Path>() {
+                @Override
+                public int compare(Path left, Path right) {
+                    return right.compareTo(left);
+                }
+            });
+            for (Path path : ordered) {
+                Files.deleteIfExists(path);
+            }
+        } catch (IOException ex) {
+            throw new BusinessException(errorMessage, ex);
         }
     }
 
@@ -243,9 +555,6 @@ public class BatchSplitService {
                                          BatchSplitConfirmRequest request) {
         BatchSplitState current = loadState(batchId);
         BatchSplitItemState currentItem = findItem(current, projectId);
-        if (isExecutionStarted(current)) {
-            throw new BusinessException("批量拆分已经开始，AI 输入已锁定，不能继续修改。");
-        }
         if (!"AWAITING_CONFIRMATION".equals(currentItem.getStatus())
                 && !"CONFIRMED".equals(currentItem.getStatus())) {
             throw new BusinessException("该文档尚未完成解析，暂不能确认 AI 输入。");
@@ -278,6 +587,7 @@ public class BatchSplitService {
                 item.setConfirmedAt(now());
                 item.setInputHash(inputHash);
                 item.setInputLength(inputLength);
+                item.setRequirementWarning(null);
                 item.setErrorMessage(null);
             }
         });
@@ -288,16 +598,18 @@ public class BatchSplitService {
         List<String> projectIds = new ArrayList<String>();
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
-            if (isExecutionStarted(state)) {
-                throw new BusinessException("该批次已经开始拆分，请勿重复提交。");
-            }
             List<String> blockers = new ArrayList<String>();
             for (BatchSplitItemState item : state.getItems()) {
+                if ("COMPLETED".equals(item.getStatus()) || "FAILED".equals(item.getStatus())
+                        || "QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())) {
+                    continue;
+                }
                 if (!"CONFIRMED".equals(item.getStatus())) {
                     blockers.add(item.getSourceFileName() + "（" + statusText(item.getStatus()) + "）");
                     continue;
                 }
                 if (item.isExistingRows()) {
+                    projectIds.add(item.getProjectId());
                     continue;
                 }
                 String currentInput = readCurrentInput(item.getProjectId());
@@ -308,29 +620,166 @@ public class BatchSplitService {
                     item.setConfirmedAt(null);
                     item.setErrorMessage("确认后的 AI 输入发生变化，请重新确认。");
                     blockers.add(item.getSourceFileName() + "（内容已变化）");
+                    continue;
                 }
+                projectIds.add(item.getProjectId());
             }
             if (!blockers.isEmpty()) {
                 recomputeState(state);
                 saveStateUnlocked(state);
                 throw new BusinessException("还有文档未完成 AI 输入确认：" + join(blockers));
             }
+            if (projectIds.isEmpty()) {
+                throw new BusinessException("当前没有已确认且等待拆分的新增需求。");
+            }
             state.setStatus("RUNNING");
-            state.setStartedAt(now());
+            if (!StringUtils.hasText(state.getStartedAt())) {
+                state.setStartedAt(now());
+            }
             state.setFinishedAt(null);
             for (BatchSplitItemState item : state.getItems()) {
-                item.setStatus("QUEUED");
-                item.setStage("WAITING_AI_SPLIT");
-                item.setProgressPercent(0);
-                item.setStageMessage("等待进入 AI 智能拆分队列");
-                item.setErrorMessage(null);
-                item.setFinishedAt(null);
-                projectIds.add(item.getProjectId());
+                if (projectIds.contains(item.getProjectId())) {
+                    item.setStatus("QUEUED");
+                    item.setStage("WAITING_AI_SPLIT");
+                    item.setProgressPercent(0);
+                    item.setStageMessage("等待进入 AI 智能拆分队列");
+                    item.setErrorMessage(null);
+                    item.setFinishedAt(null);
+                }
             }
             saveStateUnlocked(state);
         }
         for (String projectId : projectIds) {
             submitExecution(batchId, projectId);
+        }
+        return get(batchId);
+    }
+
+    public BatchSplitJobResponse addItems(String batchId, BatchSplitItemsRequest request) {
+        List<String> projectIds = normalizeProjectIds(request == null ? null : request.getProjectIds());
+        if (projectIds.isEmpty()) {
+            throw new BusinessException("请至少选择一个要添加的需求。");
+        }
+        List<String> preparationIds = new ArrayList<String>();
+        List<String> reserved = new ArrayList<String>();
+        try {
+            synchronized (lockFor(batchId)) {
+                BatchSplitState state = loadStateUnlocked(batchId);
+                assertMaintainableProjectGroup(state);
+                assertProjectGroupProjectsAvailable(projectIds, batchId);
+                if (state.getItems().size() + projectIds.size() > maxItems) {
+                    throw new BusinessException("项目级项目最多允许 " + maxItems + " 个需求。");
+                }
+                Set<String> existingIds = new HashSet<String>();
+                for (BatchSplitItemState item : state.getItems()) {
+                    existingIds.add(item.getProjectId());
+                }
+                for (String projectId : projectIds) {
+                    if (existingIds.contains(projectId)) {
+                        throw new BusinessException("需求已经在当前项目中：" + projectId);
+                    }
+                    ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+                    validateBatchProject(metadata);
+                    validateProjectGroupMembership(state, metadata);
+                    String existingBatch = assignedProjects.get(projectId);
+                    if (existingBatch != null && !batchId.equals(existingBatch)) {
+                        throw new BusinessException("文档正在另一个批次中处理：" + metadata.getSourceFileName());
+                    }
+                    boolean reuse = (request == null || request.isReuseCompletedResults())
+                            && hasReusableSplitResult(metadata);
+                    state.getItems().add(newItemState(metadata, reuse));
+                    existingIds.add(projectId);
+                    if (!reuse) {
+                        String raced = assignedProjects.putIfAbsent(projectId, batchId);
+                        if (raced != null && !batchId.equals(raced)) {
+                            throw new BusinessException("文档正在另一个批次中处理：" + metadata.getSourceFileName());
+                        }
+                        reserved.add(projectId);
+                        preparationIds.add(projectId);
+                    }
+                }
+                invalidateProjectMaterials(state, "项目成员已变化，旧材料已转为历史版本；全部需求完成后将生成新版本。");
+                associateProjects(state);
+                recomputeState(state);
+                saveStateUnlocked(state);
+            }
+        } catch (RuntimeException ex) {
+            for (String projectId : reserved) {
+                assignedProjects.remove(projectId, batchId);
+            }
+            throw ex;
+        }
+        for (String projectId : preparationIds) {
+            submitPreparation(batchId, projectId);
+        }
+        if (preparationIds.isEmpty()) {
+            submitProjectMaterialGeneration(batchId);
+        }
+        return get(batchId);
+    }
+
+    public BatchSplitJobResponse rerunItem(String batchId, String projectId) {
+        boolean executeImmediately;
+        boolean newlyReserved = false;
+        try {
+            synchronized (lockFor(batchId)) {
+                BatchSplitState state = loadStateUnlocked(batchId);
+                if ("PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                        && "GENERATING".equals(state.getProjectMaterialStatus())) {
+                    throw new BusinessException("项目级送审材料正在生成，请完成后再重新拆分需求。");
+                }
+                BatchSplitItemState item = findItem(state, projectId);
+                if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
+                        || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
+                    throw new BusinessException("该需求正在处理，不能重复提交。");
+                }
+                String existingBatch = assignedProjects.putIfAbsent(projectId, batchId);
+                if (existingBatch != null && !batchId.equals(existingBatch)) {
+                    throw new BusinessException("该需求正在另一个批次中处理。");
+                }
+                newlyReserved = existingBatch == null;
+                executeImmediately = item.isExistingRows() || snapshotExists(batchId, projectId);
+                if (!item.isExistingRows() && !executeImmediately) {
+                    String currentInput = readCurrentInput(projectId);
+                    if (StringUtils.hasText(currentInput)) {
+                        writeInputSnapshot(batchId, projectId, currentInput);
+                        item.setConfirmedAt(now());
+                        item.setInputHash(sha256(currentInput));
+                        item.setInputLength(currentInput.length());
+                        executeImmediately = true;
+                    }
+                }
+                resetItemForRerun(item);
+                if (executeImmediately) {
+                    item.setStatus("QUEUED");
+                    item.setStage("WAITING_AI_SPLIT");
+                    item.setStageMessage("已请求重新拆分，等待进入 AI 智能拆分队列");
+                } else {
+                    item.setStatus("PARSE_QUEUED");
+                    item.setStage("WAITING_PARSE");
+                    item.setStageMessage("重新拆分前需要重新解析并确认 AI 输入");
+                }
+                if ("PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))) {
+                    invalidateProjectMaterials(state, "需求“" + item.getSourceFileName()
+                            + "”正在重新拆分，旧材料已转为历史版本。");
+                }
+                state.setFinishedAt(null);
+                if (!StringUtils.hasText(state.getStartedAt())) {
+                    state.setStartedAt(now());
+                }
+                recomputeState(state);
+                saveStateUnlocked(state);
+            }
+        } catch (RuntimeException ex) {
+            if (newlyReserved) {
+                assignedProjects.remove(projectId, batchId);
+            }
+            throw ex;
+        }
+        if (executeImmediately) {
+            submitExecution(batchId, projectId);
+        } else {
+            submitPreparation(batchId, projectId);
         }
         return get(batchId);
     }
@@ -405,6 +854,19 @@ public class BatchSplitService {
             failProjectMaterials(batchId, "项目级送审材料队列已满，请稍后重试：" + message(ex));
         }
         return get(batchId);
+    }
+
+    private void submitProjectMaterialGeneration(final String batchId) {
+        try {
+            batchSplitExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    maybeGenerateProjectMaterials(batchId);
+                }
+            });
+        } catch (RuntimeException ex) {
+            failProjectMaterials(batchId, "项目级送审材料队列已满，请稍后重试：" + message(ex));
+        }
     }
 
     public Path projectMaterialFile(String batchId, String type) {
@@ -679,6 +1141,8 @@ public class BatchSplitService {
 
     private void maybeGenerateProjectMaterials(String batchId) {
         List<String> projectIds = new ArrayList<String>();
+        String materialId;
+        int nextVersion;
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
             if (!"PROJECT".equals(state.getSplitLevel())
@@ -691,8 +1155,12 @@ public class BatchSplitService {
                 }
                 projectIds.add(item.getProjectId());
             }
+            nextVersion = Math.max(0, state.getProjectMaterialVersion()) + 1;
+            materialId = StringUtils.hasText(state.getProjectGroupId())
+                    ? state.getProjectGroupId() + "-V" + nextVersion
+                    : batchId + "-V" + nextVersion;
             state.setProjectMaterialStatus("GENERATING");
-            state.setProjectMaterialMessage("正在生成每个需求的送审材料，并汇总项目级附件 1–5。");
+            state.setProjectMaterialMessage("正在生成项目级送审材料 V" + nextVersion + "，并汇总附件 1–5。");
             state.setProjectMaterialCompletedAt(null);
             recomputeState(state);
             saveStateUnlocked(state);
@@ -700,7 +1168,7 @@ public class BatchSplitService {
 
         try {
             ProjectMaterialExportService.ProjectMaterialBundle bundle =
-                    projectMaterialExportService.export(batchId, projectIds);
+                    projectMaterialExportService.export(materialId, projectIds);
             synchronized (lockFor(batchId)) {
                 BatchSplitState state = loadStateUnlocked(batchId);
                 state.getProjectMaterialFiles().clear();
@@ -709,7 +1177,8 @@ public class BatchSplitService {
                             entry.getValue().toAbsolutePath().normalize().toString());
                 }
                 state.setProjectMaterialStatus("COMPLETED");
-                state.setProjectMaterialMessage("项目级送审材料已生成，共包含附件 1–5。");
+                state.setProjectMaterialVersion(nextVersion);
+                state.setProjectMaterialMessage("项目级送审材料 V" + nextVersion + " 已生成，共包含附件 1–5。");
                 state.setProjectMaterialCompletedAt(now());
                 state.setProjectMaterialTotalCfp(bundle.getTotalCfp());
                 state.setProjectMaterialRequirementCount(bundle.getRequirementCount());
@@ -860,6 +1329,147 @@ public class BatchSplitService {
         return "PROJECT".equalsIgnoreCase(trim(splitLevel)) ? "PROJECT" : "REQUIREMENT";
     }
 
+    private String generateProjectGroupId() {
+        return "PJ" + LocalDateTime.now().format(ID_TIME_FORMATTER)
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeProjectGroupId(String projectGroupId) {
+        String value = trim(projectGroupId).toUpperCase(Locale.ROOT);
+        if (!value.matches("PJ[0-9A-Z]+")) {
+            throw new BusinessException("无效的项目级项目编号。");
+        }
+        return value;
+    }
+
+    private String resolveProjectGroupName(BatchSplitState state, String requestedName) {
+        if (StringUtils.hasText(requestedName)) {
+            return trim(requestedName);
+        }
+        if (state != null) {
+            if (StringUtils.hasText(state.getProjectGroupName())) {
+                return trim(state.getProjectGroupName());
+            }
+            for (BatchSplitItemState item : state.getItems()) {
+                if (StringUtils.hasText(item.getProjectName())) {
+                    return trim(item.getProjectName());
+                }
+            }
+        }
+        return "未命名项目";
+    }
+
+    private String resolveProjectGroupName(BatchSplitState state,
+                                           String requestedName,
+                                           List<String> projectIds) {
+        if (StringUtils.hasText(requestedName)) {
+            return trim(requestedName);
+        }
+        if (state != null && StringUtils.hasText(state.getProjectGroupName())) {
+            return trim(state.getProjectGroupName());
+        }
+        if (projectIds != null) {
+            for (String projectId : projectIds) {
+                ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+                if (metadata != null && StringUtils.hasText(metadata.getName())) {
+                    return trim(metadata.getName());
+                }
+            }
+        }
+        return resolveProjectGroupName(state, null);
+    }
+
+    private void validateProjectGroupMembership(BatchSplitState state, ProjectMetadata metadata) {
+        if (state == null || !"PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))) {
+            return;
+        }
+        if (metadata == null || !StringUtils.hasText(metadata.getId())) {
+            throw new BusinessException("不能向项目级项目加入不存在的需求。");
+        }
+    }
+
+    private boolean hasReusableSplitResult(ProjectMetadata metadata) {
+        if (metadata == null || !StringUtils.hasText(metadata.getFunctionSplitRowsPath())) {
+            return false;
+        }
+        return Files.isRegularFile(Paths.get(metadata.getFunctionSplitRowsPath()));
+    }
+
+    private boolean projectMetadataExists(String projectId) {
+        if (!StringUtils.hasText(projectId)) {
+            return false;
+        }
+        try {
+            ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+            return metadata != null && StringUtils.hasText(metadata.getId());
+        } catch (RuntimeException ex) {
+            return false;
+        }
+    }
+
+    private BatchSplitItemState newItemState(ProjectMetadata metadata, boolean reuseCompletedResult) {
+        BatchSplitItemState item = new BatchSplitItemState();
+        item.setProjectId(metadata.getId());
+        item.setProjectName(metadata.getName());
+        item.setSourceFileName(metadata.getSourceFileName());
+        item.setExistingRows(isExistingRowsProject(metadata));
+        if (reuseCompletedResult) {
+            item.setStatus("COMPLETED");
+            item.setStage("REUSED_COMPLETED");
+            item.setProgressPercent(100);
+            item.setStageMessage("已复用需求级最终拆分结果");
+            item.setLastCompletedStage("RULE_VALIDATION");
+            item.setFinishedAt(now());
+            item.setIssueCount(valueOrZero(metadata.getIssueCount()));
+            item.setErrorCount(valueOrZero(metadata.getErrorCount()));
+            item.setRiskCount(valueOrZero(metadata.getRiskCount()));
+        } else {
+            item.setStatus("PARSE_QUEUED");
+            item.setStage("WAITING_PARSE");
+            item.setStageMessage("等待进入文档解析队列");
+        }
+        return item;
+    }
+
+    private int valueOrZero(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private void assertMaintainableProjectGroup(BatchSplitState state) {
+        if (state == null || !"PROJECT".equals(normalizeSplitLevel(state.getSplitLevel()))
+                || !StringUtils.hasText(state.getProjectGroupId())) {
+            throw new BusinessException("只有项目级项目支持增量维护需求。");
+        }
+        if ("GENERATING".equals(state.getProjectMaterialStatus())) {
+            throw new BusinessException("项目级送审材料正在生成，请完成后再维护项目成员。");
+        }
+    }
+
+    private void invalidateProjectMaterials(BatchSplitState state, String message) {
+        state.getProjectMaterialFiles().clear();
+        state.setProjectMaterialStatus("PENDING");
+        state.setProjectMaterialMessage(message);
+        state.setProjectMaterialCompletedAt(null);
+        state.setProjectMaterialTotalCfp(0D);
+        state.setProjectMaterialRequirementCount(0);
+        state.setFinishedAt(null);
+    }
+
+    private void resetItemForRerun(BatchSplitItemState item) {
+        item.setProgressPercent(0);
+        item.setLastCompletedStage(null);
+        item.setErrorMessage(null);
+        item.setStartedAt(null);
+        item.setFinishedAt(null);
+        item.setIssueCount(0);
+        item.setErrorCount(0);
+        item.setRiskCount(0);
+        item.setDeepSuggestionCount(0);
+        item.setAppliedSuggestionCount(0);
+        item.setSkippedSuggestionCount(0);
+        item.setPartial(false);
+    }
+
     private BatchSplitItemState findItem(BatchSplitState state, String projectId) {
         for (BatchSplitItemState item : state.getItems()) {
             if (item.getProjectId().equals(projectId)) {
@@ -933,6 +1543,8 @@ public class BatchSplitService {
         BatchSplitJobResponse response = new BatchSplitJobResponse();
         response.setBatchId(state.getBatchId());
         response.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
+        response.setProjectGroupId(state.getProjectGroupId());
+        response.setProjectGroupName(state.getProjectGroupName());
         response.setStatus(state.getStatus());
         response.setCreatedAt(state.getCreatedAt());
         response.setUpdatedAt(state.getUpdatedAt());
@@ -945,6 +1557,7 @@ public class BatchSplitService {
         response.setProjectMaterialCompletedAt(state.getProjectMaterialCompletedAt());
         response.setProjectMaterialTotalCfp(state.getProjectMaterialTotalCfp());
         response.setProjectMaterialRequirementCount(state.getProjectMaterialRequirementCount());
+        response.setProjectMaterialVersion(state.getProjectMaterialVersion());
         List<ProjectMaterialFileResponse> materialFiles = new ArrayList<ProjectMaterialFileResponse>();
         for (java.util.Map.Entry<String, String> entry : state.getProjectMaterialFiles().entrySet()) {
             ProjectMaterialFileResponse file = new ProjectMaterialFileResponse();
@@ -1095,11 +1708,11 @@ public class BatchSplitService {
 
     private String compactErrorMessage(String value) {
         String text = value == null ? "未知错误" : value.replaceAll("\\s+", " ").trim();
-        if (text.length() <= 1000) {
+        if (text.length() <= 4000) {
             return text;
         }
-        return text.substring(0, 700) + " ...[错误详情已截短]... "
-                + text.substring(text.length() - 200);
+        return text.substring(0, 3000) + " ...[超长技术详情已截短]... "
+                + text.substring(text.length() - 500);
     }
 
     private String join(List<String> values) {
@@ -1136,6 +1749,8 @@ public class BatchSplitService {
     public static class BatchSplitState {
         private String batchId;
         private String splitLevel = "REQUIREMENT";
+        private String projectGroupId;
+        private String projectGroupName;
         private String status;
         private String createdAt;
         private String updatedAt;
@@ -1146,6 +1761,7 @@ public class BatchSplitService {
         private String projectMaterialCompletedAt;
         private double projectMaterialTotalCfp;
         private int projectMaterialRequirementCount;
+        private int projectMaterialVersion;
         private Map<String, String> projectMaterialFiles = new LinkedHashMap<String, String>();
         private List<BatchSplitItemState> items = new ArrayList<BatchSplitItemState>();
 
@@ -1153,6 +1769,10 @@ public class BatchSplitService {
         public void setBatchId(String batchId) { this.batchId = batchId; }
         public String getSplitLevel() { return splitLevel; }
         public void setSplitLevel(String splitLevel) { this.splitLevel = splitLevel; }
+        public String getProjectGroupId() { return projectGroupId; }
+        public void setProjectGroupId(String projectGroupId) { this.projectGroupId = projectGroupId; }
+        public String getProjectGroupName() { return projectGroupName; }
+        public void setProjectGroupName(String projectGroupName) { this.projectGroupName = projectGroupName; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
         public String getCreatedAt() { return createdAt; }
@@ -1173,6 +1793,8 @@ public class BatchSplitService {
         public void setProjectMaterialTotalCfp(double projectMaterialTotalCfp) { this.projectMaterialTotalCfp = projectMaterialTotalCfp; }
         public int getProjectMaterialRequirementCount() { return projectMaterialRequirementCount; }
         public void setProjectMaterialRequirementCount(int projectMaterialRequirementCount) { this.projectMaterialRequirementCount = projectMaterialRequirementCount; }
+        public int getProjectMaterialVersion() { return projectMaterialVersion; }
+        public void setProjectMaterialVersion(int projectMaterialVersion) { this.projectMaterialVersion = projectMaterialVersion; }
         public Map<String, String> getProjectMaterialFiles() {
             if (projectMaterialFiles == null) projectMaterialFiles = new LinkedHashMap<String, String>();
             return projectMaterialFiles;

@@ -97,7 +97,7 @@ public class DocumentParseService {
         response.setRequirementDetailLength(requirementDetail.length());
         response.setStatus(metadata.getStatus());
         response.setPreview(buildPreview(requirementDetail));
-        RequirementDiagnosis diagnosis = diagnoseRequirementSection(requirementDetail);
+        RequirementDiagnosis diagnosis = diagnoseRequirementSection(requirementDetail, parsedDocument.getHeadings());
         response.setRequirementRecognized(diagnosis.recognized);
         response.setRequirementWarning(diagnosis.warning);
         response.setRequirementSuggestion(diagnosis.suggestion);
@@ -314,12 +314,37 @@ public class DocumentParseService {
     }
 
     private RequirementDiagnosis diagnoseRequirementSection(String requirementDetail) {
+        return diagnoseRequirementSection(requirementDetail, new ArrayList<HeadingMarker>());
+    }
+
+    private RequirementDiagnosis diagnoseRequirementSection(String requirementDetail,
+                                                              List<HeadingMarker> headings) {
         if (!StringUtils.hasText(requirementDetail)) {
+            if (containsRecognizableRequirementHeading(headings)) {
+                return new RequirementDiagnosis(true, "", "");
+            }
             return new RequirementDiagnosis(false,
                 "未识别到有效的需求内容。",
-                "系统将展示已解析出的全部章节，请人工勾选需要送给 AI 的章节；也可使用“需求内容”“需求细则”“业务功能”“功能描述”或“需求方案 word 描述”等标题。");
+                "系统将展示已解析出的全部章节，请人工勾选需要送给 AI 的章节；也可使用“需求内容”“需求细则”“业务功能”“功能说明”“功能描述”或“需求方案 word 描述”等标题。");
         }
         return new RequirementDiagnosis(true, "", "");
+    }
+
+    private boolean containsRecognizableRequirementHeading(List<HeadingMarker> headings) {
+        for (HeadingMarker heading : headings == null
+                ? new ArrayList<HeadingMarker>() : headings) {
+            String title = heading == null || heading.title == null ? "" : heading.title.trim()
+                    .replaceAll("\\s+", "")
+                    .replaceAll("^\\d+(?:[.．]\\d+)*[、.．]?", "");
+            if ("功能说明".equals(title) || "功能描述".equals(title)
+                    || "需求内容".equals(title) || "需求细则".equals(title)
+                    || "业务功能".equals(title) || "业务功能需求".equals(title)
+                    || "功能需求".equals(title) || "功能性需求".equals(title)
+                    || "需求方案word描述".equalsIgnoreCase(title)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static class ParsedDocument {

@@ -60,8 +60,9 @@ public class SmartSplitPipelineService {
     }
 
     public PipelineResult runDocument(String projectId, String editedPrompt, StageListener listener) {
-        notify(listener, "AI_EXTRACTING", 8, "正在识别需求功能并生成结构化功能清单");
+        notify(listener, "INPUT_COVERAGE_CHECK", 5, "正在校验已确认正文是否覆盖原文功能章节");
         requirementCoverageService.ensureReadyForExtraction(projectId);
+        notify(listener, "AI_EXTRACTING", 8, "正文完整性校验通过，正在识别需求功能并生成结构化功能清单");
         if (StringUtils.hasText(editedPrompt)) {
             aiExtractionService.extractWithPrompt(projectId, editedPrompt.trim());
         } else {

@@ -1,7 +1,9 @@
 package com.li.jc.cosmiccostai.dto;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 public class SmartSplitJobResponse {
 
@@ -25,8 +27,10 @@ public class SmartSplitJobResponse {
     private String ruleVersion;
     private String errorMessage;
     private String createdAt;
+    private String startedAt;
     private String updatedAt;
     private String completedAt;
+    private Map<String, SmartSplitStageTiming> stageTimings = new LinkedHashMap<String, SmartSplitStageTiming>();
     private List<String> appliedSuggestionIds = new ArrayList<String>();
     private List<String> warnings = new ArrayList<String>();
 
@@ -70,10 +74,20 @@ public class SmartSplitJobResponse {
     public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
     public String getCreatedAt() { return createdAt; }
     public void setCreatedAt(String createdAt) { this.createdAt = createdAt; }
+    public String getStartedAt() { return startedAt; }
+    public void setStartedAt(String startedAt) { this.startedAt = startedAt; }
     public String getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(String updatedAt) { this.updatedAt = updatedAt; }
     public String getCompletedAt() { return completedAt; }
     public void setCompletedAt(String completedAt) { this.completedAt = completedAt; }
+    public Map<String, SmartSplitStageTiming> getStageTimings() {
+        if (stageTimings == null) stageTimings = new LinkedHashMap<String, SmartSplitStageTiming>();
+        return stageTimings;
+    }
+    public void setStageTimings(Map<String, SmartSplitStageTiming> stageTimings) {
+        this.stageTimings = stageTimings == null
+                ? new LinkedHashMap<String, SmartSplitStageTiming>() : stageTimings;
+    }
     public List<String> getAppliedSuggestionIds() { return appliedSuggestionIds; }
     public void setAppliedSuggestionIds(List<String> appliedSuggestionIds) { this.appliedSuggestionIds = appliedSuggestionIds; }
     public List<String> getWarnings() { return warnings; }

@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectListServiceTest {
 
@@ -64,6 +65,25 @@ class ProjectListServiceTest {
         assertEquals(1, response.getTotal());
         assertEquals(1, response.getTotalWithRisks());
         assertEquals(1, response.getTotalExported());
+    }
+
+    @Test
+    void exposesWhetherRequirementHasReusableFinalSplitRows() throws Exception {
+        writeProject("P7", "备案项目A", "REQUIREMENT", null, "2026-08-12 04:00:00");
+        Path metadataPath = tempDir.resolve("projects").resolve("P7").resolve("metadata.json");
+        ObjectMapper mapper = new ObjectMapper();
+        ProjectMetadata metadata = mapper.readValue(metadataPath.toFile(), ProjectMetadata.class);
+        Path rows = metadataPath.getParent().resolve("function-split-rows.json");
+        Files.write(rows, "[]".getBytes(StandardCharsets.UTF_8));
+        metadata.setFunctionSplitRowsPath(rows.toString());
+        mapper.writeValue(metadataPath.toFile(), metadata);
+
+        ProjectListService service = new ProjectListService(tempDir.toString(), new RuleValidationService());
+        ProjectListResponse response = service.listProjects(null, null, "REQUIREMENT",
+                null, null, null, null, 1, 20);
+
+        assertEquals(1, response.getTotal());
+        assertTrue(response.getProjects().get(0).isSplitResultReady());
     }
 
     private void writeProject(String id, String name, String splitLevel, String batchId, String updatedAt) throws Exception {

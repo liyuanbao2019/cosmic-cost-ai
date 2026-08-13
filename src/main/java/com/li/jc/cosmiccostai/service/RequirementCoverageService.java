@@ -83,9 +83,16 @@ public class RequirementCoverageService {
     public void ensureReadyForExtraction(String projectId) {
         RequirementCoverageResponse coverage = getCoverage(projectId);
         if (coverage.getSourceModuleCount() > 0 && coverage.getMissingModuleCount() > 0) {
+            List<String> missing = new ArrayList<String>();
+            for (RequirementCoverageModule module : coverage.getModules()) {
+                if (!module.isIncluded()) {
+                    missing.add(module.getNumber() + " " + module.getTitle());
+                }
+            }
             throw new BusinessException("解析完整性校验未通过：原文识别到 " + coverage.getSourceModuleCount()
                     + " 个功能模块，其中 " + coverage.getMissingModuleCount()
-                    + " 个尚未进入 AI 输入。请先在“解析完整性校验”中补入缺失模块。");
+                    + " 个尚未进入 AI 输入。缺失模块：" + join(missing)
+                    + "。请重新选择包含这些模块的章节，或在最终正文中补入相应原文。");
         }
     }
 
@@ -278,9 +285,34 @@ public class RequirementCoverageService {
         if (module.number.startsWith("OUTLINE")) {
             return input.contains(module.title);
         }
-        return input.contains(module.number + " " + module.title)
-                || input.contains(module.number + "　" + module.title)
-                || input.contains(module.number + " " + module.title.replace(" ", ""));
+        String expectedNumber = normalizeHeadingNumber(module.number);
+        String expectedTitle = compactHeadingTitle(module.title);
+        for (String rawLine : input.split("\\r?\\n")) {
+            Matcher heading = MODULE_HEADING.matcher(rawLine == null ? "" : rawLine.trim());
+            if (heading.matches()
+                    && expectedNumber.equals(normalizeHeadingNumber(heading.group(1)))
+                    && expectedTitle.equals(compactHeadingTitle(heading.group(2)))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String normalizeHeadingNumber(String number) {
+        return number == null ? "" : number.replace('．', '.').replaceAll("[.]+$", "");
+    }
+
+    private String compactHeadingTitle(String title) {
+        return title == null ? "" : title.replaceAll("\\s+", "").trim();
+    }
+
+    private String join(List<String> values) {
+        StringBuilder result = new StringBuilder();
+        for (String value : values) {
+            if (result.length() > 0) result.append("、");
+            result.append(value);
+        }
+        return result.toString();
     }
 
     private int headingDepth(String number) {

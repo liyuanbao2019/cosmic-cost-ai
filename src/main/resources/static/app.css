@@ -37,6 +37,47 @@
   font-size: 14px;
 }
 
+.project-management-tabs {
+  display: inline-flex;
+  gap: 6px;
+  padding: 5px;
+  margin: 0 0 16px;
+  border: 1px solid #dce7f2;
+  border-radius: 12px;
+  background: #f5f9fc;
+}
+
+.project-management-tabs button {
+  min-width: 132px;
+  box-shadow: none;
+}
+
+.project-management-tabs button.active {
+  color: #fff;
+  background: #0789a7;
+  border-color: #0789a7;
+}
+
+.project-group-id,
+.project-group-id-button {
+  color: #067f9c;
+  letter-spacing: .02em;
+}
+
+.project-group-id-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.project-group-summary {
+  margin-top: 4px;
+}
+
 .project-list-actions {
   display: flex;
   gap: 10px;
@@ -994,13 +1035,48 @@ button.flow-rule-config-btn:hover {
 
 .batch-document-error {
   display: block;
-  overflow: hidden;
   margin-top: 3px;
   color: var(--danger);
   font-size: 10px;
   font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.batch-selected-item-error {
+  margin: 10px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #991b1b;
+  background: #fff1f2;
+}
+
+.batch-selected-item-error > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batch-selected-item-error button {
+  padding: 4px 8px;
+  color: #991b1b;
+  border-color: #fca5a5;
+  background: #fff;
+  font-size: 11px;
+}
+
+.batch-selected-item-error p {
+  margin: 8px 0 0;
+  color: #7f1d1d;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .batch-item-status {
@@ -2451,6 +2527,32 @@ td textarea {
   font-size: 12px;
 }
 
+.smart-split-dialog-times,
+.smart-split-stage-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.smart-split-dialog-times {
+  margin-top: 9px;
+}
+
+.smart-split-dialog-times b,
+.smart-split-stage-times b {
+  margin-left: 4px;
+  color: #334155;
+  font-weight: 600;
+}
+
+.smart-split-stage-times {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.38);
+}
+
 .smart-split-dialog-stats b {
   margin-left: 4px;
   color: #172033;
@@ -2886,6 +2988,110 @@ tbody tr.validation-suggestion .cell-preview {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.project-group-create-dialog,
+.project-group-add-dialog {
+  width: min(760px, calc(100vw - 40px));
+  max-width: none;
+  max-height: min(760px, calc(100vh - 40px));
+  padding: 0;
+  text-align: left;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.project-group-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-group-dialog-header h3,
+.project-group-dialog-header p {
+  margin: 0;
+}
+
+.project-group-dialog-header p {
+  margin-top: 7px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.project-group-dialog-field,
+.project-group-dialog-search {
+  display: grid;
+  gap: 8px;
+  margin: 18px 24px 0;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.project-group-dialog-field input,
+.project-group-dialog-search input {
+  width: 100%;
+}
+
+.project-group-dialog-members {
+  min-height: 0;
+  margin: 16px 24px 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.project-group-dialog-members-title {
+  margin-bottom: 8px;
+  color: var(--secondary);
+  font-size: 13px;
+}
+
+.project-group-dialog-list {
+  min-height: 120px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--soft);
+}
+
+.project-group-dialog-list > div,
+.project-group-dialog-candidate {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-group-dialog-list > div:last-child,
+.project-group-dialog-candidate:last-child {
+  border-bottom: 0;
+}
+
+.project-group-dialog-list b {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-group-dialog-list span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.project-group-create-dialog .dialog-actions,
+.project-group-add-dialog .dialog-actions {
+  margin-top: 18px;
+  padding: 16px 24px 22px;
+  border-top: 1px solid var(--line);
 }
 
 .ai-prompt-dialog {

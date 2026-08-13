@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>项目列表 - COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260812-project-list-4">
+  <link rel="stylesheet" href="/app.css?v=20260812-batch-error-detail-1">
 </head>
 
 <body>
@@ -24,11 +24,19 @@
           <div class="project-list-actions">
             <a class="button-link ghost" href="/models.html" target="_blank" rel="noopener noreferrer">大模型管理</a>
             <button type="button" class="ghost" onclick="location.href='/index.html'">返回工作台</button>
-            <button type="button" onclick="loadProjects()">刷新</button>
+            <button type="button" onclick="loadCurrentManagement()">刷新</button>
           </div>
         </div>
       </div>
 
+      <div class="project-management-tabs" role="tablist" aria-label="项目管理级别">
+        <button id="requirementProjectsTab" type="button" class="active" onclick="switchManagementMode('REQUIREMENT')">需求级拆分</button>
+        <button id="projectGroupsTab" type="button" class="ghost" onclick="switchManagementMode('PROJECT')">项目级材料</button>
+      </div>
+
+      <div id="projectListMessage" class="message hidden"></div>
+
+      <div id="requirementManagement">
       <div class="project-list-filters">
         <input id="projectSearch" type="search" placeholder="搜索项目名称、文件名、项目ID、批次ID" oninput="scheduleProjectSearch()">
         <select id="projectNameFilter" onchange="resetProjectPage()">
@@ -36,15 +44,11 @@
           <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
           <option value="2026年家客终端扩容">2026年家客终端扩容</option>
           <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
-          <option value="26年共享采集">26年共享采集</option>
+          <option value="2026年共享采集扩容">2026年共享采集扩容</option>
           <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
           <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
         </select>
-        <select id="splitLevelFilter" onchange="resetProjectPage()">
-          <option value="">全部拆分级别</option>
-          <option value="PROJECT">项目级</option>
-          <option value="REQUIREMENT">需求级</option>
-        </select>
+        <input id="splitLevelFilter" type="hidden" value="REQUIREMENT">
         <select id="sourceFilter" onchange="resetProjectPage()">
           <option value="">全部来源</option>
           <option value="DOCUMENT">原始需求文档</option>
@@ -67,10 +71,9 @@
         </select>
       </div>
 
-      <div id="projectListMessage" class="message hidden"></div>
-
       <div class="project-batch-bar">
-        <div class="project-selected-info">已选 <b id="selectedProjectCount">0</b> 个项目</div>
+        <div class="project-selected-info">已选 <b id="selectedProjectCount">0</b> 个需求</div>
+        <button id="createProjectGroupBtn" type="button" onclick="createOrAppendProjectGroup()">整合为项目级材料</button>
         <button type="button" class="ghost danger" onclick="deleteSelectedProjects()">批量删除</button>
         <button type="button" class="ghost" onclick="clearSelectedProjects()">清空选择</button>
       </div>
@@ -125,8 +128,67 @@
           <button type="button" class="secondary" onclick="goProjectPage(1)">下一页</button>
         </div>
       </div>
+      </div>
+
+      <div id="projectGroupManagement" class="hidden">
+        <div class="project-batch-bar">
+          <div class="project-selected-info">已选 <b id="selectedProjectGroupCount">0</b> 个项目级材料</div>
+          <button type="button" class="ghost danger" onclick="deleteSelectedProjectGroups()">批量删除</button>
+          <button type="button" class="ghost" onclick="clearSelectedProjectGroups()">清空选择</button>
+        </div>
+        <div class="project-list-summary project-group-summary">
+          <div><b id="projectGroupTotal">0</b><span>项目级项目</span></div>
+          <div><b id="projectGroupCompleted">0</b><span>材料已生成</span></div>
+          <div><b id="projectGroupActive">0</b><span>处理中</span></div>
+          <div><b id="projectGroupFailed">0</b><span>需要处理</span></div>
+        </div>
+        <div class="project-table-wrap">
+          <table class="project-table project-group-table">
+            <thead>
+              <tr>
+                <th class="project-check-cell"><input id="selectAllProjectGroups" type="checkbox" onchange="toggleAllProjectGroups(this.checked)" aria-label="选择全部项目级材料"></th>
+                <th>项目级编号</th>
+                <th>项目名称</th>
+                <th>成员需求</th>
+                <th>拆分进度</th>
+                <th>材料版本</th>
+                <th>材料状态</th>
+                <th>最近修改</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="projectGroupTableBody">
+              <tr><td class="empty" colspan="9">正在加载项目级项目...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
+
+  <div id="projectGroupCreateDialogOverlay" class="dialog-overlay hidden" onclick="closeProjectGroupCreateDialogOnOverlay(event)">
+    <div class="dialog project-group-create-dialog" role="dialog" aria-modal="true" aria-labelledby="projectGroupCreateDialogTitle">
+      <div class="project-group-dialog-header">
+        <div>
+          <h3 id="projectGroupCreateDialogTitle" class="dialog-title">整合为项目级材料</h3>
+          <p>确认项目名称和成员需求后，在当前页面创建，不会跳转工作台。</p>
+        </div>
+        <button type="button" class="ghost" onclick="closeProjectGroupCreateDialog()">关闭</button>
+      </div>
+      <label class="project-group-dialog-field" for="projectGroupDialogName">
+        <span>项目级项目名称</span>
+        <input id="projectGroupDialogName" type="text" maxlength="200">
+      </label>
+      <div class="project-group-dialog-members">
+        <div class="project-group-dialog-members-title">本次整合 <b id="projectGroupDialogCount">0</b> 个需求</div>
+        <div id="projectGroupDialogList" class="project-group-dialog-list"></div>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="ghost" onclick="closeProjectGroupCreateDialog()">取消</button>
+        <button id="projectGroupDialogSubmit" type="button" onclick="submitProjectGroupDialog()">确认整合并生成材料</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     let allProjects = [];
@@ -136,10 +198,39 @@
     let filteredTotal = 0;
     let searchTimer = null;
     let selectedProjectIds = {};
+    let managementMode = "REQUIREMENT";
+    let projectGroups = [];
+    let selectedProjectGroupIds = {};
+    let pendingProjectGroupProjects = [];
 
-    document.addEventListener("DOMContentLoaded", loadProjects);
+    document.addEventListener("DOMContentLoaded", initializeProjectsPage);
+
+    function initializeProjectsPage() {
+      loadProjects();
+    }
+
+    async function switchManagementMode(mode) {
+      managementMode = mode === "PROJECT" ? "PROJECT" : "REQUIREMENT";
+      $("requirementManagement").classList.toggle("hidden", managementMode !== "REQUIREMENT");
+      $("projectGroupManagement").classList.toggle("hidden", managementMode !== "PROJECT");
+      $("requirementProjectsTab").className = managementMode === "REQUIREMENT" ? "active" : "ghost";
+      $("projectGroupsTab").className = managementMode === "PROJECT" ? "active" : "ghost";
+      selectedProjectIds = {};
+      selectedProjectGroupIds = {};
+      if (managementMode === "PROJECT") {
+        await loadProjectGroups();
+      } else {
+        await loadProjects();
+      }
+    }
+
+    function loadCurrentManagement() {
+      if (managementMode === "PROJECT") loadProjectGroups();
+      else loadProjects();
+    }
 
     async function loadProjects() {
+      if (managementMode !== "REQUIREMENT") return;
       setProjectMessage("正在加载项目列表...");
       try {
         const response = await request(buildProjectListUrl());
@@ -157,6 +248,155 @@
         setProjectMessage("", true);
       } catch (error) {
         setProjectMessage(error.message || "项目列表加载失败。", false, true);
+      }
+    }
+
+    async function loadProjectGroups() {
+      setProjectMessage("正在加载项目级项目...");
+      try {
+        const response = await request("/api/projects/batch-split/project-groups");
+        projectGroups = Array.isArray(response.data) ? response.data : [];
+        pruneSelectedProjectGroups();
+        renderProjectGroups();
+        setProjectMessage("", true);
+      } catch (error) {
+        setProjectMessage(error.message || "项目级项目加载失败。", false, true);
+      }
+    }
+
+    function renderProjectGroups() {
+      const body = $("projectGroupTableBody");
+      body.innerHTML = "";
+      const completed = projectGroups.filter(function (group) { return group.projectMaterialStatus === "COMPLETED"; }).length;
+      const failed = projectGroups.filter(function (group) {
+        return group.failed > 0 || group.projectMaterialStatus === "FAILED" || group.projectMaterialStatus === "BLOCKED";
+      }).length;
+      $("projectGroupTotal").textContent = projectGroups.length;
+      $("projectGroupCompleted").textContent = completed;
+      $("projectGroupFailed").textContent = failed;
+      $("projectGroupActive").textContent = Math.max(0, projectGroups.length - completed - failed);
+      updateProjectGroupSelectionState();
+      if (!projectGroups.length) {
+        body.innerHTML = "<tr><td class=\"empty\" colspan=\"9\">尚未创建项目级项目。请在“需求级拆分”中勾选已完成需求进行整合。</td></tr>";
+        return;
+      }
+      projectGroups.forEach(function (group) {
+        const tr = document.createElement("tr");
+        const materialVersion = Number(group.projectMaterialVersion || 0);
+        tr.innerHTML = "<td class=\"project-check-cell\"><input type=\"checkbox\" "
+          + (selectedProjectGroupIds[group.projectGroupId] ? "checked" : "")
+          + " onchange=\"toggleProjectGroupSelection('" + escapeJs(group.projectGroupId) + "', this.checked)\" aria-label=\"选择项目级材料\"></td>"
+          + "<td><button type=\"button\" class=\"project-group-id-button\" onclick=\"openProjectGroup('" + escapeJs(group.batchId) + "','" + escapeJs(group.projectGroupId) + "')\">" + escapeHtml(group.projectGroupId || "-") + "</button>"
+          + "<span class=\"project-id\">执行批次 " + escapeHtml(group.batchId || "-") + "</span></td>"
+          + "<td><b>" + escapeHtml(group.projectGroupName || "未命名项目") + "</b></td>"
+          + "<td><b>" + Number(group.total || 0) + "</b> 个</td>"
+          + "<td>完成 " + Number(group.completed || 0) + "/" + Number(group.total || 0)
+          + (group.failed ? " · 失败 " + Number(group.failed) : "") + "</td>"
+          + "<td>" + (materialVersion ? "V" + materialVersion : "待生成") + "</td>"
+          + "<td><span class=\"status-pill\">" + escapeHtml(projectMaterialStatusText(group.projectMaterialStatus)) + "</span></td>"
+          + "<td>" + escapeHtml(group.updatedAt || "-") + "</td>"
+          + "<td><div class=\"project-row-actions\"><button type=\"button\" class=\"secondary\" onclick=\"openProjectGroup('" + escapeJs(group.batchId) + "','" + escapeJs(group.projectGroupId) + "')\">进入项目</button>"
+          + "<button type=\"button\" class=\"ghost danger\" onclick=\"deleteProjectGroup('" + escapeJs(group.projectGroupId) + "','" + escapeJs(group.projectGroupName || group.projectGroupId) + "')\">删除</button></div></td>";
+        body.appendChild(tr);
+      });
+    }
+
+    function projectMaterialStatusText(status) {
+      if (status === "COMPLETED") return "已生成";
+      if (status === "GENERATING") return "生成中";
+      if (status === "FAILED") return "生成失败";
+      if (status === "BLOCKED") return "需求失败，已暂停";
+      return "等待需求完成";
+    }
+
+    function openProjectGroup(batchId, projectGroupId) {
+      location.href = "/index.html?batchId=" + encodeURIComponent(batchId)
+        + "&projectGroupId=" + encodeURIComponent(projectGroupId || "");
+    }
+
+    function toggleProjectGroupSelection(projectGroupId, checked) {
+      if (!projectGroupId) return;
+      if (checked) selectedProjectGroupIds[projectGroupId] = true;
+      else delete selectedProjectGroupIds[projectGroupId];
+      updateProjectGroupSelectionState();
+    }
+
+    function toggleAllProjectGroups(checked) {
+      projectGroups.forEach(function (group) {
+        if (checked) selectedProjectGroupIds[group.projectGroupId] = true;
+        else delete selectedProjectGroupIds[group.projectGroupId];
+      });
+      renderProjectGroups();
+    }
+
+    function clearSelectedProjectGroups() {
+      selectedProjectGroupIds = {};
+      renderProjectGroups();
+    }
+
+    function selectedProjectGroupIdList() {
+      return Object.keys(selectedProjectGroupIds).filter(function (projectGroupId) {
+        return !!selectedProjectGroupIds[projectGroupId];
+      });
+    }
+
+    function pruneSelectedProjectGroups() {
+      const existing = {};
+      projectGroups.forEach(function (group) { existing[group.projectGroupId] = true; });
+      selectedProjectGroupIdList().forEach(function (projectGroupId) {
+        if (!existing[projectGroupId]) delete selectedProjectGroupIds[projectGroupId];
+      });
+    }
+
+    function updateProjectGroupSelectionState() {
+      const selected = selectedProjectGroupIdList();
+      $("selectedProjectGroupCount").textContent = selected.length;
+      const selector = $("selectAllProjectGroups");
+      if (!selector) return;
+      const checkedCount = projectGroups.filter(function (group) {
+        return !!selectedProjectGroupIds[group.projectGroupId];
+      }).length;
+      selector.checked = projectGroups.length > 0 && checkedCount === projectGroups.length;
+      selector.indeterminate = checkedCount > 0 && checkedCount < projectGroups.length;
+    }
+
+    async function deleteProjectGroup(projectGroupId, projectGroupName) {
+      if (!window.confirm("确认删除项目级项目“" + projectGroupName + "”（" + projectGroupId + "）及其全部关联数据？")) return;
+      if (!window.confirm("再次确认：该操作无法恢复。\n\n将一起删除项目级编号、全部 Vn 汇总材料、所有成员需求、拆分结果和单需求导出材料。确定继续？")) return;
+      setProjectMessage("正在删除项目级材料...");
+      try {
+        await request("/api/projects/batch-split/project-groups/" + encodeURIComponent(projectGroupId), {
+          method: "DELETE"
+        });
+        delete selectedProjectGroupIds[projectGroupId];
+        await loadProjectGroups();
+        setProjectMessage("项目级项目及其全部成员需求、拆分结果和导出材料已删除。");
+      } catch (error) {
+        setProjectMessage(error.message || "删除项目级材料失败。", false, true);
+      }
+    }
+
+    async function deleteSelectedProjectGroups() {
+      const ids = selectedProjectGroupIdList();
+      if (!ids.length) {
+        setProjectMessage("请先勾选要删除的项目级材料。", false, true);
+        return;
+      }
+      if (!window.confirm("确认批量删除 " + ids.length + " 个项目级项目及其全部关联数据？")) return;
+      if (!window.confirm("再次确认：该操作无法恢复。\n\n所选 PJ 的全部版本、所有成员需求、拆分结果和单需求导出材料都会一起删除。确定继续？")) return;
+      setProjectMessage("正在批量删除项目级材料...");
+      try {
+        const response = await request("/api/projects/batch-split/project-groups/batch-delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(ids)
+        });
+        const deletedCount = Number(response.data || ids.length);
+        selectedProjectGroupIds = {};
+        await loadProjectGroups();
+        setProjectMessage("已彻底删除 " + deletedCount + " 个项目级项目及其全部关联数据。");
+      } catch (error) {
+        setProjectMessage(error.message || "批量删除项目级材料失败。", false, true);
       }
     }
 
@@ -204,7 +444,7 @@
       const values = {
         search: $("projectSearch").value,
         projectName: $("projectNameFilter").value,
-        splitLevel: $("splitLevelFilter").value,
+        splitLevel: "REQUIREMENT",
         sourceType: $("sourceFilter").value,
         status: $("statusFilter").value,
         risk: $("riskFilter").value,
@@ -266,6 +506,7 @@
         errorCount: 0,
         riskCount: 0,
         suggestionCount: 0,
+        splitResultReady: false,
         exportStatus: "未导出"
       }, project || {});
     }
@@ -301,12 +542,96 @@
         : "/index.html?projectId=" + encodeURIComponent(projectId);
     }
 
+    function createOrAppendProjectGroup() {
+      const ids = selectedProjectIdList();
+      if (!ids.length) {
+        setProjectMessage("请先勾选已完成拆分的需求。", false, true);
+        return;
+      }
+      const selected = ids.map(function (projectId) { return selectedProjectIds[projectId]; }).filter(function (project) {
+        return project && typeof project === "object";
+      });
+      const unfinished = selected.filter(function (project) { return !project.splitResultReady; });
+      if (unfinished.length) {
+        setProjectMessage("以下需求尚无最终拆分结果，不能直接整合：" + unfinished.map(function (project) {
+          return project.sourceFileName || project.projectId;
+        }).join("、"), false, true);
+        return;
+      }
+      const names = selected.map(function (project) { return text(project.projectName); }).filter(Boolean);
+      const uniqueNames = names.filter(function (name, index) { return names.indexOf(name) === index; });
+      if (uniqueNames.length > 1) {
+        setProjectMessage("只能整合同一备案项目名称下的需求。", false, true);
+        return;
+      }
+      pendingProjectGroupProjects = selected;
+      $("projectGroupDialogName").value = uniqueNames[0] || "未命名项目";
+      $("projectGroupDialogCount").textContent = selected.length;
+      $("projectGroupDialogList").innerHTML = selected.map(function (project) {
+        return "<div><b>" + escapeHtml(project.sourceFileName || project.projectName || project.projectId)
+          + "</b><span>" + escapeHtml(project.projectId) + "</span></div>";
+      }).join("");
+      $("projectGroupCreateDialogOverlay").classList.remove("hidden");
+      $("projectGroupDialogName").focus();
+    }
+
+    function closeProjectGroupCreateDialog() {
+      $("projectGroupCreateDialogOverlay").classList.add("hidden");
+      pendingProjectGroupProjects = [];
+    }
+
+    function closeProjectGroupCreateDialogOnOverlay(event) {
+      if (event.target === $("projectGroupCreateDialogOverlay")) closeProjectGroupCreateDialog();
+    }
+
+    async function submitProjectGroupDialog() {
+      const selected = pendingProjectGroupProjects.slice();
+      const ids = selected.map(function (project) { return project.projectId; }).filter(Boolean);
+      const projectGroupName = text($("projectGroupDialogName").value);
+      if (!ids.length) {
+        closeProjectGroupCreateDialog();
+        setProjectMessage("本次整合的需求已失效，请重新勾选。", false, true);
+        return;
+      }
+      if (!projectGroupName) {
+        $("projectGroupDialogName").focus();
+        return;
+      }
+      const button = $("projectGroupDialogSubmit");
+      button.disabled = true;
+      button.textContent = "正在整合...";
+      setProjectMessage("正在创建项目级项目并生成材料...");
+      try {
+        const response = await request("/api/projects/batch-split/project-groups", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectIds: ids,
+            projectGroupName: projectGroupName,
+            reuseCompletedResults: true
+          })
+        });
+        const group = response.data || {};
+        closeProjectGroupCreateDialog();
+        selectedProjectIds = {};
+        await switchManagementMode("PROJECT");
+        setProjectMessage("项目级项目已创建：" + (group.projectGroupId || "-") + "。材料正在当前项目中生成，可点击“进入项目”查看进度。");
+      } catch (error) {
+        setProjectMessage(error.message || "项目级项目创建失败。", false, true);
+      } finally {
+        button.disabled = false;
+        button.textContent = "确认整合并生成材料";
+      }
+    }
+
     function toggleProjectSelection(projectId, checked) {
       if (!projectId) {
         return;
       }
       if (checked) {
-        selectedProjectIds[projectId] = true;
+        selectedProjectIds[projectId] = allProjects.find(function (project) {
+          return project.projectId === projectId;
+        }) || { projectId: projectId };
       } else {
         delete selectedProjectIds[projectId];
       }
@@ -316,7 +641,7 @@
     function togglePageProjects(checked) {
       currentPageItems().forEach(function (project) {
         if (checked) {
-          selectedProjectIds[project.projectId] = true;
+          selectedProjectIds[project.projectId] = project;
         } else {
           delete selectedProjectIds[project.projectId];
         }

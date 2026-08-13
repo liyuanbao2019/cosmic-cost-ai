@@ -7,6 +7,8 @@ public class BatchSplitJobResponse {
 
     private String batchId;
     private String splitLevel;
+    private String projectGroupId;
+    private String projectGroupName;
     private String status;
     private String createdAt;
     private String updatedAt;
@@ -26,6 +28,7 @@ public class BatchSplitJobResponse {
     private String projectMaterialCompletedAt;
     private double projectMaterialTotalCfp;
     private int projectMaterialRequirementCount;
+    private int projectMaterialVersion;
     private List<ProjectMaterialFileResponse> projectMaterialFiles = new ArrayList<ProjectMaterialFileResponse>();
     private List<BatchSplitItemResponse> items = new ArrayList<BatchSplitItemResponse>();
 
@@ -33,6 +36,10 @@ public class BatchSplitJobResponse {
     public void setBatchId(String batchId) { this.batchId = batchId; }
     public String getSplitLevel() { return splitLevel; }
     public void setSplitLevel(String splitLevel) { this.splitLevel = splitLevel; }
+    public String getProjectGroupId() { return projectGroupId; }
+    public void setProjectGroupId(String projectGroupId) { this.projectGroupId = projectGroupId; }
+    public String getProjectGroupName() { return projectGroupName; }
+    public void setProjectGroupName(String projectGroupName) { this.projectGroupName = projectGroupName; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getCreatedAt() { return createdAt; }
@@ -71,6 +78,8 @@ public class BatchSplitJobResponse {
     public void setProjectMaterialTotalCfp(double projectMaterialTotalCfp) { this.projectMaterialTotalCfp = projectMaterialTotalCfp; }
     public int getProjectMaterialRequirementCount() { return projectMaterialRequirementCount; }
     public void setProjectMaterialRequirementCount(int projectMaterialRequirementCount) { this.projectMaterialRequirementCount = projectMaterialRequirementCount; }
+    public int getProjectMaterialVersion() { return projectMaterialVersion; }
+    public void setProjectMaterialVersion(int projectMaterialVersion) { this.projectMaterialVersion = projectMaterialVersion; }
     public List<ProjectMaterialFileResponse> getProjectMaterialFiles() { return projectMaterialFiles; }
     public void setProjectMaterialFiles(List<ProjectMaterialFileResponse> projectMaterialFiles) { this.projectMaterialFiles = projectMaterialFiles; }
     public List<BatchSplitItemResponse> getItems() { return items; }

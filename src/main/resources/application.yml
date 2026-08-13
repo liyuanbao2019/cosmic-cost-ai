@@ -74,13 +74,13 @@ cosmic:
     max-concurrency: ${OPENAI_MAX_CONCURRENCY:100}
     batch-split:
       # 批量拆分按项目并发；单项目内部统一调用 smart-split 流水线并严格串行
-      worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:24}
+      worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:50}
       # 等待执行的批量项目上限，配合单批最大文件数形成背压保护
       queue-capacity: ${COSMIC_BATCH_SPLIT_QUEUE_CAPACITY:100}
-      # 单用户极速模式：一个批次最多同时运行 23 份文档；仍保留 1 个全局槽给其他批次
-      max-concurrency-per-batch: ${COSMIC_BATCH_MAX_CONCURRENCY_PER_BATCH:23}
+      # 单用户满并发模式：一个 50 份需求的批次可全部同时进入智能拆分，不在应用内预留排队槽
+      max-concurrency-per-batch: ${COSMIC_BATCH_MAX_CONCURRENCY_PER_BATCH:50}
       # 文档解析与章节识别是本地代码任务，使用独立线程池，不能被长时间等待 AI 的拆分线程阻塞
-      preparation-worker-count: ${COSMIC_BATCH_PREPARATION_WORKERS:4}
+      preparation-worker-count: ${COSMIC_BATCH_PREPARATION_WORKERS:50}
       preparation-queue-capacity: ${COSMIC_BATCH_PREPARATION_QUEUE_CAPACITY:100}
       # 单个批次允许包含的最大需求文档数
       max-items: ${COSMIC_BATCH_SPLIT_MAX_ITEMS:50}
@@ -93,7 +93,7 @@ cosmic:
       deep-review-retry-rounds: ${COSMIC_SMART_SPLIT_DEEP_REVIEW_RETRY_ROUNDS:2}
     deep-split:
       # AI 深度审核后台任务线程数；控制同时可运行多少个深度审核任务
-      worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:32}
+      worker-count: ${COSMIC_DEEP_SPLIT_WORKERS:50}
       # 后台任务等待队列容量；超过容量时立即提示系统繁忙，避免无限积压
       queue-capacity: ${COSMIC_DEEP_SPLIT_QUEUE_CAPACITY:50}
       # AI 深度审核单个分批调用超时时间，单位秒；避免某一批长时间卡死

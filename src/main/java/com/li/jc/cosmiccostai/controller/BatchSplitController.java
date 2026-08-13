@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.controller;
 import com.li.jc.cosmiccostai.common.ApiResponse;
 import com.li.jc.cosmiccostai.dto.BatchSplitConfirmRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
+import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
 import com.li.jc.cosmiccostai.service.BatchSplitService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 
 @Tag(name = "批量拆分")
 @RestController
@@ -39,6 +42,37 @@ public class BatchSplitController {
     @PostMapping
     public ApiResponse<BatchSplitJobResponse> create(@RequestBody BatchSplitCreateRequest request) {
         return ApiResponse.ok(batchSplitService.create(request));
+    }
+
+    @Operation(summary = "Create project group", description = "Combine completed requirement-level results into a separately managed project-level project.")
+    @PostMapping("/project-groups")
+    public ApiResponse<BatchSplitJobResponse> createProjectGroup(@RequestBody BatchSplitCreateRequest request) {
+        return ApiResponse.ok(batchSplitService.createProjectGroup(request));
+    }
+
+    @Operation(summary = "List project groups", description = "List separately managed project-level projects.")
+    @GetMapping("/project-groups")
+    public ApiResponse<List<BatchSplitJobResponse>> listProjectGroups() {
+        return ApiResponse.ok(batchSplitService.listProjectGroups());
+    }
+
+    @Operation(summary = "Get project group", description = "Resolve a project-level project number to its current execution batch and members.")
+    @GetMapping("/project-groups/{projectGroupId}")
+    public ApiResponse<BatchSplitJobResponse> getProjectGroup(@PathVariable String projectGroupId) {
+        return ApiResponse.ok(batchSplitService.getProjectGroup(projectGroupId));
+    }
+
+    @Operation(summary = "Delete project group", description = "Delete one project-level container and aggregate material versions without deleting linked requirements.")
+    @DeleteMapping("/project-groups/{projectGroupId}")
+    public ApiResponse<Void> deleteProjectGroup(@PathVariable String projectGroupId) {
+        batchSplitService.deleteProjectGroup(projectGroupId);
+        return ApiResponse.ok(null);
+    }
+
+    @Operation(summary = "Batch delete project groups", description = "Delete multiple project-level containers and aggregate material versions.")
+    @PostMapping("/project-groups/batch-delete")
+    public ApiResponse<Integer> deleteProjectGroups(@RequestBody List<String> projectGroupIds) {
+        return ApiResponse.ok(batchSplitService.deleteProjectGroups(projectGroupIds));
     }
 
     @Operation(summary = "Get batch split", description = "Get preparation, confirmation and execution progress.")
@@ -59,6 +93,20 @@ public class BatchSplitController {
     @PostMapping("/{batchId}/start")
     public ApiResponse<BatchSplitJobResponse> start(@PathVariable String batchId) {
         return ApiResponse.ok(batchSplitService.start(batchId));
+    }
+
+    @Operation(summary = "Add project members", description = "Add completed requirements or new uploads to an existing project-level project.")
+    @PostMapping("/{batchId}/items")
+    public ApiResponse<BatchSplitJobResponse> addItems(@PathVariable String batchId,
+                                                        @RequestBody BatchSplitItemsRequest request) {
+        return ApiResponse.ok(batchSplitService.addItems(batchId, request));
+    }
+
+    @Operation(summary = "Rerun project member", description = "Rerun one requirement without rerunning the other completed project members.")
+    @PostMapping("/{batchId}/items/{projectId}/rerun")
+    public ApiResponse<BatchSplitJobResponse> rerunItem(@PathVariable String batchId,
+                                                        @PathVariable String projectId) {
+        return ApiResponse.ok(batchSplitService.rerunItem(batchId, projectId));
     }
 
     @Operation(summary = "Retry failed batch items", description = "Retry failed preparation or split items without rerunning successful items.")

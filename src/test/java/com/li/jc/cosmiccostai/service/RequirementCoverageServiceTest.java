@@ -1,5 +1,6 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageResponse;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RequirementCoverageServiceTest {
@@ -62,7 +64,7 @@ class RequirementCoverageServiceTest {
                 + "2.1.2 智能报告详情管理（新增）\n2.1.2.1 功能描述\n3. 报告详情展示：展示完整报告信息。\n维护报告详情。\n2.1.2.2 功能界面\n"
                 + "2.1.3 终端盘点管理（新增）\n2.1.3.1 功能描述\n查询盘点结果。\n"
                 + "3. 调整因子情况说明\n").getBytes(StandardCharsets.UTF_8));
-        Files.write(aiInput, ("2.1.1 智能报告管理（新增）\n功能描述\n新增、查询智能报告。\n")
+        Files.write(aiInput, ("2.1.1. 智能报告管理（新增）\n功能描述\n新增、查询智能报告。\n")
                 .getBytes(StandardCharsets.UTF_8));
         ProjectMetadata metadata = new ProjectMetadata();
         metadata.setId(projectId);
@@ -76,6 +78,10 @@ class RequirementCoverageServiceTest {
         assertEquals(1, before.getIncludedModuleCount());
         assertEquals(2, before.getMissingModuleCount());
         assertFalse(before.isReadyForExtraction());
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.ensureReadyForExtraction(projectId));
+        assertTrue(error.getMessage().contains("2.1.2 智能报告详情管理（新增）"));
+        assertTrue(error.getMessage().contains("2.1.3 终端盘点管理（新增）"));
 
         RequirementCoverageResponse after = service.includeModules(projectId, Arrays.asList("2.1.2", "2.1.3"));
         assertEquals(3, after.getIncludedModuleCount());
