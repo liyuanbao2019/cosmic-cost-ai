@@ -50,6 +50,7 @@
 - 批量确认面板逐份展示推荐章节、章节字数、解析警告和最终 AI 输入，支持人工修改。
 - 每份文档确认时保存输入快照和内容哈希；全部文档确认且内容未变化后才允许启动。
 - 文档之间按配置并发；单个文档内部与单需求模式共用 `SmartSplitPipelineService`，统一顺序为 COSMIC 初拆、AI 深度审核、安全建议采纳、复用度调整、规则初审；深审开关关闭时跳过中间两个可选阶段。
+- 需求级批次完成后可一键为全部已完成需求生成各自的附件1、附件2、附件3及单需求 ZIP，并将所有单需求 ZIP 再打成一个批次总 ZIP 直接下载；个别材料生成失败时保留并打包成功项，同时展示完整失败原因。
 - 多个批次同时运行时采用轮转调度；单用户满并发模式默认提供 50 个文档解析槽、50 个文档智能拆分槽、单批最多占 50 个，深度审核任务池也为 50，因此一个达到上限的 50 需求批次在应用层无需排队，并由模型级 100 个在途请求额度统一保护。
 - 服务重启只恢复批次进度展示，不会静默恢复解析、AI 拆分或项目材料生成；重启前未完成项标记为“已中断”，必须由用户点击“恢复中断项”后才重新排队，已完成结果继续保留。
 - 某份文档失败不会中断其他文档，可只重试失败项；刷新页面可通过批次 ID 恢复进度。
@@ -60,6 +61,7 @@
 - 项目级五个附件生成后自动打包为 `项目名称-COSMIC送审材料.zip`；材料生成失败可单独重试，不重复运行已完成的 AI 拆分。
 - 项目级项目支持继续添加已有拆分结果，也支持上传新需求后只对新增需求执行解析、确认和智能拆分；已完成成员不会重跑。
 - 批量面板支持单独重新拆分一个已完成或失败的需求，其他成员结果保持不变；项目级重拆完成后生成新的 `Vn` 材料版本，旧版本目录继续保留。
+- 需求级和项目级批次完成后均可打开“拆分摘要”，查看批次汇总 CFP、功能过程数、拆分行数及逐需求明细；摘要可直接下载为带公式合计、筛选和失败原因的 Excel，便于传递与归档。
 
 ### 已拆分 Excel 导入
 
@@ -359,6 +361,8 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects/batch-split/project-groups/{projectGroupId}` | GET / DELETE | 按 `PJ...` 编号查询项目级项目及全部需求成员 / 级联删除项目及全部成员数据 |
 | `/api/projects/batch-split/project-groups/batch-delete` | POST | 批量级联删除多个项目级项目及全部成员数据 |
 | `/api/projects/batch-split/{batchId}` | GET | 查询批次准备、确认及并发执行进度 |
+| `/api/projects/batch-split/{batchId}/summary` | GET | 汇总已完成需求的最终功能过程、拆分行及 CFP |
+| `/api/projects/batch-split/{batchId}/summary/download` | GET | 下载需求级或项目级批次 CFP 摘要 Excel |
 | `/api/projects/batch-split/{batchId}/items` | POST | 向项目级项目追加已有拆分需求或新上传需求 |
 | `/api/projects/batch-split/{batchId}/items/{projectId}/rerun` | POST | 只重新拆分指定需求，保留批次内其他成功结果 |
 | `/api/projects/batch-split/{batchId}/items/{projectId}/ai-input` | PUT | 保存并确认单份文档的章节和最终 AI 输入 |

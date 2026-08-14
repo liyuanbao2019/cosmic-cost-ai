@@ -5,9 +5,11 @@ import com.li.jc.cosmiccostai.dto.BatchSplitConfirmRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
+import com.li.jc.cosmiccostai.dto.BatchSplitSummaryResponse;
 import com.li.jc.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
+import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -587,10 +589,49 @@ class BatchSplitServiceTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
     }
 
+    @Test
+    void completedBatchSummaryReadsLatestFinalRowsAndTotalsCfp() throws Exception {
+        BatchSplitJobResponse created = service.create(createRequest());
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("需要拆分的需求正文");
+        service.confirm(created.getBatchId(), metadata.getId(), confirmation);
+        service.start(created.getBatchId());
+
+        FunctionSplitRow first = summaryRow("查询终端", "E", 1D);
+        FunctionSplitRow second = summaryRow("查询终端", "X", 1D);
+        FunctionSplitRow third = summaryRow("导出终端", "E", 2D);
+        Path rowsPath = tempDir.resolve("summary-final-rows.json");
+        new com.fasterxml.jackson.databind.ObjectMapper().writeValue(rowsPath.toFile(),
+                Arrays.asList(first, second, third));
+        metadata.setFunctionSplitRowsPath(rowsPath.toString());
+
+        BatchSplitSummaryResponse summary = service.summary(created.getBatchId());
+
+        assertEquals("REQUIREMENT", summary.getSplitLevel());
+        assertEquals(1, summary.getCompletedCount());
+        assertEquals(1, summary.getStatisticsAvailableCount());
+        assertEquals(2, summary.getFunctionProcessCount());
+        assertEquals(3, summary.getMovementRowCount());
+        assertEquals(4D, summary.getTotalCfp());
+        assertEquals(4D, summary.getItems().get(0).getTotalCfp());
+        assertTrue(summary.getItems().get(0).isStatisticsAvailable());
+    }
+
     private BatchSplitCreateRequest createRequest() {
         BatchSplitCreateRequest request = new BatchSplitCreateRequest();
         request.setProjectIds(Arrays.asList(metadata.getId()));
         return request;
+    }
+
+    private FunctionSplitRow summaryRow(String process, String movementType, double cfp) {
+        FunctionSplitRow row = new FunctionSplitRow();
+        row.setLevel1Module("终端管理");
+        row.setFunctionalUser("管理员");
+        row.setTriggerEvent("用户操作");
+        row.setFunctionProcess(process);
+        row.setMovementType(movementType);
+        row.setCfp(cfp);
+        return row;
     }
 
     private ProjectMetadata registerSecondProject() throws Exception {

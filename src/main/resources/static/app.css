@@ -2656,7 +2656,7 @@ td textarea {
 .dialog.review-stage-dialog {
   width: min(1120px, calc(100vw - 48px));
   max-width: none;
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - 28px);
   padding: 0;
   overflow: auto;
   text-align: left;
@@ -2684,6 +2684,35 @@ td textarea {
 
 .review-stage-dialog .review-stage-grid {
   padding: 18px 20px 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: stretch;
+}
+
+.review-stage-dialog .smart-split-stage-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+  gap: 8px;
+}
+
+.review-stage-dialog .smart-split-stage-times > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-stage-dialog .smart-split-stage-times b {
+  min-width: 0;
+  margin-left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .review-stage-dialog .review-stage-note {
@@ -3000,6 +3029,168 @@ tbody tr.validation-suggestion .cell-preview {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.batch-summary-dialog {
+  width: min(1120px, calc(100vw - 40px));
+  max-width: none;
+  max-height: min(820px, calc(100vh - 40px));
+  padding: 0;
+  text-align: left;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.batch-summary-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.batch-summary-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.batch-summary-header h3,
+.batch-summary-header p {
+  margin: 0;
+}
+
+.batch-summary-header p {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.batch-summary-loading {
+  padding: 42px 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+#batchSummaryContent {
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 24px;
+}
+
+.batch-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 12px;
+}
+
+.batch-summary-stats article {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--soft);
+}
+
+.batch-summary-stats article.primary {
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+
+.batch-summary-stats span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.batch-summary-stats b {
+  color: var(--text);
+  font-size: 24px;
+}
+
+.batch-summary-stats article.primary b {
+  color: var(--primary);
+  font-size: 30px;
+}
+
+.batch-summary-notice {
+  margin: 14px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #0f766e;
+  background: #f0fdfa;
+  font-size: 13px;
+}
+
+.batch-summary-notice.warning {
+  color: #9a3412;
+  background: #fff7ed;
+}
+
+.batch-summary-table-wrap {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.batch-summary-table {
+  min-width: 860px;
+  margin: 0;
+}
+
+.batch-summary-table th,
+.batch-summary-table td {
+  padding: 11px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.batch-summary-table td:first-child {
+  min-width: 250px;
+}
+
+.batch-summary-table small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.batch-summary-status {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.batch-summary-status.success {
+  color: #047857;
+  background: #d1fae5;
+}
+
+.batch-summary-status.failed {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
+.batch-summary-cfp {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.batch-summary-message {
+  max-width: 320px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .batch-summary-stats {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
 }
 
 .project-group-dialog-header {
@@ -3779,6 +3970,10 @@ button.deep-split-row-link:hover {
 
   .review-stage-dialog .review-stage-grid {
     padding: 14px 14px 10px;
+  }
+
+  .review-stage-dialog .smart-split-stage-times {
+    grid-template-columns: 1fr;
   }
 
   .review-stage-dialog .review-stage-note {

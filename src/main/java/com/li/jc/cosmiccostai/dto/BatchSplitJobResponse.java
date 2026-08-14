@@ -30,6 +30,11 @@ public class BatchSplitJobResponse {
     private int projectMaterialRequirementCount;
     private int projectMaterialVersion;
     private List<ProjectMaterialFileResponse> projectMaterialFiles = new ArrayList<ProjectMaterialFileResponse>();
+    private String requirementMaterialStatus;
+    private String requirementMaterialMessage;
+    private int requirementMaterialSuccessCount;
+    private int requirementMaterialFailedCount;
+    private ProjectMaterialFileResponse requirementMaterialArchive;
     private List<BatchSplitItemResponse> items = new ArrayList<BatchSplitItemResponse>();
 
     public String getBatchId() { return batchId; }
@@ -82,6 +87,16 @@ public class BatchSplitJobResponse {
     public void setProjectMaterialVersion(int projectMaterialVersion) { this.projectMaterialVersion = projectMaterialVersion; }
     public List<ProjectMaterialFileResponse> getProjectMaterialFiles() { return projectMaterialFiles; }
     public void setProjectMaterialFiles(List<ProjectMaterialFileResponse> projectMaterialFiles) { this.projectMaterialFiles = projectMaterialFiles; }
+    public String getRequirementMaterialStatus() { return requirementMaterialStatus; }
+    public void setRequirementMaterialStatus(String requirementMaterialStatus) { this.requirementMaterialStatus = requirementMaterialStatus; }
+    public String getRequirementMaterialMessage() { return requirementMaterialMessage; }
+    public void setRequirementMaterialMessage(String requirementMaterialMessage) { this.requirementMaterialMessage = requirementMaterialMessage; }
+    public int getRequirementMaterialSuccessCount() { return requirementMaterialSuccessCount; }
+    public void setRequirementMaterialSuccessCount(int requirementMaterialSuccessCount) { this.requirementMaterialSuccessCount = requirementMaterialSuccessCount; }
+    public int getRequirementMaterialFailedCount() { return requirementMaterialFailedCount; }
+    public void setRequirementMaterialFailedCount(int requirementMaterialFailedCount) { this.requirementMaterialFailedCount = requirementMaterialFailedCount; }
+    public ProjectMaterialFileResponse getRequirementMaterialArchive() { return requirementMaterialArchive; }
+    public void setRequirementMaterialArchive(ProjectMaterialFileResponse requirementMaterialArchive) { this.requirementMaterialArchive = requirementMaterialArchive; }
     public List<BatchSplitItemResponse> getItems() { return items; }
     public void setItems(List<BatchSplitItemResponse> items) { this.items = items; }
 }

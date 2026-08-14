@@ -15,6 +15,20 @@ class BatchSplitUiRegressionTest {
     void multiDocumentInputRequiresPerDocumentConfirmationBeforeStart() throws Exception {
         String html = new String(Files.readAllBytes(
                 Paths.get("src/main/resources/static/index.html")), StandardCharsets.UTF_8);
+        String css = new String(Files.readAllBytes(
+                Paths.get("src/main/resources/static/app.css")), StandardCharsets.UTF_8);
+        assertTrue(html.contains("id=\"batchRequirementMaterials\""));
+        assertTrue(html.contains("function exportBatchRequirementMaterials()"));
+        assertTrue(html.contains("/requirement-materials"));
+        assertTrue(html.contains("id=\"batchSummaryBtn\"")
+                && html.contains("id=\"batchSummaryDialogOverlay\""));
+        assertTrue(html.contains("function openBatchSummaryDialog()")
+                && html.contains("/summary"));
+        assertTrue(html.contains("id=\"batchSummaryDownloadBtn\"")
+                && html.contains("function downloadBatchSummaryExcel()")
+                && html.contains("/summary/download"));
+        assertTrue(html.contains("summary.totalCfp")
+                && html.contains("summary.functionProcessCount"));
 
         assertTrue(html.contains("id=\"fileInput\" type=\"file\" accept=\".doc,.docx\" multiple"));
         assertTrue(html.contains("id=\"batchStartBtn\"") && html.contains("等待全部确认"));
@@ -54,5 +68,12 @@ class BatchSplitUiRegressionTest {
         assertTrue(html.contains("id=\"batchSelectedItemError\"")
                 && html.contains("copyBatchSelectedItemError"));
         assertTrue(html.contains("item.confirmedAt || Number(item.inputLength || 0) > 0"));
+        assertTrue(css.contains(".review-stage-dialog .review-stage-grid")
+                && css.contains("repeat(auto-fit, minmax(220px, 1fr))"));
+        assertTrue(css.contains(".review-stage-dialog .smart-split-stage-times")
+                && css.contains("grid-template-columns: repeat(2, minmax(0, 1fr))")
+                && css.contains("flex-direction: column")
+                && css.contains("text-overflow: ellipsis")
+                && css.contains(".review-stage-dialog .smart-split-stage-times b"));
     }
 }

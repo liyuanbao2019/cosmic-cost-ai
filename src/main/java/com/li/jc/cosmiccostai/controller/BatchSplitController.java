@@ -5,7 +5,9 @@ import com.li.jc.cosmiccostai.dto.BatchSplitConfirmRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
+import com.li.jc.cosmiccostai.dto.BatchSplitSummaryResponse;
 import com.li.jc.cosmiccostai.service.BatchSplitService;
+import com.li.jc.cosmiccostai.service.BatchSplitSummaryExcelService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.core.io.PathResource;
@@ -33,9 +35,12 @@ import java.util.List;
 public class BatchSplitController {
 
     private final BatchSplitService batchSplitService;
+    private final BatchSplitSummaryExcelService batchSplitSummaryExcelService;
 
-    public BatchSplitController(BatchSplitService batchSplitService) {
+    public BatchSplitController(BatchSplitService batchSplitService,
+                                BatchSplitSummaryExcelService batchSplitSummaryExcelService) {
         this.batchSplitService = batchSplitService;
+        this.batchSplitSummaryExcelService = batchSplitSummaryExcelService;
     }
 
     @Operation(summary = "Create batch split", description = "Parse selected Word projects without starting AI work.")
@@ -81,6 +86,27 @@ public class BatchSplitController {
         return ApiResponse.ok(batchSplitService.get(batchId));
     }
 
+    @Operation(summary = "Get batch split summary", description = "Summarize final CFP for every completed requirement in a requirement-level or project-level batch.")
+    @GetMapping("/{batchId}/summary")
+    public ApiResponse<BatchSplitSummaryResponse> summary(@PathVariable String batchId) {
+        return ApiResponse.ok(batchSplitService.summary(batchId));
+    }
+
+    @Operation(summary = "Download batch split summary", description = "Download the requirement-level or project-level batch CFP summary as Excel.")
+    @GetMapping("/{batchId}/summary/download")
+    public ResponseEntity<Resource> downloadSummary(@PathVariable String batchId) {
+        Path path = batchSplitSummaryExcelService.export(batchSplitService.summary(batchId));
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(path.getFileName().toString(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentLength(path.toFile().length())
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(new PathResource(path));
+    }
+
     @Operation(summary = "Confirm AI input", description = "Freeze the selected chapters and final AI input for one document.")
     @PutMapping("/{batchId}/items/{projectId}/ai-input")
     public ApiResponse<BatchSplitJobResponse> confirm(@PathVariable String batchId,
@@ -119,6 +145,26 @@ public class BatchSplitController {
     @PostMapping("/{batchId}/materials/retry")
     public ApiResponse<BatchSplitJobResponse> retryMaterials(@PathVariable String batchId) {
         return ApiResponse.ok(batchSplitService.retryProjectMaterials(batchId));
+    }
+
+    @Operation(summary = "Generate requirement material bundle", description = "Generate every completed requirement's attachment 1-3 archive and wrap all requirement archives in one ZIP.")
+    @PostMapping("/{batchId}/requirement-materials")
+    public ApiResponse<BatchSplitJobResponse> exportRequirementMaterials(@PathVariable String batchId) {
+        return ApiResponse.ok(batchSplitService.exportRequirementMaterials(batchId));
+    }
+
+    @Operation(summary = "Download requirement material bundle", description = "Download the ZIP containing every successfully generated single-requirement material archive.")
+    @GetMapping("/{batchId}/requirement-materials/download")
+    public ResponseEntity<Resource> downloadRequirementMaterials(@PathVariable String batchId) {
+        Path path = batchSplitService.requirementMaterialArchiveFile(batchId);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(path.getFileName().toString(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentLength(path.toFile().length())
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(new PathResource(path));
     }
 
     @Operation(summary = "Download project material", description = "Download one approved project-level attachment or the complete archive.")

@@ -1,5 +1,6 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.li.jc.cosmiccostai.common.BusinessException;
@@ -8,12 +9,15 @@ import com.li.jc.cosmiccostai.dto.BatchSplitCreateRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitItemResponse;
 import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
+import com.li.jc.cosmiccostai.dto.BatchSplitSummaryItemResponse;
+import com.li.jc.cosmiccostai.dto.BatchSplitSummaryResponse;
 import com.li.jc.cosmiccostai.dto.DocumentChapterItem;
 import com.li.jc.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.dto.ProjectMaterialFileResponse;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
+import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.task.TaskExecutor;
@@ -154,6 +158,11 @@ public class BatchSplitService {
                                 && allItemsCompleted(state))) {
                             state.setProjectMaterialStatus("FAILED");
                             state.setProjectMaterialMessage("服务重启已停止项目级送审材料生成，未自动恢复；请手动点击重试。");
+                            stateChanged = true;
+                        }
+                        if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
+                            state.setRequirementMaterialStatus("FAILED");
+                            state.setRequirementMaterialMessage("服务重启已停止需求级材料整合，未自动恢复；请手动重新打包。");
                             stateChanged = true;
                         }
                         for (BatchSplitItemState item : state.getItems()) {
@@ -550,6 +559,108 @@ public class BatchSplitService {
         return toResponse(loadState(batchId));
     }
 
+    public BatchSplitSummaryResponse summary(String batchId) {
+        BatchSplitState state = loadState(batchId);
+        if (hasUnfinishedItems(state)) {
+            throw new BusinessException("批量拆分尚未结束，请等待全部需求完成或失败后再查看摘要。");
+        }
+
+        BatchSplitSummaryResponse response = new BatchSplitSummaryResponse();
+        response.setBatchId(state.getBatchId());
+        response.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
+        response.setProjectGroupId(state.getProjectGroupId());
+        response.setProjectGroupName(state.getProjectGroupName());
+        response.setTotalCount(state.getItems().size());
+        response.setProjectMaterialStatus(state.getProjectMaterialStatus());
+        response.setProjectMaterialTotalCfp(roundCfp(state.getProjectMaterialTotalCfp()));
+
+        List<BatchSplitSummaryItemResponse> items = new ArrayList<BatchSplitSummaryItemResponse>();
+        int totalProcesses = 0;
+        int totalRows = 0;
+        double totalCfp = 0D;
+        int completed = 0;
+        int failed = 0;
+        int statisticsAvailable = 0;
+        for (BatchSplitItemState stateItem : state.getItems()) {
+            BatchSplitSummaryItemResponse item = new BatchSplitSummaryItemResponse();
+            item.setProjectId(stateItem.getProjectId());
+            item.setProjectName(stateItem.getProjectName());
+            item.setSourceFileName(stateItem.getSourceFileName());
+            item.setStatus(stateItem.getStatus());
+            if ("COMPLETED".equals(stateItem.getStatus())) {
+                completed++;
+                try {
+                    List<FunctionSplitRow> rows = readFinalSplitRows(stateItem.getProjectId());
+                    Set<String> processKeys = new LinkedHashSet<String>();
+                    double itemCfp = 0D;
+                    for (FunctionSplitRow row : rows) {
+                        if (row == null) continue;
+                        if (StringUtils.hasText(row.getFunctionProcess())) {
+                            processKeys.add(FunctionProcessKey.of(row));
+                        }
+                        itemCfp += row.getCfp();
+                    }
+                    item.setFunctionProcessCount(processKeys.size());
+                    item.setMovementRowCount(rows.size());
+                    item.setTotalCfp(roundCfp(itemCfp));
+                    item.setStatisticsAvailable(true);
+                    statisticsAvailable++;
+                    totalProcesses += processKeys.size();
+                    totalRows += rows.size();
+                    totalCfp += itemCfp;
+                } catch (RuntimeException ex) {
+                    item.setStatisticsAvailable(false);
+                    item.setMessage("最终拆分结果读取失败：" + message(ex));
+                }
+            } else {
+                if ("FAILED".equals(stateItem.getStatus())) failed++;
+                item.setStatisticsAvailable(false);
+                item.setMessage(StringUtils.hasText(stateItem.getErrorMessage())
+                        ? stateItem.getErrorMessage() : "该需求未完成拆分，不计入 CFP 汇总。");
+            }
+            items.add(item);
+        }
+        response.setCompletedCount(completed);
+        response.setFailedCount(failed);
+        response.setStatisticsAvailableCount(statisticsAvailable);
+        response.setFunctionProcessCount(totalProcesses);
+        response.setMovementRowCount(totalRows);
+        response.setTotalCfp(roundCfp(totalCfp));
+        response.setItems(items);
+        return response;
+    }
+
+    private boolean hasUnfinishedItems(BatchSplitState state) {
+        for (BatchSplitItemState item : state.getItems()) {
+            if (!"COMPLETED".equals(item.getStatus()) && !"FAILED".equals(item.getStatus())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<FunctionSplitRow> readFinalSplitRows(String projectId) {
+        ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+        if (metadata == null || !StringUtils.hasText(metadata.getFunctionSplitRowsPath())) {
+            throw new BusinessException("未找到最终拆分表");
+        }
+        Path path = Paths.get(metadata.getFunctionSplitRowsPath());
+        if (!Files.isRegularFile(path)) {
+            throw new BusinessException("最终拆分表文件不存在");
+        }
+        try {
+            List<FunctionSplitRow> rows = objectMapper.readValue(path.toFile(),
+                    new TypeReference<List<FunctionSplitRow>>() { });
+            return rows == null ? Collections.<FunctionSplitRow>emptyList() : rows;
+        } catch (IOException ex) {
+            throw new BusinessException("最终拆分表格式无效", ex);
+        }
+    }
+
+    private double roundCfp(double value) {
+        return Math.round(value * 100D) / 100D;
+    }
+
     public BatchSplitJobResponse confirm(String batchId,
                                          String projectId,
                                          BatchSplitConfirmRequest request) {
@@ -729,6 +840,9 @@ public class BatchSplitService {
                     throw new BusinessException("项目级送审材料正在生成，请完成后再重新拆分需求。");
                 }
                 BatchSplitItemState item = findItem(state, projectId);
+                if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
+                    throw new BusinessException("需求级送审材料整合包正在生成，请完成后再重新拆分需求。");
+                }
                 if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
                         || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
                     throw new BusinessException("该需求正在处理，不能重复提交。");
@@ -750,6 +864,13 @@ public class BatchSplitService {
                     }
                 }
                 resetItemForRerun(item);
+                if ("REQUIREMENT".equals(normalizeSplitLevel(state.getSplitLevel()))) {
+                    state.setRequirementMaterialStatus("NOT_STARTED");
+                    state.setRequirementMaterialMessage("需求已重新拆分，旧整合包已失效；完成后请重新生成。");
+                    state.setRequirementMaterialArchivePath(null);
+                    state.setRequirementMaterialSuccessCount(0);
+                    state.setRequirementMaterialFailedCount(0);
+                }
                 if (executeImmediately) {
                     item.setStatus("QUEUED");
                     item.setStage("WAITING_AI_SPLIT");
@@ -854,6 +975,113 @@ public class BatchSplitService {
             failProjectMaterials(batchId, "项目级送审材料队列已满，请稍后重试：" + message(ex));
         }
         return get(batchId);
+    }
+
+    public BatchSplitJobResponse exportRequirementMaterials(final String batchId) {
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            if (!"REQUIREMENT".equals(normalizeSplitLevel(state.getSplitLevel()))) {
+                throw new BusinessException("该功能仅用于需求级批次；项目级请下载项目级完整送审材料。");
+            }
+            if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
+                throw new BusinessException("需求级材料整合包正在生成，请等待完成。");
+            }
+            int completed = 0;
+            for (BatchSplitItemState item : state.getItems()) {
+                if ("COMPLETED".equals(item.getStatus())) completed++;
+                if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
+                        || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
+                    throw new BusinessException("批量拆分仍在执行，请完成后再生成送审材料整合包。");
+                }
+            }
+            if (completed == 0) {
+                throw new BusinessException("当前批次没有已完成的需求，无法生成送审材料整合包。");
+            }
+            state.setRequirementMaterialStatus("GENERATING");
+            state.setRequirementMaterialMessage("正在逐份生成单需求送审材料并打包，共 " + completed + " 份。");
+            state.setRequirementMaterialSuccessCount(0);
+            state.setRequirementMaterialFailedCount(0);
+            state.setRequirementMaterialArchivePath(null);
+            saveStateUnlocked(state);
+        }
+        try {
+            batchSplitExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    generateRequirementMaterials(batchId);
+                }
+            });
+        } catch (RuntimeException ex) {
+            failRequirementMaterials(batchId, "需求级材料生成队列已满，请稍后重试：" + message(ex));
+        }
+        return get(batchId);
+    }
+
+    private void generateRequirementMaterials(String batchId) {
+        List<String> projectIds = new ArrayList<String>();
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            if (!"GENERATING".equals(state.getRequirementMaterialStatus())) return;
+            for (BatchSplitItemState item : state.getItems()) {
+                if ("COMPLETED".equals(item.getStatus())) projectIds.add(item.getProjectId());
+            }
+        }
+        try {
+            ProjectMaterialExportService.RequirementBatchArchive archive =
+                    projectMaterialExportService.exportRequirementArchives(batchId, projectIds,
+                            new ProjectMaterialExportService.RequirementArchiveProgressListener() {
+                                @Override
+                                public void onProgress(int successCount, int failedCount, int totalCount) {
+                                    synchronized (lockFor(batchId)) {
+                                        BatchSplitState state = loadStateUnlocked(batchId);
+                                        state.setRequirementMaterialSuccessCount(successCount);
+                                        state.setRequirementMaterialFailedCount(failedCount);
+                                        state.setRequirementMaterialMessage("正在逐份生成单需求送审材料：已处理 "
+                                                + (successCount + failedCount) + "/" + totalCount
+                                                + "，成功 " + successCount + "，失败 " + failedCount + "。");
+                                        saveStateUnlocked(state);
+                                    }
+                                }
+                            });
+            synchronized (lockFor(batchId)) {
+                BatchSplitState state = loadStateUnlocked(batchId);
+                state.setRequirementMaterialArchivePath(
+                        archive.getArchivePath().toAbsolutePath().normalize().toString());
+                state.setRequirementMaterialSuccessCount(archive.getSuccessCount());
+                state.setRequirementMaterialFailedCount(archive.getFailedProjects().size());
+                state.setRequirementMaterialStatus(archive.getFailedProjects().isEmpty()
+                        ? "COMPLETED" : "PARTIAL_COMPLETED");
+                state.setRequirementMaterialMessage(archive.getFailedProjects().isEmpty()
+                        ? "已生成全部 " + archive.getSuccessCount() + " 份单需求送审材料整合包。"
+                        : "已打包成功 " + archive.getSuccessCount() + " 份，失败 "
+                        + archive.getFailedProjects().size() + " 份："
+                        + String.join("；", archive.getFailedProjects()));
+                saveStateUnlocked(state);
+            }
+        } catch (RuntimeException ex) {
+            failRequirementMaterials(batchId, message(ex));
+        }
+    }
+
+    private void failRequirementMaterials(String batchId, String errorMessage) {
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            state.setRequirementMaterialStatus("FAILED");
+            state.setRequirementMaterialMessage(errorMessage);
+            saveStateUnlocked(state);
+        }
+    }
+
+    public Path requirementMaterialArchiveFile(String batchId) {
+        BatchSplitState state = loadState(batchId);
+        if (!StringUtils.hasText(state.getRequirementMaterialArchivePath())) {
+            throw new BusinessException("需求级送审材料整合包尚未生成。");
+        }
+        Path file = Paths.get(state.getRequirementMaterialArchivePath()).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(file)) {
+            throw new BusinessException("需求级送审材料整合包文件不存在：" + file.getFileName());
+        }
+        return file;
     }
 
     private void submitProjectMaterialGeneration(final String batchId) {
@@ -1570,6 +1798,21 @@ public class BatchSplitService {
             materialFiles.add(file);
         }
         response.setProjectMaterialFiles(materialFiles);
+        response.setRequirementMaterialStatus(StringUtils.hasText(state.getRequirementMaterialStatus())
+                ? state.getRequirementMaterialStatus() : "NOT_STARTED");
+        response.setRequirementMaterialMessage(state.getRequirementMaterialMessage());
+        response.setRequirementMaterialSuccessCount(state.getRequirementMaterialSuccessCount());
+        response.setRequirementMaterialFailedCount(state.getRequirementMaterialFailedCount());
+        if (StringUtils.hasText(state.getRequirementMaterialArchivePath())) {
+            Path archivePath = Paths.get(state.getRequirementMaterialArchivePath());
+            ProjectMaterialFileResponse archive = new ProjectMaterialFileResponse();
+            archive.setType("requirementArchive");
+            archive.setName(archivePath.getFileName().toString());
+            archive.setPath(state.getRequirementMaterialArchivePath());
+            archive.setDownloadUrl("/api/projects/batch-split/" + state.getBatchId()
+                    + "/requirement-materials/download");
+            response.setRequirementMaterialArchive(archive);
+        }
         List<BatchSplitItemResponse> items = new ArrayList<BatchSplitItemResponse>();
         for (BatchSplitItemState item : state.getItems()) {
             BatchSplitItemResponse target = new BatchSplitItemResponse();
@@ -1763,6 +2006,11 @@ public class BatchSplitService {
         private int projectMaterialRequirementCount;
         private int projectMaterialVersion;
         private Map<String, String> projectMaterialFiles = new LinkedHashMap<String, String>();
+        private String requirementMaterialStatus = "NOT_STARTED";
+        private String requirementMaterialMessage;
+        private String requirementMaterialArchivePath;
+        private int requirementMaterialSuccessCount;
+        private int requirementMaterialFailedCount;
         private List<BatchSplitItemState> items = new ArrayList<BatchSplitItemState>();
 
         public String getBatchId() { return batchId; }
@@ -1803,6 +2051,16 @@ public class BatchSplitService {
             this.projectMaterialFiles = projectMaterialFiles == null
                     ? new LinkedHashMap<String, String>() : projectMaterialFiles;
         }
+        public String getRequirementMaterialStatus() { return requirementMaterialStatus; }
+        public void setRequirementMaterialStatus(String requirementMaterialStatus) { this.requirementMaterialStatus = requirementMaterialStatus; }
+        public String getRequirementMaterialMessage() { return requirementMaterialMessage; }
+        public void setRequirementMaterialMessage(String requirementMaterialMessage) { this.requirementMaterialMessage = requirementMaterialMessage; }
+        public String getRequirementMaterialArchivePath() { return requirementMaterialArchivePath; }
+        public void setRequirementMaterialArchivePath(String requirementMaterialArchivePath) { this.requirementMaterialArchivePath = requirementMaterialArchivePath; }
+        public int getRequirementMaterialSuccessCount() { return requirementMaterialSuccessCount; }
+        public void setRequirementMaterialSuccessCount(int requirementMaterialSuccessCount) { this.requirementMaterialSuccessCount = requirementMaterialSuccessCount; }
+        public int getRequirementMaterialFailedCount() { return requirementMaterialFailedCount; }
+        public void setRequirementMaterialFailedCount(int requirementMaterialFailedCount) { this.requirementMaterialFailedCount = requirementMaterialFailedCount; }
         public List<BatchSplitItemState> getItems() { return items; }
         public void setItems(List<BatchSplitItemState> items) { this.items = items; }
     }

@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260812-requirement-warning-1">
+  <link rel="stylesheet" href="/app.css?v=20260813-flow-time-3">
 </head>
 
 <body>
@@ -114,6 +114,38 @@
       <div class="dialog-actions">
         <button type="button" class="ghost" onclick="closeProjectGroupAddDialog()">取消</button>
         <button id="projectGroupRequirementSubmit" type="button" onclick="submitExistingRequirementsToProjectGroup()">添加到当前项目</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="batchSummaryDialogOverlay" class="dialog-overlay hidden" onclick="closeBatchSummaryDialogOnOverlay(event)">
+    <div class="dialog batch-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="batchSummaryDialogTitle">
+      <div class="batch-summary-header">
+        <div>
+          <h3 id="batchSummaryDialogTitle" class="dialog-title">批量拆分摘要</h3>
+          <p id="batchSummaryMeta">正在读取最终拆分结果...</p>
+        </div>
+        <div class="batch-summary-header-actions">
+          <button id="batchSummaryDownloadBtn" type="button" class="secondary" onclick="downloadBatchSummaryExcel()" disabled>下载 Excel</button>
+          <button type="button" class="ghost" onclick="closeBatchSummaryDialog()">关闭</button>
+        </div>
+      </div>
+      <div id="batchSummaryLoading" class="batch-summary-loading">正在汇总各需求最终 CFP...</div>
+      <div id="batchSummaryContent" class="hidden">
+        <div class="batch-summary-stats">
+          <article class="primary"><span>汇总 CFP</span><b id="batchSummaryTotalCfp">0</b></article>
+          <article><span>已完成需求</span><b id="batchSummaryCompleted">0</b></article>
+          <article><span>功能过程</span><b id="batchSummaryProcesses">0</b></article>
+          <article><span>拆分行数</span><b id="batchSummaryRows">0</b></article>
+          <article id="batchSummaryProjectMaterialStat" class="hidden"><span>项目材料 CFP</span><b id="batchSummaryProjectMaterialCfp">-</b></article>
+        </div>
+        <div id="batchSummaryNotice" class="batch-summary-notice hidden"></div>
+        <div class="batch-summary-table-wrap">
+          <table class="batch-summary-table">
+            <thead><tr><th>需求文档</th><th>状态</th><th>功能过程</th><th>拆分行</th><th>CFP</th><th>说明</th></tr></thead>
+            <tbody id="batchSummaryBody"></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
@@ -300,6 +332,7 @@
           <p id="batchSplitSummary" class="batch-split-summary">先逐份确定送给 AI 的章节和正文，全部确认后才能并发拆分。</p>
         </div>
         <div class="batch-split-header-actions">
+          <button id="batchSummaryBtn" type="button" class="secondary hidden" onclick="openBatchSummaryDialog()">查看拆分摘要</button>
           <button id="batchAddExistingBtn" type="button" class="ghost hidden" onclick="addExistingRequirementsToProjectGroup()">添加已拆分需求</button>
           <button id="batchAddNewBtn" type="button" class="ghost hidden" onclick="chooseNewProjectGroupDocuments()">上传并添加新需求</button>
           <input id="batchAddFileInput" class="hidden" type="file" accept=".doc,.docx" multiple onchange="uploadAndAddProjectGroupDocuments()">
@@ -371,6 +404,16 @@
           <button id="batchMaterialRetryBtn" type="button" class="ghost hidden" onclick="retryBatchProjectMaterials()">重试生成</button>
         </div>
         <div id="batchProjectMaterialFiles" class="batch-material-file-list"></div>
+      </div>
+      <div id="batchRequirementMaterials" class="batch-project-materials hidden">
+        <div class="batch-materials-heading">
+          <div>
+            <h3>单需求送审材料整合包</h3>
+            <p id="batchRequirementMaterialsSummary" class="muted">批量拆分完成后，可一次生成并下载全部单需求送审压缩包。</p>
+          </div>
+          <button id="batchRequirementMaterialsBtn" type="button" onclick="exportBatchRequirementMaterials()">生成全部送审材料整合包</button>
+        </div>
+        <div id="batchRequirementMaterialFiles" class="batch-material-file-list"></div>
       </div>
     </section>
 
@@ -1971,7 +2014,8 @@
 
     function batchJobNeedsPolling(job) {
       return !!job && (job.status === "PREPARING" || job.status === "RUNNING"
-        || job.status === "MATERIAL_PENDING" || job.status === "GENERATING_MATERIALS");
+        || job.status === "MATERIAL_PENDING" || job.status === "GENERATING_MATERIALS"
+        || job.requirementMaterialStatus === "GENERATING");
     }
 
     function renderBatchSplitJob() {
@@ -1999,6 +2043,7 @@
       $("batchSplitSummary").textContent = batchJobSummary(job);
       renderBatchDocumentList(job.items || []);
       renderBatchProjectMaterials(job);
+      renderBatchRequirementMaterials(job);
 
       const interruptedCount = (job.items || []).filter(function (item) {
         return item.status === "FAILED" && item.stage === "RESTART_INTERRUPTED";
@@ -2023,6 +2068,10 @@
           : (interruptedCount > 0 ? "恢复失败/中断项（" + job.failed + "）" : "重试失败项（" + job.failed + "）"))
         : "恢复失败/中断项";
       $("batchRetryBtn").classList.toggle("hidden", !(job.failed > 0));
+      const summaryReady = Number(job.completed || 0) > 0 && (job.items || []).every(function (item) {
+        return item.status === "COMPLETED" || item.status === "FAILED";
+      });
+      $("batchSummaryBtn").classList.toggle("hidden", !summaryReady);
       updateBatchEditorLock();
 
       const items = job.items || [];
@@ -2038,6 +2087,122 @@
         }
       }
       updateBatchProjectActions();
+    }
+
+    async function openBatchSummaryDialog() {
+      const job = currentBatchSplitJob;
+      if (!job || !job.batchId) {
+        setMessage("请先打开已完成的批量拆分任务。", "error");
+        return;
+      }
+      $("batchSummaryDialogOverlay").classList.remove("hidden");
+      $("batchSummaryDownloadBtn").disabled = true;
+      $("batchSummaryLoading").textContent = "正在汇总各需求最终 CFP...";
+      $("batchSummaryLoading").classList.remove("hidden");
+      $("batchSummaryContent").classList.add("hidden");
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(job.batchId) + "/summary");
+        renderBatchSplitSummary(response.data || {});
+      } catch (error) {
+        $("batchSummaryLoading").textContent = error.message || "读取批量拆分摘要失败。";
+      }
+    }
+
+    function renderBatchSplitSummary(summary) {
+      const projectLevel = summary.splitLevel === "PROJECT";
+      const meta = projectLevel
+        ? ((summary.projectGroupName || "项目级材料") + " · " + (summary.projectGroupId || summary.batchId || "-"))
+        : ("需求级批次 · " + (summary.batchId || "-"));
+      $("batchSummaryMeta").textContent = meta;
+      $("batchSummaryTotalCfp").textContent = formatCfp(summary.totalCfp);
+      $("batchSummaryCompleted").textContent = (summary.completedCount || 0) + "/" + (summary.totalCount || 0);
+      $("batchSummaryProcesses").textContent = summary.functionProcessCount || 0;
+      $("batchSummaryRows").textContent = summary.movementRowCount || 0;
+      $("batchSummaryProjectMaterialStat").classList.toggle("hidden", !projectLevel);
+      $("batchSummaryProjectMaterialCfp").textContent = summary.projectMaterialStatus === "COMPLETED"
+        ? formatCfp(summary.projectMaterialTotalCfp) : "生成中/未生成";
+
+      const unavailable = Math.max(0,
+        Number(summary.completedCount || 0) - Number(summary.statisticsAvailableCount || 0));
+      const notes = [];
+      if (Number(summary.failedCount || 0) > 0) {
+        notes.push(summary.failedCount + " 个失败需求未计入 CFP");
+      }
+      if (unavailable > 0) {
+        notes.push(unavailable + " 个已完成需求的最终拆分表暂时无法读取");
+      }
+      $("batchSummaryNotice").textContent = notes.length
+        ? "注意：" + notes.join("；") + "。" : "汇总值来自各需求最新保存的最终拆分表。";
+      $("batchSummaryNotice").classList.toggle("hidden", false);
+      $("batchSummaryNotice").classList.toggle("warning", notes.length > 0);
+
+      const rows = (summary.items || []).map(function (item) {
+        const available = !!item.statisticsAvailable;
+        const statusText = item.status === "COMPLETED" ? "已完成"
+          : (item.status === "FAILED" ? "失败/中断" : (item.status || "-"));
+        return "<tr>"
+          + "<td><b>" + escapeHtml(item.sourceFileName || item.projectName || item.projectId || "-") + "</b>"
+          + "<small>" + escapeHtml(item.projectId || "") + "</small></td>"
+          + "<td><span class=\"batch-summary-status " + (available ? "success" : "failed") + "\">"
+          + escapeHtml(statusText) + "</span></td>"
+          + "<td>" + (available ? Number(item.functionProcessCount || 0) : "-") + "</td>"
+          + "<td>" + (available ? Number(item.movementRowCount || 0) : "-") + "</td>"
+          + "<td class=\"batch-summary-cfp\">" + (available ? formatCfp(item.totalCfp) : "-") + "</td>"
+          + "<td class=\"batch-summary-message\">" + escapeHtml(item.message || "-") + "</td>"
+          + "</tr>";
+      }).join("");
+      $("batchSummaryBody").innerHTML = rows || "<tr><td colspan=\"6\">暂无可汇总需求</td></tr>";
+      $("batchSummaryLoading").classList.add("hidden");
+      $("batchSummaryContent").classList.remove("hidden");
+      $("batchSummaryDownloadBtn").disabled = false;
+    }
+
+    async function downloadBatchSummaryExcel() {
+      const job = currentBatchSplitJob;
+      if (!job || !job.batchId) return;
+      const button = $("batchSummaryDownloadBtn");
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = "正在生成...";
+      try {
+        const response = await fetch("/api/projects/batch-split/"
+          + encodeURIComponent(job.batchId) + "/summary/download");
+        if (!response.ok) {
+          const payload = await response.json().catch(function () { return null; });
+          throw new Error(payload && payload.message ? payload.message : "下载摘要 Excel 失败。");
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get("content-disposition") || "";
+        const encodedName = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const fallbackName = (job.projectGroupId || job.batchId) + "-批量拆分摘要.xlsx";
+        let fileName = fallbackName;
+        if (encodedName && encodedName[1]) {
+          try { fileName = decodeURIComponent(encodedName[1].replace(/\"/g, "")); } catch (ignored) { }
+        }
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+      } catch (error) {
+        setMessage(error.message || "下载摘要 Excel 失败。", "error");
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+    }
+
+    function closeBatchSummaryDialog() {
+      $("batchSummaryDialogOverlay").classList.add("hidden");
+    }
+
+    function closeBatchSummaryDialogOnOverlay(event) {
+      if (event.target === $("batchSummaryDialogOverlay")) {
+        closeBatchSummaryDialog();
+      }
     }
 
     function batchJobSummary(job) {
@@ -2151,6 +2316,49 @@
           + "\" download><b>" + escapeHtml(labels[file.type] || file.type) + "</b><span>"
           + escapeHtml(file.name || "下载") + "</span></a>";
       }).join("") || "<span class=\"muted\">材料尚未生成。</span>";
+    }
+
+    function renderBatchRequirementMaterials(job) {
+      const panel = $("batchRequirementMaterials");
+      const requirementLevel = job && job.splitLevel !== "PROJECT";
+      const finished = requirementLevel && Number(job.completed || 0) > 0
+        && Number(job.running || 0) === 0 && Number(job.queued || 0) === 0
+        && Number(job.preparing || 0) === 0 && Number(job.parseQueued || 0) === 0;
+      panel.classList.toggle("hidden", !finished);
+      if (!finished) return;
+      const status = job.requirementMaterialStatus || "NOT_STARTED";
+      const summary = $("batchRequirementMaterialsSummary");
+      const button = $("batchRequirementMaterialsBtn");
+      summary.textContent = job.requirementMaterialMessage
+        || "将为 " + Number(job.completed || 0) + " 个已完成需求分别生成附件1、附件2、附件3和单需求 ZIP，再汇总为一个总 ZIP。";
+      button.disabled = status === "GENERATING";
+      button.textContent = status === "GENERATING" ? "正在生成，请稍候…"
+        : ((status === "COMPLETED" || status === "PARTIAL_COMPLETED") ? "重新生成整合包" : "生成全部送审材料整合包");
+      const archive = job.requirementMaterialArchive;
+      $("batchRequirementMaterialFiles").innerHTML = archive
+        ? "<a class=\"batch-material-file primary\" href=\"" + escapeHtml(archive.downloadUrl)
+          + "\" download><b>下载全部单需求送审材料</b><span>" + escapeHtml(archive.name || "整合包.zip") + "</span></a>"
+        : "<span class=\"muted\">整合包尚未生成。</span>";
+    }
+
+    async function exportBatchRequirementMaterials() {
+      if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
+      const count = Number(currentBatchSplitJob.completed || 0);
+      if (!window.confirm("确认为 " + count + " 个已完成需求生成单需求送审材料，并打成一个总 ZIP？")) return;
+      const button = $("batchRequirementMaterialsBtn");
+      button.disabled = true;
+      button.textContent = "正在提交…";
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/requirement-materials", { method: "POST" });
+        currentBatchSplitJob = response.data;
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("已开始生成全部单需求送审材料，完成后可直接下载总 ZIP。", "success");
+      } catch (error) {
+        button.disabled = false;
+        showDialog("生成整合包失败", error.message || "请稍后再试。");
+      }
     }
 
     async function selectBatchItem(projectId, force) {
@@ -5308,6 +5516,7 @@
         closeAiPromptDialog();
         closeReviewStageDialog();
         closeProjectGroupAddDialog();
+        closeBatchSummaryDialog();
       }
     });
   </script>

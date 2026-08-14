@@ -38,6 +38,52 @@ class ProjectMaterialExportServiceTest {
     Path tempDir;
 
     @Test
+    void generatesOneBatchZipContainingEachRequirementArchive() throws Exception {
+        FileStorageService storage = mock(FileStorageService.class);
+        ExcelExportService excel = mock(ExcelExportService.class);
+        WordExportService word = mock(WordExportService.class);
+        Path projectOutput = tempDir.resolve("single-outputs");
+        Files.createDirectories(projectOutput);
+        ProjectMetadata first = new ProjectMetadata();
+        first.setId("P1");
+        first.setSourceFileName("1.需求甲.docx");
+        ProjectMetadata second = new ProjectMetadata();
+        second.setId("P2");
+        second.setSourceFileName("2.需求乙.docx");
+        when(storage.loadMetadata("P1")).thenReturn(first);
+        when(storage.loadMetadata("P2")).thenReturn(second);
+        when(excel.export(anyString())).thenAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            ProjectMetadata metadata = "P1".equals(id) ? first : second;
+            metadata.setExcelOutputPath(Files.write(projectOutput.resolve(id + "-附件3.xlsx"), id.getBytes()).toString());
+            metadata.setBusinessRequirementOutputPath(Files.write(projectOutput.resolve(id + "-附件2.xlsx"), id.getBytes()).toString());
+            return null;
+        });
+        when(word.export(anyString())).thenAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            ProjectMetadata metadata = "P1".equals(id) ? first : second;
+            metadata.setWordOutputPath(Files.write(projectOutput.resolve(id + "-附件1.docx"), id.getBytes()).toString());
+            return null;
+        });
+        ProjectMaterialExportService service = new ProjectMaterialExportService(
+                storage, excel, word, tempDir.toString());
+
+        ProjectMaterialExportService.RequirementBatchArchive result =
+                service.exportRequirementArchives("BS001", Arrays.asList("P1", "P2"));
+
+        assertEquals(2, result.getSuccessCount());
+        assertTrue(result.getFailedProjects().isEmpty());
+        assertTrue(Files.isRegularFile(result.getArchivePath()));
+        Set<String> entries = new HashSet<String>();
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(result.getArchivePath()))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) entries.add(entry.getName());
+        }
+        assertEquals(new HashSet<String>(Arrays.asList(
+                "1.需求甲-送审材料.zip", "2.需求乙-送审材料.zip")), entries);
+    }
+
+    @Test
     void deletesAggregateVersionsAndIndividualRequirementOutputs() throws Exception {
         ProjectMaterialExportService service = new ProjectMaterialExportService(
                 mock(FileStorageService.class), mock(ExcelExportService.class),

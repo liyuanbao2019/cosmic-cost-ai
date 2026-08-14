@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -129,6 +130,96 @@ public class ProjectMaterialExportService {
         bundle.totalCfp = excel.getTotalCfp();
         bundle.files.putAll(files);
         return bundle;
+    }
+
+    /** Generates each completed requirement's normal attachment 1-3 archive and wraps those ZIP files in one batch ZIP. */
+    public RequirementBatchArchive exportRequirementArchives(String batchId,
+                                                             List<String> projectIds) {
+        return exportRequirementArchives(batchId, projectIds, null);
+    }
+
+    public RequirementBatchArchive exportRequirementArchives(String batchId,
+                                                             List<String> projectIds,
+                                                             RequirementArchiveProgressListener listener) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new BusinessException("需求级材料整合包至少需要一个已完成需求。");
+        }
+        Path outputDir = outputBaseDir.resolve("batch-requirement-materials").resolve(batchId);
+        try {
+            Files.createDirectories(outputDir);
+        } catch (IOException ex) {
+            throw new BusinessException("创建需求级材料整合目录失败。", ex);
+        }
+
+        List<Path> requirementArchives = new ArrayList<Path>();
+        List<String> failedProjects = new ArrayList<String>();
+        Map<String, Integer> names = new LinkedHashMap<String, Integer>();
+        for (String projectId : projectIds) {
+            try {
+                ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+                if (metadata == null) {
+                    throw new BusinessException("需求项目不存在");
+                }
+                excelExportService.export(projectId);
+                wordExportService.export(projectId);
+                metadata = fileStorageService.loadMetadata(projectId);
+                Path excel = requiredExport(metadata.getExcelOutputPath(), "附件3功能点拆分表");
+                Path business = requiredExport(metadata.getBusinessRequirementOutputPath(), "附件2需求汇总表");
+                Path word = requiredExport(metadata.getWordOutputPath(), "附件1需求说明书");
+                String baseName = sanitizeFileName(requirementArchiveBaseName(metadata));
+                int duplicate = names.containsKey(baseName) ? names.get(baseName) + 1 : 1;
+                names.put(baseName, duplicate);
+                String archiveName = baseName + (duplicate > 1 ? "-" + duplicate : "") + "-送审材料.zip";
+                Path requirementArchive = outputDir.resolve(archiveName);
+                writeArchive(requirementArchive, Arrays.asList(word, business, excel));
+                requirementArchives.add(requirementArchive);
+            } catch (RuntimeException ex) {
+                failedProjects.add(projectId + "：" + rootMessage(ex));
+            }
+            if (listener != null) {
+                listener.onProgress(requirementArchives.size(), failedProjects.size(), projectIds.size());
+            }
+        }
+        if (requirementArchives.isEmpty()) {
+            throw new BusinessException("没有成功生成任何单需求送审材料：" + String.join("；", failedProjects));
+        }
+        Path batchArchive = outputDir.resolve(batchId + "-全部单需求送审材料.zip");
+        writeArchive(batchArchive, requirementArchives);
+
+        RequirementBatchArchive result = new RequirementBatchArchive();
+        result.archivePath = batchArchive;
+        result.successCount = requirementArchives.size();
+        result.failedProjects.addAll(failedProjects);
+        return result;
+    }
+
+    private Path requiredExport(String path, String label) {
+        if (!StringUtils.hasText(path)) {
+            throw new BusinessException(label + "未生成");
+        }
+        Path file = Paths.get(path).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(file)) {
+            throw new BusinessException(label + "文件不存在：" + file.getFileName());
+        }
+        return file;
+    }
+
+    private String requirementArchiveBaseName(ProjectMetadata metadata) {
+        String source = metadata == null ? "" : metadata.getSourceFileName();
+        if (!StringUtils.hasText(source) && metadata != null) {
+            source = metadata.getName();
+        }
+        String name = StringUtils.hasText(source) ? source.trim() : metadata.getId();
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0, dot) : name;
+    }
+
+    private String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        return StringUtils.hasText(current.getMessage()) ? current.getMessage() : error.getClass().getSimpleName();
     }
 
     /** Deletes every aggregate material version owned by one project-level group. */
@@ -450,5 +541,19 @@ public class ProjectMaterialExportService {
         public double getTotalCfp() { return totalCfp; }
         public Map<String, Path> getFiles() { return Collections.unmodifiableMap(files); }
         public Path getFile(String type) { return files.get(type); }
+    }
+
+    public static class RequirementBatchArchive {
+        private Path archivePath;
+        private int successCount;
+        private final List<String> failedProjects = new ArrayList<String>();
+
+        public Path getArchivePath() { return archivePath; }
+        public int getSuccessCount() { return successCount; }
+        public List<String> getFailedProjects() { return Collections.unmodifiableList(failedProjects); }
+    }
+
+    public interface RequirementArchiveProgressListener {
+        void onProgress(int successCount, int failedCount, int totalCount);
     }
 }
