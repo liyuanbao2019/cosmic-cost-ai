@@ -24,12 +24,12 @@ class CosmicAnalysisMovementRuleTest {
     }
 
     @Test
-    void queryAndTemporaryExportDoNotGainWriteFromDescriptions() {
+    void queryDoesNotGainWriteButTemporaryExportUsesFileWriteAndResultExit() {
         CosmicResult queried = analyze("用户查询", "保存查询条件并生成查询结果");
         CosmicResult exported = analyze("用户导出", "临时生成导出文件，下载后立即删除");
 
         assertMovements(queried, 1, 1, 0, 1);
-        assertMovements(exported, 1, 1, 0, 1);
+        assertMovements(exported, 1, 1, 1, 1);
     }
 
     @Test

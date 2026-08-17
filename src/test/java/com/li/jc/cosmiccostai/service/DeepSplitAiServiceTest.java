@@ -61,7 +61,8 @@ class DeepSplitAiServiceTest {
         assertTrue(prompt.contains("ADJUST_MOVEMENT_STRUCTURE"));
         assertTrue(prompt.contains("ADJUST_REUSE_CLASSIFICATION"));
         assertTrue(prompt.contains("用户查询 E-R-X；新增/删除 E-W-X"));
-        assertTrue(prompt.contains("文件写入服务器并保留为 E-R-W-X"));
+        assertTrue(prompt.contains("动态导出 Excel/CSV/PDF 等文件统一为 E-R-W-X"));
+        assertTrue(prompt.contains("临时文件也必须拆开 W 和 X"));
         assertTrue(prompt.contains("也可合并为 E-W-W"));
         assertTrue(prompt.contains("被调用方：查询接口 E-R-X，接收同步数据 E-W-X"));
         assertTrue(prompt.contains("E 已携带查询所需参数并直接通过 X 发出请求"));
@@ -104,7 +105,7 @@ class DeepSplitAiServiceTest {
 
         String prompt = service.buildPrompt(
                 state, chunk, Collections.<DeepSplitAiService.EvidenceBlock>emptyList());
-        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.0（设计院评审沉淀版）";
+        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）";
 
         assertTrue(prompt.contains("DeepSeek 专项执行协议"));
         assertTrue(prompt.contains("顶层为 suggestions 数组"));

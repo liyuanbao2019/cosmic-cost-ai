@@ -97,6 +97,7 @@ public class RuleValidationService {
         Set<Integer> structureRiskRows = validateGroups(response, groups);
         validatePendingDataAttributes(response, groups);
         validateReuseAndDuplicateRules(response, groups);
+        validateXinjiangScheduledEntryPolicy(response, groups);
         validateQueryDisplayOverlap(response, groups);
         List<String> highRiskKeywords = resolveHighRiskKeywords();
         for (int i = 0; i < rows.size(); i++) {
@@ -711,10 +712,8 @@ public class RuleValidationService {
         }
         if (!missing.isEmpty()) {
             addGroupIssue(response, rows, process, "数据移动组合", "RISK",
-                    "“" + actionKeywords(actionMatches) + "”类功能通常应包含 "
-                            + joinMovements(required) + "，当前缺少 " + joinMovements(missing),
-                    "请先核对原始需求，再补充有明确依据的 " + joinMovements(missing)
-                            + " 数据移动；不得为了满足形式完整而虚构数据组或属性。");
+                    missingMovementMessage(actionMatches, required, missing),
+                    missingMovementSuggestion(actionMatches, missing));
             markRows(structureRiskRows, rows);
         }
         if (required.contains("X")) {
@@ -778,12 +777,37 @@ public class RuleValidationService {
                     && ActionMovementRule.hasMessageRecordEvidence(context)) {
                 return true;
             }
-            if ("W".equals(movement) && "导出".equals(label)
-                    && ActionMovementRule.hasPersistentExportEvidence(context)) {
-                return true;
-            }
         }
         return false;
+    }
+
+    private String missingMovementMessage(List<ActionMovementRule.Match> matches,
+                                          Set<String> required,
+                                          Set<String> missing) {
+        if (hasActionLabel(matches, "导入") && (missing.contains("W") || missing.contains("X"))) {
+            return "导入功能必须将写入导入业务数据 W 与返回导入结果信息 X 拆成两个独立子过程，当前缺少 "
+                    + joinMovements(missing);
+        }
+        if (hasActionLabel(matches, "导出") && (missing.contains("W") || missing.contains("X"))) {
+            return "导出功能必须将生成/写入 Excel 等导出文件 W 与返回文件或导出结果 X 拆成两个独立子过程，当前缺少 "
+                    + joinMovements(missing);
+        }
+        return "“" + actionKeywords(matches) + "”类功能通常应包含 "
+                + joinMovements(required) + "，当前缺少 " + joinMovements(missing);
+    }
+
+    private String missingMovementSuggestion(List<ActionMovementRule.Match> matches,
+                                             Set<String> missing) {
+        if (hasActionLabel(matches, "导入") && (missing.contains("W") || missing.contains("X"))) {
+            return "在读取并校验导入文件后，单独增加 W 写入目标业务数据；末行单独使用 X 返回成功/失败、导入数量或错误信息。"
+                    + "不得把写入数据和返回结果合并到同一个子过程。";
+        }
+        if (hasActionLabel(matches, "导出") && (missing.contains("W") || missing.contains("X"))) {
+            return "在读取待导出数据后，单独增加 W 生成/写入 Excel、CSV、PDF 等导出文件；末行单独使用 X 返回文件、"
+                    + "下载地址或导出结果。临时文件也不得省略 W。";
+        }
+        return "请先核对原始需求，再补充有明确依据的 " + joinMovements(missing)
+                + " 数据移动；不得为了满足形式完整而虚构数据组或属性。";
     }
 
     private String actionKeywords(List<ActionMovementRule.Match> matches) {
@@ -820,13 +844,6 @@ public class RuleValidationService {
         String context = groupEvidenceText(rows);
         for (ActionMovementRule.Match actionMatch : actionMatches) {
             String label = actionMatch.getProfile().getLabel();
-            if ("导出".equals(label) && !combinedRequired.contains("W")
-                    && !ActionMovementRule.hasPersistentExportEvidence(context)) {
-                addConditionalWriteIssues(response, process, rows, structureRiskRows,
-                        "导出功能中的 W 缺少“文件在服务器持久保存”的明确依据",
-                        "临时生成并下载后删除的文件按 E-R-X；只有文件写入服务器并在下载后保留时才使用 W。"
-                                + "请在子过程、数据组或需求证据中写清文件留存方式。");
-            }
             if ("发送/推送".equals(label) && !combinedRequired.contains("W")
                     && !ActionMovementRule.hasMessageRecordEvidence(context)) {
                 addConditionalWriteIssues(response, process, rows, structureRiskRows,
@@ -932,6 +949,58 @@ public class RuleValidationService {
         }
         validateCrossFunctionReuse(response, groups);
         validateDuplicateFunctionProcesses(response, groups);
+    }
+
+    /**
+     * Minimal safety check for the unified Xinjiang rule XJ-TIMER-E. Semantic
+     * recognition remains an AI task; this validator only catches a clearly
+     * established scheduled business process whose first E was left as new.
+     */
+    private void validateXinjiangScheduledEntryPolicy(RuleValidationResponse response,
+                                                       Map<String, List<RowRef>> groups) {
+        for (Map.Entry<String, List<RowRef>> entry : groups.entrySet()) {
+            List<RowRef> rows = entry.getValue();
+            if (rows == null || rows.size() < 2 || entry.getKey().startsWith("__ROW_")) {
+                continue;
+            }
+            RowRef first = rows.get(0);
+            if (!"E".equals(safe(first.row.getMovementType()).toUpperCase(Locale.ROOT))
+                    || !hasScheduledTriggerEvidence(first.row)
+                    || looksLikeTechnicalTimer(first.row)
+                    || !hasBusinessOutcome(rows)) {
+                continue;
+            }
+            if ("复用".equals(safe(first.row.getReuseDegree()))
+                    && Math.abs(first.row.getCfp() - 0.33D) <= CFP_TOLERANCE) {
+                continue;
+            }
+            add(response, first.rowNumber, safe(first.row.getFunctionProcess()), "复用与 CFP", "RISK",
+                    "有效定时/时钟/系统事件功能过程的初始触发 E 未按新疆统一规则设为复用 0.33",
+                    "重新执行复用度 AI 调整，按 XJ-TIMER-E 核对当前行证据；只调整首行 E，后续 R/W/X 独立判断。若只是技术定时器或内部轮询，应排除该非 COSMIC 触发。");
+        }
+    }
+
+    private boolean hasScheduledTriggerEvidence(FunctionSplitRow row) {
+        String value = safe(row.getFunctionalUser()) + " " + safe(row.getTriggerEvent()) + " "
+                + safe(row.getFunctionProcess()) + " " + safe(row.getSubProcessDescription()) + " "
+                + safe(row.getEvidence());
+        return containsAny(value, "定时", "时钟", "调度", "系统事件");
+    }
+
+    private boolean looksLikeTechnicalTimer(FunctionSplitRow row) {
+        String value = safe(row.getFunctionProcess()) + " " + safe(row.getFunctionDescription()) + " "
+                + safe(row.getSubProcessDescription()) + " " + safe(row.getEvidence());
+        return containsAny(value, "心跳", "保活", "框架调度", "定时器配置", "调度器配置", "内部轮询");
+    }
+
+    private boolean hasBusinessOutcome(List<RowRef> rows) {
+        for (int i = 1; i < rows.size(); i++) {
+            String movement = safe(rows.get(i).row.getMovementType()).toUpperCase(Locale.ROOT);
+            if ("W".equals(movement) || "X".equals(movement)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void validateCrossFunctionReuse(RuleValidationResponse response,
@@ -1233,7 +1302,8 @@ public class RuleValidationService {
         if (!StringUtils.hasText(rules)) {
             return keywords;
         }
-        if (rules.contains("COSMIC 软件造价拆分基础规则 v2.0")) {
+        if (rules.contains("COSMIC 软件造价拆分基础规则 v2.0")
+                || rules.contains("COSMIC 软件造价拆分基础规则 v2.1")) {
             return parseV2Keywords(rules);
         }
         boolean collecting = false;

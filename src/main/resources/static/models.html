@@ -133,7 +133,7 @@
           '<div class="model-section">普通调用参数</div>' +
           field(index,"timeoutSeconds","超时（秒）",model.timeoutSeconds,"number",false,"5-3600") +
           field(index,"maxRetries","失败重试次数",model.maxRetries,"number",false,"0-10") +
-          field(index,"maxConcurrency","模型最大并发",model.maxConcurrency,"number",false,"1-200；所有 AI 场景共享") +
+          field(index,"maxConcurrency","模型最大并发",model.maxConcurrency,"number",false,"1-10000；所有 AI 场景共享") +
           '<div class="model-hint">模型最大并发是最终保护上限；即使分批并发更大，同时发往该模型的请求也不会超过此值。</div>' +
           '<div class="model-section">深度审校与批处理参数</div>' +
           field(index,"chunkTimeoutSeconds","单批超时（秒）",model.chunkTimeoutSeconds,"number",false,"20-3600") +

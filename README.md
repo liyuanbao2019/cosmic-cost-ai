@@ -11,7 +11,7 @@
 - 提供需求说明书标准模板下载：`src/main/resources/static/templates/requirement-standard-template.docx`。
 - 自动解析 Word 正文和表格文本，截取“需求内容 / 需求细则 / 业务功能 / 功能描述”等章节作为 AI 拆分输入。
 - 支持查看 AI 调用提示词、复制提示词、编辑提示词并重新发起 AI 拆分。
-- AI 拆分提示词会合并可编辑的拆分校验规则，规则来源于 `src/main/resources/static/split-check-rules.md`。
+- AI 拆分提示词会合并唯一的可编辑拆分校验规则，规则来源于 `src/main/resources/static/split-check-rules.md`。当前内容为在 v2.0 设计院规则上直接融入新疆 SFTP、数据库汇总、Kafka、实时接口及有效定时 E 口径的统一 v2.1，不存在通用版/新疆版切换。
 - 基于 AI 结果生成 COSMIC 功能过程，并计算 Entry / Read / Write / Exit 与 CFP。
 - 提供人工审核页，可修改、新增、复制、删除、勾选多行、批量修改功能点拆分行。
 - 审核页支持搜索过滤、按一级模块 / 类型 / 复用度 / 初审提示筛选，以及紧凑 / 宽松视图切换。
@@ -44,14 +44,14 @@
 ### 批量拆分
 
 - “拆分级别”默认选择需求级；项目级支持一份或多份需求文档，统一按备案项目名称组织送审材料。
-- 首页需求文档选择框支持同时选择多份 `doc` / `docx`。
+- 首页需求文档选择框支持分多次从不同目录追加 `doc` / `docx`，已选文件会累计保留；即使不同目录存在同名文件也不会被静默丢弃。
 - 批次创建后只执行上传和解析，不会提前调用 AI。
 - 文档解析与章节识别使用独立的本地准备线程池，不会被其他批次中长时间运行或等待 AI 的智能拆分任务阻塞。
 - 批量确认面板逐份展示推荐章节、章节字数、解析警告和最终 AI 输入，支持人工修改。
 - 每份文档确认时保存输入快照和内容哈希；全部文档确认且内容未变化后才允许启动。
 - 文档之间按配置并发；单个文档内部与单需求模式共用 `SmartSplitPipelineService`，统一顺序为 COSMIC 初拆、AI 深度审核、安全建议采纳、复用度调整、规则初审；深审开关关闭时跳过中间两个可选阶段。
 - 需求级批次完成后可一键为全部已完成需求生成各自的附件1、附件2、附件3及单需求 ZIP，并将所有单需求 ZIP 再打成一个批次总 ZIP 直接下载；个别材料生成失败时保留并打包成功项，同时展示完整失败原因。
-- 多个批次同时运行时采用轮转调度；单用户满并发模式默认提供 50 个文档解析槽、50 个文档智能拆分槽、单批最多占 50 个，深度审核任务池也为 50，因此一个达到上限的 50 需求批次在应用层无需排队，并由模型级 100 个在途请求额度统一保护。
+- 单个批次不限制需求文档总数。多个批次同时运行时采用轮转调度；默认提供 1000 个文档解析槽、1000 个文档智能拆分槽，单批最多同时执行 1000 个，并由模型级 1000 个在途请求额度统一保护；超过并发数的需求继续排队。
 - 服务重启只恢复批次进度展示，不会静默恢复解析、AI 拆分或项目材料生成；重启前未完成项标记为“已中断”，必须由用户点击“恢复中断项”后才重新排队，已完成结果继续保留。
 - 某份文档失败不会中断其他文档，可只重试失败项；刷新页面可通过批次 ID 恢复进度。
 - 项目级批次只要仍有失败需求，就将项目材料标记为“已阻断”，不会生成不完整的附件或 ZIP；已成功需求的结果继续保留，失败项全部重试成功后自动续接项目材料汇总。
@@ -59,6 +59,7 @@
 - 项目级整合时会自动移除原始文件名开头用于文件排序的序号（如 `1.`、`13 `、`十一、`、`（15）`），再作为需求章节名称，避免与 Word 自动章节编号重复；原始文件名和单需求材料名称保持不变。
 - 项目级附件4项目台账和附件5工作量评估申请表按项目总 CFP 汇总送审工作量；负责人、联系方式、预算、单价、供应商和签字等未知信息保持为空，送审前人工补充。
 - 项目级五个附件生成后自动打包为 `项目名称-COSMIC送审材料.zip`；材料生成失败可单独重试，不重复运行已完成的 AI 拆分。
+- 项目级全部需求拆分成功后同时生成两个独立产物：产物 1 是附件1至附件5组成的项目整合送审包；产物 2 是项目内每个需求各自附件1至附件3送审 ZIP 的全量总包。两个产物独立展示和下载，产物 2 个别需求生成失败时仍保留成功项并支持单独重试。
 - 项目级项目支持继续添加已有拆分结果，也支持上传新需求后只对新增需求执行解析、确认和智能拆分；已完成成员不会重跑。
 - 批量面板支持单独重新拆分一个已完成或失败的需求，其他成员结果保持不变；项目级重拆完成后生成新的 `Vn` 材料版本，旧版本目录继续保留。
 - 需求级和项目级批次完成后均可打开“拆分摘要”，查看批次汇总 CFP、功能过程数、拆分行数及逐需求明细；摘要可直接下载为带公式合计、筛选和失败原因的 Excel，便于传递与归档。
@@ -81,7 +82,7 @@
 - 规则接口：
   - `GET /api/rules/split`
   - `PUT /api/rules/split`
-- 默认规则文件：`src/main/resources/static/split-check-rules.md`，内容为《COSMIC 软件造价拆分基础规则 v2.0（设计院评审沉淀版）》全文；旧版内置规则会自动迁移到 v2.0，人工维护的非旧版规则不会被覆盖。
+- 默认规则文件：`src/main/resources/static/split-check-rules.md`，内容为《COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）》全文。它是 v2.0 基础规则的一次统一升级，不是第二套规则；运行时可编辑规则位于 `storage/config/split-check-rules.md`，已有 v2.0 规则会在首次读取时统一迁移为 v2.1。
 - 可通过配置项覆盖规则路径：`COSMIC_SPLIT_RULES_PATH`。
 - 保存后的规则会同时影响：
   - AI 拆分提示词。
@@ -117,12 +118,13 @@
 - 目标是让送审口径与设计院最终评审更一致、降低后续核减率，不以提高或压低 CFP 为目标。
 - 跨功能过程按“首次实现、后续复用”处理：前面首次出现的子过程保留新增/1；后面不同用户目标再次使用时，两项相同，或三项完全相同但整个功能过程不重复，自动设为复用/0.33；只有完整用户目标及整组 E/R/W/X 重复/被包含才进入利旧/0 判断。
 - 服务端只采纳通过证据闸门的建议：复用必须引用有效行并匹配至少两项审核三要素；利旧必须覆盖整个功能过程；恢复新增必须说明真实边界差异。
+- 新疆统一规则中的有效定时/时钟/系统事件初始 E 由模型按 `XJ-TIMER-E` 结合当前需求或 Excel 当前行证据判断；服务端只允许该规则作用于功能过程首行 E，并要求后续存在真实 W/X。通过后只把该 E 调整为复用/0.33，后续 R/W/X 不联动。
 - 模型建议、采纳数、拦截数和 CFP 调整前后都会在流程完成信息中展示。
 
 ### DeepSeek 专项提示词与调用策略
 
 - 当前模型的 `provider`、`model` 或 `baseUrl` 识别为 DeepSeek 时，拆分和复用度 AI 调整自动切换到 `deepseek-cosmic-v1`；深度审核专项提示词继续保留，在重新启用深审开关后生效。
-- DeepSeek 专项版不保存第二份 COSMIC 业务规则。各任务仍只引用 `SplitRuleConfigService` 提供的当前完整 v2.0 规则及同一规则版本号，专项执行协议仅规定处理顺序和输出格式。
+- DeepSeek 专项版不保存第二份 COSMIC 业务规则。各任务只引用 `SplitRuleConfigService` 提供的当前新疆统一 v2.1 规则及同一规则版本号，专项执行协议仅规定处理顺序和输出格式。
 - 拆分固定返回 `{"functions":[]}`，复用度 AI 调整固定返回 `{"decisions":[]}`，深度审核固定返回 `{"suggestions":[]}`；功能描述也返回严格 JSON 对象，调用统一启用 DeepSeek `json_object`。
 - 选择 DeepSeek 后，需求文档初拆统一启用 Thinking 并使用最强 `reasoning_effort=max`；单需求与批量需求共用该设置。复用度全表判断继续使用 `reasoning_effort=high`，功能描述生成保持结构化非 Thinking 模式；深度审核重新启用时使用 `high`。最终结果只读取 JSON `content`，不接收推理过程。
 - DeepSeek 请求使用独立 System/User 消息：System 约束唯一规则源和 JSON 输出，User 携带当前任务、完整规则、审核数据及原文证据。
@@ -370,6 +372,8 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects/batch-split/{batchId}/retry` | POST | 仅重试批次中的失败文档 |
 | `/api/projects/batch-split/{batchId}/materials/retry` | POST | 仅重试失败的项目级送审材料生成 |
 | `/api/projects/batch-split/{batchId}/materials/{type}/download` | GET | 下载项目级附件1至附件5或完整 ZIP |
+| `/api/projects/batch-split/{batchId}/requirement-materials` | POST | 生成或重新生成批次内全部单需求送审材料总包 |
+| `/api/projects/batch-split/{batchId}/requirement-materials/download` | GET | 下载需求级批次整合包或项目级产物 2 |
 | `/api/projects/{projectId}/parse` | POST | 解析需求说明书 |
 | `/api/projects/{projectId}/extract` | POST | 使用默认提示词执行 AI 功能点提取 |
 | `/api/projects/{projectId}/ai-prompt` | GET | 获取当前项目 AI 提示词和模型名 |
@@ -489,6 +493,7 @@ curl -X POST http://localhost:8080/api/projects/batch-split \
   -H "Content-Type: application/json" \
   -d '{"projectIds":["projectId-1","projectId-2"],"splitLevel":"PROJECT"}'
 curl -O -J http://localhost:8080/api/projects/batch-split/{batchId}/materials/archive/download
+curl -O -J http://localhost:8080/api/projects/batch-split/{batchId}/requirement-materials/download
 ```
 
 ## 存储文件

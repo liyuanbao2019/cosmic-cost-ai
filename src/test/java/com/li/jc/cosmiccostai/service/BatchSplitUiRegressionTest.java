@@ -18,6 +18,11 @@ class BatchSplitUiRegressionTest {
         String css = new String(Files.readAllBytes(
                 Paths.get("src/main/resources/static/app.css")), StandardCharsets.UTF_8);
         assertTrue(html.contains("id=\"batchRequirementMaterials\""));
+        assertTrue(html.contains("产物 1 · 项目整合送审材料")
+                && html.contains("产物 2 · 项目全量单需求送审材料总包"));
+        assertTrue(html.contains("产物 1：下载项目整合送审包")
+                && html.contains("产物 2：下载项目全量单需求送审包"));
+        assertTrue(html.contains("Number(job.completed || 0) === Number(job.total || 0)"));
         assertTrue(html.contains("function exportBatchRequirementMaterials()"));
         assertTrue(html.contains("/requirement-materials"));
         assertTrue(html.contains("id=\"batchSummaryBtn\"")
@@ -31,6 +36,13 @@ class BatchSplitUiRegressionTest {
                 && html.contains("summary.functionProcessCount"));
 
         assertTrue(html.contains("id=\"fileInput\" type=\"file\" accept=\".doc,.docx\" multiple"));
+        assertTrue(html.contains("let selectedDocumentFiles = []"));
+        assertTrue(html.contains("selectedDocumentFiles.push(file)"));
+        assertTrue(html.contains("input.value = \"\"")
+                && html.contains("selectedDocumentFiles.slice()"));
+        assertTrue(html.contains("可分多次从不同目录追加")
+                && html.contains("已累计选择 "));
+        assertFalse(html.contains("Array.prototype.slice.call($(\"fileInput\").files || [])"));
         assertTrue(html.contains("id=\"batchStartBtn\"") && html.contains("等待全部确认"));
         assertTrue(html.contains("Number(job.confirmed || 0) > 0")
                 && html.contains("preparationBlockers === 0"));

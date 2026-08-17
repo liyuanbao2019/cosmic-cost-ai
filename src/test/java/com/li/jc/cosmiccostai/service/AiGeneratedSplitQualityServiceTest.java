@@ -41,6 +41,19 @@ class AiGeneratedSplitQualityServiceTest {
     }
 
     @Test
+    void reportsAiGeneratedExportThatCombinesFileGenerationIntoOnlyOneExit() {
+        ExtractedFunction function = function("导出业务明细", "用户发起业务明细导出请求",
+                movement("E", "发起业务明细导出请求", "导出条件", "时间范围"),
+                movement("R", "读取业务明细", "业务明细表", "业务编号、业务状态"),
+                movement("X", "生成Excel明细文件并返回用户下载", "Excel明细文件", "文件名称、文件内容"));
+
+        List<RuleValidationIssue> issues = service.validate(Arrays.asList(function));
+
+        assertTrue(hasMessage(issues, "生成/写入 Excel 等导出文件 W"), describe(issues));
+        assertTrue(hasMessage(issues, "当前缺少 W"), describe(issues));
+    }
+
+    @Test
     void leavesEvidencePendingAttributesForInitialReviewInsteadOfBlockingGeneration() {
         ExtractedFunction function = function("查询业务类型节点", "用户查询业务类型节点",
                 movement("E", "提交业务类型查询条件", "查询条件", "业务类型编码"),

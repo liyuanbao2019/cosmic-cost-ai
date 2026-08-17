@@ -219,7 +219,7 @@ public class AiModelConfigService {
             if (!StringUtils.hasText(incomingKey) || incomingKey.startsWith(MASK_PREFIX)) profile.setApiKey(oldKeys.get(profile.getId()));
             profile.setTimeoutSeconds(range(profile.getTimeoutSeconds(), 5, 3600, "普通调用超时"));
             profile.setMaxRetries((int) range(profile.getMaxRetries(), 0, 10, "重试次数"));
-            profile.setMaxConcurrency((int) range(profile.getMaxConcurrency(), 1, 200, "最大并发"));
+            profile.setMaxConcurrency((int) range(profile.getMaxConcurrency(), 1, 10000, "最大并发"));
             profile.setChunkTimeoutSeconds(range(profile.getChunkTimeoutSeconds(), 20, 3600, "分批调用超时"));
             profile.setChunkMaxRetries((int) range(profile.getChunkMaxRetries(), 0, 10, "分批重试次数"));
             profile.setChunkParallelism((int) range(profile.getChunkParallelism(), 1, 100, "分批并发"));

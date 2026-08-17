@@ -6,9 +6,32 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AiTaskConfigTest {
+
+    @Test
+    void aiExecutorsAcceptOneThousandConfiguredWorkers() {
+        ThreadPoolTaskExecutor split = (ThreadPoolTaskExecutor)
+                new AiTaskConfig().batchSplitExecutor(1000, 2000);
+        ThreadPoolTaskExecutor preparation = (ThreadPoolTaskExecutor)
+                new AiTaskConfig().batchPreparationExecutor(1000, 2000);
+        ThreadPoolTaskExecutor deepReview = (ThreadPoolTaskExecutor)
+                new AiTaskConfig().deepSplitExecutor(1000, 2000);
+        try {
+            assertEquals(1000, split.getCorePoolSize());
+            assertEquals(1000, split.getMaxPoolSize());
+            assertEquals(1000, preparation.getCorePoolSize());
+            assertEquals(1000, preparation.getMaxPoolSize());
+            assertEquals(1000, deepReview.getCorePoolSize());
+            assertEquals(1000, deepReview.getMaxPoolSize());
+        } finally {
+            split.shutdown();
+            preparation.shutdown();
+            deepReview.shutdown();
+        }
+    }
 
     @Test
     void batchSplitExecutorCanStartFiftyProjectsWithoutApplicationQueueing() throws InterruptedException {

@@ -141,6 +141,20 @@ public class ProjectMaterialExportService {
     public RequirementBatchArchive exportRequirementArchives(String batchId,
                                                              List<String> projectIds,
                                                              RequirementArchiveProgressListener listener) {
+        return exportRequirementArchives(batchId, projectIds, listener, true);
+    }
+
+    /** Wraps the per-requirement exports just refreshed by project material generation without writing them twice. */
+    public RequirementBatchArchive exportExistingRequirementArchives(String batchId,
+                                                                     List<String> projectIds,
+                                                                     RequirementArchiveProgressListener listener) {
+        return exportRequirementArchives(batchId, projectIds, listener, false);
+    }
+
+    private RequirementBatchArchive exportRequirementArchives(String batchId,
+                                                              List<String> projectIds,
+                                                              RequirementArchiveProgressListener listener,
+                                                              boolean refreshRequirementExports) {
         if (projectIds == null || projectIds.isEmpty()) {
             throw new BusinessException("需求级材料整合包至少需要一个已完成需求。");
         }
@@ -160,8 +174,10 @@ public class ProjectMaterialExportService {
                 if (metadata == null) {
                     throw new BusinessException("需求项目不存在");
                 }
-                excelExportService.export(projectId);
-                wordExportService.export(projectId);
+                if (refreshRequirementExports) {
+                    excelExportService.export(projectId);
+                    wordExportService.export(projectId);
+                }
                 metadata = fileStorageService.loadMetadata(projectId);
                 Path excel = requiredExport(metadata.getExcelOutputPath(), "附件3功能点拆分表");
                 Path business = requiredExport(metadata.getBusinessRequirementOutputPath(), "附件2需求汇总表");
@@ -245,6 +261,22 @@ public class ProjectMaterialExportService {
             throw new BusinessException("删除项目级材料版本失败。", ex);
         }
         return deleted;
+    }
+
+    /** Deletes the aggregate ZIP that contains every single-requirement review archive for one batch. */
+    public int deleteRequirementArchive(String batchId) {
+        String batch = safeMaterialId(batchId, "BS");
+        Path root = outputBaseDir.resolve("batch-requirement-materials").toAbsolutePath().normalize();
+        Path directory = root.resolve(batch).normalize();
+        if (!Files.isDirectory(directory)) {
+            return 0;
+        }
+        try {
+            deleteDirectory(directory, root);
+            return 1;
+        } catch (IOException ex) {
+            throw new BusinessException("删除单需求送审材料总包失败。", ex);
+        }
     }
 
     /** Deletes the individual exported material folders for requirements owned by a deleted group. */

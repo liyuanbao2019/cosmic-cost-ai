@@ -81,7 +81,30 @@ class BatchSplitServiceTest {
         service = new BatchSplitService(fileStorageService, documentParseService, chapterSelectionService,
                 requirementInputService, smartSplitPipelineService, projectMaterialExportService,
                 new SyncTaskExecutor(), new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
+    }
+
+    @Test
+    void acceptsMoreThanFiftyRequirementsInOneBatch() throws Exception {
+        List<String> projectIds = new ArrayList<String>();
+        for (int i = 1; i <= 60; i++) {
+            String projectId = String.format("P20260815BULK%04d", i);
+            registerProject(projectId, String.format("%02d.批量需求.docx", i));
+            projectIds.add(projectId);
+        }
+        PausedTaskExecutor preparationExecutor = new PausedTaskExecutor();
+        BatchSplitService unlimitedService = new BatchSplitService(fileStorageService, documentParseService,
+                chapterSelectionService, requirementInputService, smartSplitPipelineService,
+                projectMaterialExportService, preparationExecutor, new SyncTaskExecutor(),
+                50, 50, tempDir.toString());
+        BatchSplitCreateRequest request = new BatchSplitCreateRequest();
+        request.setProjectIds(projectIds);
+
+        BatchSplitJobResponse created = unlimitedService.create(request);
+
+        assertEquals(60, created.getTotal());
+        assertEquals(60, created.getParseQueued());
+        assertEquals(60, preparationExecutor.size());
     }
 
     @Test
@@ -147,14 +170,14 @@ class BatchSplitServiceTest {
         BatchSplitService firstProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, pausedExecutor, new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         BatchSplitJobResponse created = firstProcess.create(createRequest());
         assertEquals("PREPARING", created.getStatus());
 
         BatchSplitService restartedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         restartedProcess.recoverPersistedBatches();
 
         BatchSplitJobResponse recovered = restartedProcess.get(created.getBatchId());
@@ -181,7 +204,7 @@ class BatchSplitServiceTest {
         BatchSplitService firstProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, pausedExecutor, new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         BatchSplitCreateRequest request = createRequest();
         request.setSplitLevel("PROJECT");
         BatchSplitJobResponse created = firstProcess.create(request);
@@ -191,7 +214,7 @@ class BatchSplitServiceTest {
         BatchSplitService restartedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
 
         restartedProcess.recoverPersistedBatches();
 
@@ -208,7 +231,7 @@ class BatchSplitServiceTest {
         BatchSplitService isolatedPoolsService = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), busySplitExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
 
         BatchSplitJobResponse first = isolatedPoolsService.create(createRequest());
         BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
@@ -236,7 +259,7 @@ class BatchSplitServiceTest {
         BatchSplitService fairService = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), pausedExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
 
         BatchSplitCreateRequest oldRequest = new BatchSplitCreateRequest();
         oldRequest.setProjectIds(Arrays.asList(metadata.getId(), second.getId(), third.getId()));
@@ -275,7 +298,7 @@ class BatchSplitServiceTest {
         BatchSplitService stoppedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), stoppedExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
 
         BatchSplitCreateRequest oldRequest = new BatchSplitCreateRequest();
         oldRequest.setProjectIds(Arrays.asList(metadata.getId(), second.getId(), third.getId()));
@@ -296,7 +319,7 @@ class BatchSplitServiceTest {
         BatchSplitService restartedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), recoveredExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         restartedProcess.recoverPersistedBatches();
 
         assertEquals(0, recoveredExecutor.size());
@@ -322,7 +345,7 @@ class BatchSplitServiceTest {
         BatchSplitService stoppedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), pausedExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         BatchSplitJobResponse queued = stoppedProcess.start(created.getBatchId());
         assertEquals(1, queued.getQueued());
         assertEquals(0, queued.getRunning());
@@ -330,7 +353,7 @@ class BatchSplitServiceTest {
         BatchSplitService restartedProcess = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), new SyncTaskExecutor(),
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         restartedProcess.recoverPersistedBatches();
 
         BatchSplitJobResponse recovered = restartedProcess.get(created.getBatchId());
@@ -368,7 +391,7 @@ class BatchSplitServiceTest {
         BatchSplitService runningService = new BatchSplitService(fileStorageService, documentParseService,
                 chapterSelectionService, requirementInputService, smartSplitPipelineService,
                 projectMaterialExportService, new SyncTaskExecutor(), pausedExecutor,
-                3, 2, tempDir.toString(), 10);
+                3, 2, tempDir.toString());
         runningService.start(created.getBatchId());
         pausedExecutor.runNext();
 
@@ -412,6 +435,44 @@ class BatchSplitServiceTest {
         assertEquals(12D, completed.getProjectMaterialTotalCfp());
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
+    }
+
+    @Test
+    void projectRequirementArchiveStillCompletesWhenAggregateMaterialFails() {
+        when(projectMaterialExportService.export(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList()))
+                .thenThrow(new BusinessException("模拟项目整合包失败"));
+        ProjectMaterialExportService.RequirementBatchArchive requirementArchive =
+                mock(ProjectMaterialExportService.RequirementBatchArchive.class);
+        when(requirementArchive.getArchivePath()).thenReturn(tempDir.resolve("独立生成的单需求总包.zip"));
+        when(requirementArchive.getSuccessCount()).thenReturn(1);
+        when(requirementArchive.getFailedProjects()).thenReturn(Collections.<String>emptyList());
+        when(projectMaterialExportService.exportRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class)))
+                .thenReturn(requirementArchive);
+
+        BatchSplitCreateRequest request = createRequest();
+        request.setSplitLevel("PROJECT");
+        BatchSplitJobResponse created = service.create(request);
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("4. 功能需求\n查询终端状态");
+        service.confirm(created.getBatchId(), metadata.getId(), confirmation);
+
+        BatchSplitJobResponse completed = service.start(created.getBatchId());
+
+        assertEquals("MATERIAL_FAILED", completed.getStatus());
+        assertEquals("FAILED", completed.getProjectMaterialStatus());
+        assertEquals("COMPLETED", completed.getRequirementMaterialStatus());
+        assertEquals(1, completed.getRequirementMaterialSuccessCount());
+        verify(projectMaterialExportService).exportRequirementArchives(eq(created.getBatchId()),
+                eq(Arrays.asList(metadata.getId())),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
+        verify(projectMaterialExportService, never()).exportExistingRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
     }
 
     @Test
@@ -485,11 +546,17 @@ class BatchSplitServiceTest {
         assertEquals("COMPLETED", group.getStatus());
         assertEquals(1, group.getCompleted());
         assertEquals(1, group.getProjectMaterialVersion());
+        assertEquals("COMPLETED", group.getRequirementMaterialStatus());
+        assertEquals(1, group.getRequirementMaterialSuccessCount());
+        assertTrue(group.getRequirementMaterialArchive() != null);
         assertEquals("REUSED_COMPLETED", group.getItems().get(0).getStage());
         verify(smartSplitPipelineService, never()).runDocument(eq(metadata.getId()), eq(""),
                 any(SmartSplitPipelineService.StageListener.class));
         verify(projectMaterialExportService).export(eq(group.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
+        verify(projectMaterialExportService).exportExistingRequirementArchives(eq(group.getBatchId()),
+                eq(Arrays.asList(metadata.getId())),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
     }
 
     @Test
@@ -507,6 +574,7 @@ class BatchSplitServiceTest {
         assertThrows(BusinessException.class, () -> service.get(group.getBatchId()));
         verify(projectMaterialExportService).deleteMaterialVersions(
                 eq(group.getProjectGroupId()), eq(group.getBatchId()));
+        verify(projectMaterialExportService).deleteRequirementArchive(eq(group.getBatchId()));
         verify(projectMaterialExportService).deleteRequirementOutputs(
                 eq(Arrays.asList(metadata.getId())));
     }
@@ -673,6 +741,21 @@ class BatchSplitServiceTest {
         when(bundle.getTotalCfp()).thenReturn(totalCfp);
         when(projectMaterialExportService.export(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.<String>anyList())).thenReturn(bundle);
+        ProjectMaterialExportService.RequirementBatchArchive requirementArchive =
+                mock(ProjectMaterialExportService.RequirementBatchArchive.class);
+        when(requirementArchive.getArchivePath()).thenReturn(tempDir.resolve("全部单需求送审材料.zip"));
+        when(requirementArchive.getSuccessCount()).thenReturn(requirementCount);
+        when(requirementArchive.getFailedProjects()).thenReturn(Collections.<String>emptyList());
+        when(projectMaterialExportService.exportRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class)))
+                .thenReturn(requirementArchive);
+        when(projectMaterialExportService.exportExistingRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class)))
+                .thenReturn(requirementArchive);
     }
 
     private static class PausedTaskExecutor implements TaskExecutor {

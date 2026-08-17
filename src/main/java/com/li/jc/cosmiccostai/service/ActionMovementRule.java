@@ -28,7 +28,9 @@ final class ActionMovementRule {
     private static final Profile IMPORT = profile(
             "导入", setOf("R", "W", "X"), emptySet(), 1, 1, 1);
     private static final Profile EXPORT = profile(
-            "导出", setOf("R", "X"), emptySet(), 1, null, 1);
+            "导出", setOf("R", "W", "X"), emptySet(), 1, 1, 1);
+    private static final Profile FILE_DOWNLOAD = profile(
+            "下载/预览已有文件", setOf("R", "X"), emptySet(), 1, 0, 1);
     private static final Profile WORKFLOW = profile(
             "流程派发/审批", setOf("R", "W", "X"), emptySet(), 1, 1, 1);
     private static final Profile SCHEDULED_SUMMARY = profile(
@@ -113,8 +115,10 @@ final class ActionMovementRule {
         if (containsAny(process, "导入")) {
             addUnique(matches, IMPORT, "导入");
         }
-        if (containsAny(process, "导出", "下载", "预览")) {
+        if (isGeneratedFileExport(process, context)) {
             addUnique(matches, EXPORT, firstKeyword(process, "导出", "下载", "预览"));
+        } else if (containsAny(process, "下载", "预览")) {
+            addUnique(matches, FILE_DOWNLOAD, firstKeyword(process, "下载", "预览"));
         }
         if (containsAny(process, "新增", "新建", "创建", "添加")) {
             addUnique(matches, CREATE, firstKeyword(process, "新增", "新建", "创建", "添加"));
@@ -205,12 +209,14 @@ final class ActionMovementRule {
 
     static String canonicalPromptRules() {
         return "统一动作组合（AI 拆分、初审、深度审核、保存和导出使用同一口径）：\n"
-                + "- 用户查询 E-R-X；新增/删除 E-W-X；修改和导入 E-R-W-X。查询通常没有 W，新增/删除通常没有 R。\n"
+                + "- 用户查询 E-R-X；新增/删除 E-W-X；修改、导入和动态导出文件 E-R-W-X。查询通常没有 W，新增/删除通常没有 R。\n"
                 + "- 新建/创建/添加按新增处理；移除/作废/注销按删除处理。只有明确关联读取其他持久化数据组时，新增/删除才扩展 R。\n"
                 + "- 修改类通常为 E-R-W-X；编辑/更新/业务配置/绑定解绑/启停/恢复清除/关闭按修改处理。若原文证明无需读取持久化原数据即可直接更新，可为 E-W-X，禁止为凑模板补 R。\n"
                 + "- 流程派发、发布、审批、审核、撤回按 E-R-W-X 处理。\n"
-                + "- 新疆项目中，查询、导出、发送等以 R/X 为主的功能或业务对象名称同时含“派发/派单”等词时，不得把动作模板机械合并后强制补 W，也不提示“派发/查询”“派发/导出”等组合缺少 W；只有独立派发功能，或原文明示更新派发状态、写入派发结果等持久化动作时才计 W。\n"
-                + "- 临时生成且下载后删除为 E-R-X，写入服务器并保留为 E-R-W-X；即文件写入服务器并保留为 E-R-W-X。\n"
+                + "- 新疆项目中，查询、发送等以 R/X 为主的功能或业务对象名称同时含“派发/派单”等词时，不得把动作模板机械合并后强制补派发状态 W。导出功能也不因“派发”一词额外补派发状态 W，但仍须按导出规则分别生成文件 W、返回结果 X。\n"
+                + "- 导入必须把“写入导入业务数据”记为独立 W，再以独立 X 返回导入成功/失败、数量或错误信息；不得把写入和返回合并成一个 X。\n"
+                + "- 动态导出 Excel/CSV/PDF 等文件统一为 E-R-W-X：W 表示生成/写入导出文件，X 表示向用户返回文件、下载地址或导出结果；临时文件也必须拆开 W 和 X，不得只写“生成文件并返回”的单个 X。\n"
+                + "- 下载或预览已经存在且本次不重新生成的文件可为 E-R-X；若下载过程中动态生成导出文件，仍按导出 E-R-W-X。\n"
                 + "- 定时文件采集直接保存文件并写业务表时，也可合并为 E-W-W。\n"
                 + "- 定时统计/汇总并保存：E-R-W；同时发送/推送/通知时必须增加 X，以 E-R-W-X 结束。\n"
                 + "- 发送/推送/短信通知：E-R-X；明确保存发送结果、记录或状态时为 E-R-W-X。\n"
@@ -219,7 +225,7 @@ final class ActionMovementRule {
                 + "- 本系统向外部平台发送 X 后，外部平台在同一用户目标内同步返回数据时，响应进入本系统可再次记 E；可形成 E-X-E-W-X，串联多个外部系统时可出现多组 X-E。\n"
                 + "- 外部平台稍后以回调/上报接口触发本系统时属于新的独立触发，必须另拆功能过程；不得把异步回调伪装为同步响应 E。\n"
                 + "- E 描述按真实发起方使用自然业务语言：用户/UI 主动触发写“发起/提交”，外部平台上报或回调才写“接收”，X 后同步响应写“获取同步响应数据”；禁止机械拼接“接收+功能过程名+请求”。\n"
-                + "- 不得只根据“同步、导出、采集、发送”等名称机械禁止或补充 R/W/X。\n"
+                + "- 除上述已明确的导入/动态导出文件 W-X 规则外，不得只根据“同步、采集、发送”等名称机械禁止或补充 R/W/X。\n"
                 + "- 新疆项目暂不因功能过程名称同时出现多个动作词直接提示风险，也不因出现“配置”提示表达风险；只有原文能够证明存在不同触发、不同用户目标或不同业务结果时，才拆成多个功能过程。\n"
                 + "- 一个 R/W 数据移动只能对应一个逻辑持久化数据组。同一触发、同一用户目标内，原文明示读取或更新多个不同业务对象、业务表、台账或记录时，功能过程保持一个，但必须按对象分别拆成多个 R/W；同一对象仅更新多个字段仍只计一个 W。"
                 + "例如“更新调拨分派单状态，并更新库存及全生命周期流转记录”应分别写调拨分派单、库存、全生命周期流转记录 3 个 W，不得合并到一个 W 的数据组中。\n"
@@ -246,10 +252,18 @@ final class ActionMovementRule {
         return queryRequest && outboundAction && externalDirection;
     }
 
-    static boolean hasPersistentExportEvidence(String text) {
-        String value = safe(text);
-        return containsAny(value, "存储到服务器", "保存到服务器", "服务器保存", "服务器存储",
-                "持久化", "下载后不删除", "文件不删除", "保留导出文件", "导出文件表");
+    private static boolean isGeneratedFileExport(String process, String context) {
+        if (containsAny(process, "导出")) {
+            return true;
+        }
+        if (!containsAny(process, "下载", "预览")) {
+            return false;
+        }
+        String value = safe(context);
+        boolean generated = containsAny(value, "生成", "创建", "写入", "导出");
+        boolean file = containsAny(value, "Excel", "EXCEL", "excel", "CSV", "csv", "PDF", "pdf",
+                "文件", "报表");
+        return generated && file;
     }
 
     static boolean hasMessageRecordEvidence(String text) {

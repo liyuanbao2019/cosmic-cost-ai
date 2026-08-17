@@ -270,6 +270,7 @@
             <option value="">-- 请选择 --</option>
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
             <option value="2026年家客终端扩容">2026年家客终端扩容</option>
+            <option value="2026年运维管理扩容">2026年运维管理扩容</option>
             <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
             <option value="2026年共享采集扩容">2026年共享采集扩容</option>
             <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
@@ -297,7 +298,7 @@
         <div id="documentUploadField" class="upload-field">
           <div class="upload-field-head">
             <label for="fileInput">
-              <span>需求文档 <em>（可一次选择多个 doc 或 docx）</em><small id="batchFileHint" class="batch-file-hint">选择多份文档后，将先逐份确认送给 AI 的章节和正文。</small></span>
+              <span>需求文档 <em>（可分多次从不同目录追加 doc 或 docx）</em><small id="batchFileHint" class="batch-file-hint">每次选择都会追加到已选列表，可继续点击选择其他目录。</small></span>
             </label>
             <a class="template-download-link"
                href="/templates/requirement-standard-template.docx"
@@ -398,7 +399,7 @@
       <div id="batchProjectMaterials" class="batch-project-materials hidden">
         <div class="batch-materials-heading">
           <div>
-            <h3>项目级送审材料</h3>
+            <h3>产物 1 · 项目整合送审材料</h3>
             <p id="batchProjectMaterialsSummary" class="muted">全部需求完成智能拆分后自动生成。</p>
           </div>
           <button id="batchMaterialRetryBtn" type="button" class="ghost hidden" onclick="retryBatchProjectMaterials()">重试生成</button>
@@ -408,7 +409,7 @@
       <div id="batchRequirementMaterials" class="batch-project-materials hidden">
         <div class="batch-materials-heading">
           <div>
-            <h3>单需求送审材料整合包</h3>
+            <h3 id="batchRequirementMaterialsTitle">单需求送审材料整合包</h3>
             <p id="batchRequirementMaterialsSummary" class="muted">批量拆分完成后，可一次生成并下载全部单需求送审压缩包。</p>
           </div>
           <button id="batchRequirementMaterialsBtn" type="button" onclick="exportBatchRequirementMaterials()">生成全部送审材料整合包</button>
@@ -679,6 +680,7 @@
     let reviewDensity = "comfortable";
     let cellEditorState = null;
     let splitMode = "document";
+    let selectedDocumentFiles = [];
     let currentProjectSourceType = "";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
@@ -1266,6 +1268,7 @@
         $("chapterSelectionPanel").classList.add("hidden");
       }
       if (!keepFiles) {
+        selectedDocumentFiles = [];
         $("fileInput").value = "";
         $("splitExcelInput").value = "";
         onDocumentFilesChanged();
@@ -1765,6 +1768,7 @@
       if ($("splitLevel")) {
         $("splitLevel").value = "REQUIREMENT";
       }
+      selectedDocumentFiles = [];
       $("fileInput").value = "";
       if ($("splitExcelInput")) {
         $("splitExcelInput").value = "";
@@ -1807,7 +1811,7 @@
         await importSplitExcel();
         return;
       }
-      if ($("fileInput").files.length > 1 || selectedSplitLevel() === "PROJECT") {
+      if (selectedDocumentFiles.length > 1 || selectedSplitLevel() === "PROJECT") {
         await startBatchSplitPreparation();
         return;
       }
@@ -1816,12 +1820,21 @@
 
     function onDocumentFilesChanged() {
       const input = $("fileInput");
-      const count = input && input.files ? input.files.length : 0;
+      const incoming = input && input.files ? Array.prototype.slice.call(input.files) : [];
+      if (incoming.length) {
+        incoming.forEach(function (file) {
+          selectedDocumentFiles.push(file);
+        });
+        // 清空原生选择值，使用户可以再次打开文件框选择其它目录；
+        // 真正待上传文件保存在 selectedDocumentFiles 中。
+        input.value = "";
+      }
+      const count = selectedDocumentFiles.length;
       const hint = $("batchFileHint");
       if (hint) {
-        hint.textContent = count > 1
-          ? "已选择 " + count + " 份需求文档；导入解析后需要逐份确认 AI 输入。"
-          : "选择多份文档后，将先逐份确认送给 AI 的章节和正文。";
+        hint.textContent = count > 0
+          ? "已累计选择 " + count + " 份需求文档；可继续点击选择其它目录。"
+          : "每次选择都会追加到已选列表，可继续点击选择其他目录。";
       }
       const button = $("runBtn");
       if (button && !button.disabled) {
@@ -1848,7 +1861,7 @@
         showDialog("请选择项目名称", "请先选择项目名称，再点击「开始拆分」");
         return;
       }
-      const file = $("fileInput").files[0];
+      const file = selectedDocumentFiles[0];
       if (!file) {
         showDialog("请先上传需求文档", "请选择 doc 或 docx 格式的需求文档，然后点击「开始拆分」");
         return;
@@ -1892,7 +1905,7 @@
         showDialog("请选择项目名称", "请先选择本批需求文档所属的备案项目名称。");
         return;
       }
-      const files = Array.prototype.slice.call($("fileInput").files || []);
+      const files = selectedDocumentFiles.slice();
       if (!files.length) {
         showDialog("请先上传需求文档", "请选择一份或多份 doc、docx 格式的需求文档。");
         return;
@@ -2308,7 +2321,7 @@
         attachment3: "附件3 功能点拆分表",
         attachment4: "附件4 项目台账",
         attachment5: "附件5 工作量评估申请表",
-        archive: "下载完整送审材料"
+        archive: "产物 1：下载项目整合送审包"
       };
       $("batchProjectMaterialFiles").innerHTML = (job.projectMaterialFiles || []).map(function (file) {
         const primary = file.type === "archive" ? " primary" : "";
@@ -2320,31 +2333,43 @@
 
     function renderBatchRequirementMaterials(job) {
       const panel = $("batchRequirementMaterials");
-      const requirementLevel = job && job.splitLevel !== "PROJECT";
-      const finished = requirementLevel && Number(job.completed || 0) > 0
+      const projectLevel = job && job.splitLevel === "PROJECT";
+      const processingFinished = job && Number(job.completed || 0) > 0
         && Number(job.running || 0) === 0 && Number(job.queued || 0) === 0
         && Number(job.preparing || 0) === 0 && Number(job.parseQueued || 0) === 0;
+      const finished = processingFinished && (!projectLevel
+        || Number(job.completed || 0) === Number(job.total || 0));
       panel.classList.toggle("hidden", !finished);
       if (!finished) return;
       const status = job.requirementMaterialStatus || "NOT_STARTED";
       const summary = $("batchRequirementMaterialsSummary");
       const button = $("batchRequirementMaterialsBtn");
+      $("batchRequirementMaterialsTitle").textContent = projectLevel
+        ? "产物 2 · 项目全量单需求送审材料总包"
+        : "单需求送审材料整合包";
       summary.textContent = job.requirementMaterialMessage
-        || "将为 " + Number(job.completed || 0) + " 个已完成需求分别生成附件1、附件2、附件3和单需求 ZIP，再汇总为一个总 ZIP。";
+        || (projectLevel
+          ? "项目整合时自动为全部需求分别生成附件 1–3 和单需求 ZIP，再汇总为第二个总 ZIP。"
+          : "将为 " + Number(job.completed || 0) + " 个已完成需求分别生成附件 1–3 和单需求 ZIP，再汇总为一个总 ZIP。");
       button.disabled = status === "GENERATING";
       button.textContent = status === "GENERATING" ? "正在生成，请稍候…"
-        : ((status === "COMPLETED" || status === "PARTIAL_COMPLETED") ? "重新生成整合包" : "生成全部送审材料整合包");
+        : (projectLevel && status === "NOT_STARTED") ? "生成产物 2"
+        : ((status === "COMPLETED" || status === "PARTIAL_COMPLETED")
+          ? "重新生成单需求总包" : "重试生成单需求总包");
       const archive = job.requirementMaterialArchive;
       $("batchRequirementMaterialFiles").innerHTML = archive
         ? "<a class=\"batch-material-file primary\" href=\"" + escapeHtml(archive.downloadUrl)
-          + "\" download><b>下载全部单需求送审材料</b><span>" + escapeHtml(archive.name || "整合包.zip") + "</span></a>"
+          + "\" download><b>" + (projectLevel ? "产物 2：下载项目全量单需求送审包" : "下载全部单需求送审材料")
+          + "</b><span>" + escapeHtml(archive.name || "整合包.zip") + "</span></a>"
         : "<span class=\"muted\">整合包尚未生成。</span>";
     }
 
     async function exportBatchRequirementMaterials() {
       if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
       const count = Number(currentBatchSplitJob.completed || 0);
-      if (!window.confirm("确认为 " + count + " 个已完成需求生成单需求送审材料，并打成一个总 ZIP？")) return;
+      const projectLevel = currentBatchSplitJob.splitLevel === "PROJECT";
+      if (!window.confirm("确认为 " + count + " 个已完成需求生成单需求送审材料，并打成一个总 ZIP？"
+        + (projectLevel ? "这会重新生成项目的产物 2。" : ""))) return;
       const button = $("batchRequirementMaterialsBtn");
       button.disabled = true;
       button.textContent = "正在提交…";

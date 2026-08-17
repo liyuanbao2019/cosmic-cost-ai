@@ -11,8 +11,8 @@ public class AiTaskConfig {
 
     @Bean(name = "deepSplitExecutor")
     public TaskExecutor deepSplitExecutor(
-            @Value("${cosmic.ai.deep-split.worker-count:50}") int workerCount,
-            @Value("${cosmic.ai.deep-split.queue-capacity:50}") int queueCapacity) {
+            @Value("${cosmic.ai.deep-split.worker-count:1000}") int workerCount,
+            @Value("${cosmic.ai.deep-split.queue-capacity:2000}") int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         int size = Math.max(1, workerCount);
         executor.setCorePoolSize(size);
@@ -26,8 +26,8 @@ public class AiTaskConfig {
 
     @Bean(name = "batchSplitExecutor")
     public TaskExecutor batchSplitExecutor(
-            @Value("${cosmic.ai.batch-split.worker-count:50}") int workerCount,
-            @Value("${cosmic.ai.batch-split.queue-capacity:100}") int queueCapacity) {
+            @Value("${cosmic.ai.batch-split.worker-count:1000}") int workerCount,
+            @Value("${cosmic.ai.batch-split.queue-capacity:2000}") int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         int size = Math.max(1, workerCount);
         executor.setCorePoolSize(size);
@@ -41,8 +41,8 @@ public class AiTaskConfig {
 
     @Bean(name = "batchPreparationExecutor")
     public TaskExecutor batchPreparationExecutor(
-            @Value("${cosmic.ai.batch-split.preparation-worker-count:50}") int workerCount,
-            @Value("${cosmic.ai.batch-split.preparation-queue-capacity:100}") int queueCapacity) {
+            @Value("${cosmic.ai.batch-split.preparation-worker-count:1000}") int workerCount,
+            @Value("${cosmic.ai.batch-split.preparation-queue-capacity:2000}") int queueCapacity) {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         int size = Math.max(1, workerCount);
         executor.setCorePoolSize(size);

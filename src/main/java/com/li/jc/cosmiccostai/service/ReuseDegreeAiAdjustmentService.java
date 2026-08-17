@@ -43,6 +43,9 @@ public class ReuseDegreeAiAdjustmentService {
     private static final String MODULE_ANCHOR_DEFAULT_SCOPE = "MODULE_ANCHOR_DEFAULT";
     private static final String CROSS_FUNCTION_TWO_DIMENSIONS_SCOPE = "CROSS_FUNCTION_TWO_DIMENSIONS";
     private static final String CROSS_FUNCTION_SHARED_MOVEMENT_SCOPE = "CROSS_FUNCTION_SHARED_MOVEMENT";
+    private static final String RULE_POLICY = "RULE_POLICY";
+    private static final String CURRENT_TABLE_REUSE = "CURRENT_TABLE_REUSE";
+    private static final String XINJIANG_TIMER_ENTRY_RULE = "XJ-TIMER-E";
     private static final String KEY_SEPARATOR = "\u001f";
 
     private final AiModelConfigService aiModelConfigService;
@@ -81,6 +84,7 @@ public class ReuseDegreeAiAdjustmentService {
             List<ReuseDegreeAdjustmentDecision> modelDecisionsToApply =
                     excludeModuleReuseModelDecisions(decisions, moduleReusePlan);
             ApplySummary summary = applyDecisions(rows, modelDecisionsToApply);
+            removeAppliedRulePolicyRows(moduleReusePlan, modelDecisionsToApply);
             int governedModelDecisions = decisions.size() - modelDecisionsToApply.size();
             if (governedModelDecisions > 0) {
                 summary.skipped += governedModelDecisions;
@@ -126,12 +130,13 @@ public class ReuseDegreeAiAdjustmentService {
         builder.append("2. 同一一级/二级/三级模块路径内，新增和查询功能过程的全部子过程设为新增；导入或上传若是同模块新增数据功能的配套能力，全部子过程设为复用，若同模块不存在新增功能则可作为新增基准；同模块修改、删除、导出、下载功能过程的全部子过程设为复用。不要求增删改查四类齐全。该规则由服务端统一落地，模型不要为这些行输出 decision，也不得提出相反值。\n");
         builder.append("3. 服务端先判断整个功能过程是否重复/包含，再按表格顺序判断跨功能共享子过程：后置功能过程中审核三要素恰有两项相同，或三项完全相同但整个功能过程并不重复，且未发现跨层/跨边界差异时，当前行自动设为复用/0.33；模型不要为这些行输出 decision，也不得提出相反值。\n");
         builder.append("4. 新增=1、复用=0.33、利旧=0。你只判断 suggestedReuseDegree，CFP 由服务端统一映射。\n");
-        builder.append("5. 建议复用时 duplicateScope=MOVEMENT，必须给出有效 referenceRowIndexes，并在 matchedDimensions 中列出审核三要素中至少两项：subProcessDescription、movementType、dataAttributes。\n");
+        builder.append("5. 一般表内复用判断使用 decisionType=CURRENT_TABLE_REUSE；建议复用时 duplicateScope=MOVEMENT，必须给出有效 referenceRowIndexes，并在 matchedDimensions 中列出审核三要素中至少两项：subProcessDescription、movementType、dataAttributes。\n");
         builder.append("6. 建议利旧时 duplicateScope=FUNCTION，必须证明整个用户目标重复/被包含，并为该功能过程的每一行分别输出 decision；matchedDimensions 必须包含全部三项。\n");
         builder.append("7. 将复用/利旧恢复为新增时，必须在 boundaryDifference 中写清真实的功能用户、业务目标、跨层或跨软件边界差异。\n");
         builder.append("8. evidenceSufficient 只有在当前行、参考行、原文 evidence/sourceReferences 能形成闭环时才可为 true；不得用同义词、字段换序或模板常识代替证据。\n");
-        builder.append("9. 只输出确需改变的行；不改变功能过程、E/R/W/X、数据组、数据属性、描述和行顺序。\n");
-        builder.append("10. 输出顶层 JSON 对象：{\"decisions\":[{\"rowIndex\":1,\"suggestedReuseDegree\":\"复用\",\"duplicateScope\":\"MOVEMENT\",\"referenceRowIndexes\":[2],\"matchedDimensions\":[\"movementType\",\"dataAttributes\"],\"boundaryDifference\":\"\",\"reason\":\"...\",\"evidenceSufficient\":true,\"confidence\":0.96}]}。无可靠调整时输出 {\"decisions\":[]}。\n\n");
+        builder.append("9. 执行统一规则中的新疆特殊场景 XJ-TIMER-E：逐个识别有效定时/时钟/系统事件功能过程。只有功能过程成立、有明确业务目标且后续存在真实 W 或 X 时，首个初始触发 E 才调整为复用/0.33；纯技术定时器不计，后续 R/W/X 不随 E 调整。该决策使用 decisionType=RULE_POLICY、ruleId=XJ-TIMER-E、rowScope=MOVEMENT，不要求引用其它表格行，但必须在 evidenceReferences 中引用当前行真实 REQ 标识；Excel 导入没有 REQ 标识时引用 ROW-行号。\n");
+        builder.append("10. 只输出确需改变的行；不改变功能过程、E/R/W/X、数据组、数据属性、描述和行顺序。\n");
+        builder.append("11. 输出顶层 JSON 对象：{\"decisions\":[{\"rowIndex\":1,\"decisionType\":\"CURRENT_TABLE_REUSE\",\"ruleId\":\"\",\"rowScope\":\"MOVEMENT\",\"evidenceReferences\":[\"REQ-L0001\"],\"suggestedReuseDegree\":\"复用\",\"duplicateScope\":\"MOVEMENT\",\"referenceRowIndexes\":[2],\"matchedDimensions\":[\"movementType\",\"dataAttributes\"],\"boundaryDifference\":\"\",\"reason\":\"...\",\"evidenceSufficient\":true,\"confidence\":0.96}]}。无可靠调整时输出 {\"decisions\":[]}。\n\n");
         builder.append("【当前生效完整规则】\n");
         builder.append(splitRuleConfigService.getEffectiveRulesPrompt()).append("【当前生效完整规则结束】\n\n");
         builder.append("【待整体判断的完整拆分表，共 ").append(rows.size()).append(" 行】\n");
@@ -211,6 +216,8 @@ public class ReuseDegreeAiAdjustmentService {
             }
             row.setReuseDegree(target);
             row.setCfp(cfp(target));
+            row.setReuseBasis(normalizeDecisionType(decision.getDecisionType()));
+            row.setReuseRuleId(text(decision.getRuleId()));
             decision.setApplied(true);
             decision.setApplyMessage("已按证据调整为" + target + "，CFP=" + formatCfp(cfp(target)) + "。");
             summary.applied++;
@@ -232,13 +239,24 @@ public class ReuseDegreeAiAdjustmentService {
         List<ReuseDegreeAdjustmentDecision> result = new ArrayList<ReuseDegreeAdjustmentDecision>();
         for (ReuseDegreeAdjustmentDecision decision : decisions == null
                 ? Collections.<ReuseDegreeAdjustmentDecision>emptyList() : decisions) {
-            if (decision != null && plan.targets.containsKey(decision.getRowIndex())) {
+            if (decision != null && plan.targets.containsKey(decision.getRowIndex())
+                    && !isRulePolicyDecision(decision)) {
                 reject(decision, "该行属于服务端确定性复用规则范围，模型建议不参与落地。 ");
                 continue;
             }
             result.add(decision);
         }
         return result;
+    }
+
+    private void removeAppliedRulePolicyRows(ModuleReusePlan plan,
+                                             List<ReuseDegreeAdjustmentDecision> decisions) {
+        for (ReuseDegreeAdjustmentDecision decision : decisions == null
+                ? Collections.<ReuseDegreeAdjustmentDecision>emptyList() : decisions) {
+            if (decision != null && decision.isApplied() && isRulePolicyDecision(decision)) {
+                plan.targets.remove(decision.getRowIndex());
+            }
+        }
     }
 
     private ModuleReusePlan moduleReusePlan(List<FunctionSplitRow> rows) {
@@ -454,6 +472,8 @@ public class ReuseDegreeAiAdjustmentService {
             }
             row.setReuseDegree(target.reuseDegree);
             row.setCfp(expectedCfp);
+            row.setReuseBasis(target.scope);
+            row.setReuseRuleId(target.scope);
 
             ReuseDegreeAdjustmentDecision decision = new ReuseDegreeAdjustmentDecision();
             decision.setRowIndex(rowIndex);
@@ -496,7 +516,7 @@ public class ReuseDegreeAiAdjustmentService {
                 actions.add(ModuleAction.QUERY);
             } else if ("导入".equals(label)) {
                 actions.add(ModuleAction.IMPORT);
-            } else if ("导出".equals(label)) {
+            } else if ("导出".equals(label) || "下载/预览已有文件".equals(label)) {
                 actions.add(ModuleAction.EXPORT);
             }
         }
@@ -556,6 +576,9 @@ public class ReuseDegreeAiAdjustmentService {
             }
             return "";
         }
+        if (isRulePolicyDecision(decision)) {
+            return validateRulePolicyDecision(rows, processRows, decision, row);
+        }
         if (!hasValidReference(rows, decision)) {
             return "调整为复用或利旧必须引用当前全表中的其它有效行。";
         }
@@ -590,6 +613,104 @@ public class ReuseDegreeAiAdjustmentService {
             }
         }
         return "";
+    }
+
+    private String validateRulePolicyDecision(List<FunctionSplitRow> rows,
+                                              Map<String, List<Integer>> processRows,
+                                              ReuseDegreeAdjustmentDecision decision,
+                                              FunctionSplitRow row) {
+        if (!XINJIANG_TIMER_ENTRY_RULE.equalsIgnoreCase(text(decision.getRuleId()))) {
+            return "未知的统一规则政策决策。";
+        }
+        if (!"复用".equals(decision.getSuggestedReuseDegree())) {
+            return "XJ-TIMER-E 只能将有效定时初始 E 调整为复用。";
+        }
+        if (!"MOVEMENT".equals(normalizeScope(decision.getRowScope()))) {
+            return "XJ-TIMER-E 只能作用于单个数据移动行。";
+        }
+        if (decision.getConfidence() < REUSE_CONFIDENCE) {
+            return "有效定时初始 E 的规则调整必须达到置信度 0.90。";
+        }
+        if (!"E".equals(text(row.getMovementType()).toUpperCase(Locale.ROOT))) {
+            return "XJ-TIMER-E 的目标行必须是 E。";
+        }
+        List<Integer> group = processRows.get(FunctionProcessKey.of(row));
+        if (group == null || group.isEmpty() || group.get(0) != decision.getRowIndex()) {
+            return "XJ-TIMER-E 只能作用于功能过程首行的初始触发 E。";
+        }
+        if (!hasScheduledTriggerEvidence(row)) {
+            return "当前行缺少定时、时钟、调度或系统事件触发证据。";
+        }
+        if (looksLikeTechnicalTimer(row)) {
+            return "当前描述更接近技术定时器、轮询或保活，不得机械保留 0.33 E。";
+        }
+        if (!hasIndependentBusinessOutcome(rows, group)) {
+            return "当前定时处理未形成有依据的持久化或跨边界业务结果。";
+        }
+        if (!hasCurrentEvidenceReference(row, decision)) {
+            return "XJ-TIMER-E 必须引用当前需求 REQ 证据；Excel 导入行可引用 ROW-行号。";
+        }
+        return "";
+    }
+
+    private boolean isRulePolicyDecision(ReuseDegreeAdjustmentDecision decision) {
+        return decision != null && RULE_POLICY.equals(normalizeDecisionType(decision.getDecisionType()));
+    }
+
+    private String normalizeDecisionType(String value) {
+        String normalized = text(value).toUpperCase(Locale.ROOT);
+        return StringUtils.hasText(normalized) ? normalized : CURRENT_TABLE_REUSE;
+    }
+
+    private boolean hasScheduledTriggerEvidence(FunctionSplitRow row) {
+        String value = text(row.getFunctionalUser()) + " " + text(row.getTriggerEvent()) + " "
+                + text(row.getFunctionProcess()) + " " + text(row.getSubProcessDescription()) + " "
+                + text(row.getEvidence());
+        return containsAny(value, "定时", "时钟", "调度", "系统事件");
+    }
+
+    private boolean looksLikeTechnicalTimer(FunctionSplitRow row) {
+        String value = text(row.getFunctionProcess()) + " " + text(row.getFunctionDescription()) + " "
+                + text(row.getSubProcessDescription()) + " " + text(row.getEvidence());
+        return containsAny(value, "心跳", "保活", "框架调度", "定时器配置", "调度器配置", "内部轮询");
+    }
+
+    private boolean hasIndependentBusinessOutcome(List<FunctionSplitRow> rows, List<Integer> group) {
+        for (Integer rowIndex : group == null ? Collections.<Integer>emptyList() : group) {
+            if (rowIndex == null || rowIndex < 1 || rowIndex > rows.size()) {
+                continue;
+            }
+            String movement = text(rows.get(rowIndex - 1).getMovementType()).toUpperCase(Locale.ROOT);
+            if ("W".equals(movement) || "X".equals(movement)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasCurrentEvidenceReference(FunctionSplitRow row,
+                                                ReuseDegreeAdjustmentDecision decision) {
+        List<String> references = decision.getEvidenceReferences() == null
+                ? Collections.<String>emptyList() : decision.getEvidenceReferences();
+        List<String> sourceReferences = row.getSourceReferences() == null
+                ? Collections.<String>emptyList() : row.getSourceReferences();
+        for (String reference : references) {
+            String value = text(reference);
+            if (sourceReferences.contains(value)
+                    || ("ROW-" + decision.getRowIndex()).equalsIgnoreCase(value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean containsAny(String value, String... keywords) {
+        for (String keyword : keywords) {
+            if (value.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private boolean hasValidReference(List<FunctionSplitRow> rows,

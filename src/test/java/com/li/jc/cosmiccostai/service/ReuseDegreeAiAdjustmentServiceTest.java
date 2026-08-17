@@ -116,6 +116,102 @@ class ReuseDegreeAiAdjustmentServiceTest {
     }
 
     @Test
+    void appliesUnifiedTimerEntryPolicyToFirstEntryOnly() {
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        ReviewService review = mock(ReviewService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("UNIFIED-XINJIANG-RULES");
+        when(rules.getRuleVersion()).thenReturn("R-xj-unified");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false)))
+                .thenReturn("{\"decisions\":[{\"rowIndex\":1,"
+                        + "\"decisionType\":\"RULE_POLICY\","
+                        + "\"ruleId\":\"XJ-TIMER-E\","
+                        + "\"rowScope\":\"MOVEMENT\","
+                        + "\"evidenceReferences\":[\"REQ-L0002\"],"
+                        + "\"suggestedReuseDegree\":\"复用\","
+                        + "\"duplicateScope\":\"MOVEMENT\","
+                        + "\"referenceRowIndexes\":[],\"matchedDimensions\":[],"
+                        + "\"boundaryDifference\":\"\","
+                        + "\"reason\":\"需求明确每日定时触发并持久化订单汇总结果。\","
+                        + "\"evidenceSufficient\":true,\"confidence\":0.98}]}");
+        AiModelProfile profile = new AiModelProfile();
+        profile.setModel("deepseek-reasoner");
+        when(ai.getActiveProfile()).thenReturn(profile);
+
+        FunctionSplitRow entry = moduleMovementRow("订单统计", "定时查询订单汇总", "E", "新增");
+        entry.setTriggerEvent("每日零点定时触发");
+        entry.setEvidence("每日零点生成并保存订单汇总结果");
+        entry.getSourceReferences().add("REQ-L0002");
+        FunctionSplitRow write = moduleMovementRow("订单统计", "定时查询订单汇总", "W", "新增");
+        write.setTriggerEvent("每日零点定时触发");
+        write.getSourceReferences().add("REQ-L0002");
+        List<FunctionSplitRow> rows = Arrays.asList(entry, write);
+        when(review.saveReuseAdjustedReview(eq("p-xj-timer"), any())).thenAnswer(invocation -> {
+            ReviewResponse saved = new ReviewResponse();
+            @SuppressWarnings("unchecked")
+            List<FunctionSplitRow> savedRows = (List<FunctionSplitRow>) invocation.getArgument(1);
+            saved.setSplitRows(savedRows);
+            return saved;
+        });
+
+        ReuseDegreeAdjustmentResponse response = service(ai, rules, review)
+                .adjust("p-xj-timer", rows);
+
+        assertEquals("复用", response.getRows().get(0).getReuseDegree());
+        assertEquals(0.33D, response.getRows().get(0).getCfp(), 0.0001D);
+        assertEquals("RULE_POLICY", response.getRows().get(0).getReuseBasis());
+        assertEquals("XJ-TIMER-E", response.getRows().get(0).getReuseRuleId());
+        assertEquals("新增", response.getRows().get(1).getReuseDegree());
+        assertEquals(1D, response.getRows().get(1).getCfp(), 0.0001D);
+        assertTrue(response.getDecisions().get(0).isApplied());
+    }
+
+    @Test
+    void excelTimerPolicyCanCiteCurrentRowAndRejectsTechnicalTimer() {
+        ReuseDegreeAiAdjustmentService service = service(null, null, null);
+        FunctionSplitRow entry = row("定时汇总库存", "定时触发库存汇总", "E",
+                "定时事件", "无业务数据", "新增");
+        entry.setTriggerEvent("每日调度触发");
+        FunctionSplitRow write = row("定时汇总库存", "写入库存汇总结果", "W",
+                "库存汇总表", "统计日期、库存数量", "新增");
+        write.setTriggerEvent("每日调度触发");
+        List<FunctionSplitRow> rows = Arrays.asList(entry, write);
+        ReuseDegreeAdjustmentDecision accepted = decision(1, "复用", "MOVEMENT", 0.97D,
+                Collections.<Integer>emptyList(), Collections.<String>emptyList());
+        accepted.setDecisionType("RULE_POLICY");
+        accepted.setRuleId("XJ-TIMER-E");
+        accepted.setRowScope("MOVEMENT");
+        accepted.setEvidenceReferences(Collections.singletonList("ROW-1"));
+
+        service.applyDecisions(rows, Collections.singletonList(accepted));
+
+        assertTrue(accepted.isApplied(), accepted.getApplyMessage());
+        assertEquals("复用", entry.getReuseDegree());
+        assertEquals("新增", write.getReuseDegree());
+
+        FunctionSplitRow technicalEntry = row("定时器保活", "执行内部轮询保活", "E",
+                "定时事件", "无业务数据", "新增");
+        technicalEntry.setTriggerEvent("定时调度");
+        FunctionSplitRow technicalWrite = row("定时器保活", "写入心跳状态", "W",
+                "心跳状态表", "状态", "新增");
+        technicalWrite.setTriggerEvent("定时调度");
+        ReuseDegreeAdjustmentDecision rejected = decision(1, "复用", "MOVEMENT", 0.99D,
+                Collections.<Integer>emptyList(), Collections.<String>emptyList());
+        rejected.setDecisionType("RULE_POLICY");
+        rejected.setRuleId("XJ-TIMER-E");
+        rejected.setRowScope("MOVEMENT");
+        rejected.setEvidenceReferences(Collections.singletonList("ROW-1"));
+
+        service.applyDecisions(Arrays.asList(technicalEntry, technicalWrite),
+                Collections.singletonList(rejected));
+
+        assertFalse(rejected.isApplied());
+        assertTrue(rejected.getApplyMessage().contains("技术定时器"));
+        assertEquals("新增", technicalEntry.getReuseDegree());
+    }
+
+    @Test
     void promptOptimizesAuditAccuracyInsteadOfCfpDirection() {
         AiModelConfigService ai = mock(AiModelConfigService.class);
         SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
@@ -136,6 +232,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertTrue(prompt.contains("同模块修改、删除、导出、下载功能过程的全部子过程设为复用"));
         assertTrue(prompt.contains("不要求增删改查四类齐全"));
         assertTrue(prompt.contains("该规则由服务端统一落地"));
+        assertTrue(prompt.contains("XJ-TIMER-E"));
+        assertTrue(prompt.contains("后续 R/W/X 不随 E 调整"));
         assertTrue(prompt.contains("完整拆分表，共 1 行"));
         assertTrue(prompt.contains("FULL-RULE-V2-UNIQUE"));
     }

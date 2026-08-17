@@ -23,7 +23,7 @@ public class SplitRuleConfigService {
      * Bump whenever deterministic validation semantics change. The public rule
      * version must identify both the editable prose and the server-side judge.
      */
-    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-13.v3.1";
+    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-17.v4.1-import-export-wx";
 
     private final Path editableRulePath;
 
@@ -104,7 +104,14 @@ public class SplitRuleConfigService {
     private void upgradeLegacyBundledRules(Path path) {
         try {
             String existing = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
+            if (existing.contains("COSMIC 软件造价拆分基础规则 v2.1")) {
+                return;
+            }
+            // This application is deployed only for Xinjiang. Once v2.1 became
+            // the unified rule source, an existing v2.0 file must not keep the
+            // runtime on the old semantics after an application upgrade.
             if (existing.contains("COSMIC 软件造价拆分基础规则 v2.0")) {
+                Files.write(path, readDefaultRules().getBytes(StandardCharsets.UTF_8));
                 return;
             }
             boolean legacyBundledRules = existing.startsWith("# 拆分校验规则")
@@ -115,7 +122,7 @@ public class SplitRuleConfigService {
                 Files.write(path, readDefaultRules().getBytes(StandardCharsets.UTF_8));
             }
         } catch (IOException ex) {
-            throw new BusinessException("升级 v2.0 初审规则失败：" + path, ex);
+            throw new BusinessException("升级统一拆分规则失败：" + path, ex);
         }
     }
 

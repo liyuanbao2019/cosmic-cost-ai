@@ -45,6 +45,7 @@ class AiModelConfigServiceTest {
         response.getModels().add(second);
         response.setSelectedId("second");
         response.getModels().get(0).setTimeoutSeconds(600);
+        response.getModels().get(0).setMaxConcurrency(1000);
         service.save(response);
 
         String stored = new String(Files.readAllBytes(config), StandardCharsets.UTF_8);
@@ -52,5 +53,6 @@ class AiModelConfigServiceTest {
         assertTrue(stored.contains("another-secret"));
         assertEquals("second", service.getActiveProfile().getId());
         assertEquals(600, service.getSettings().getModels().get(0).getTimeoutSeconds());
+        assertEquals(1000, service.getSettings().getModels().get(0).getMaxConcurrency());
     }
 }

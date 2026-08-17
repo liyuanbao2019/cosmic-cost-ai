@@ -9,6 +9,14 @@ public class ReuseDegreeAdjustmentDecision {
     private String originalReuseDegree;
     private String suggestedReuseDegree;
     private Double suggestedCfp;
+    /** CURRENT_TABLE_REUSE or RULE_POLICY. */
+    private String decisionType;
+    /** Rule id from the single effective rule source, for example XJ-TIMER-E. */
+    private String ruleId;
+    /** Scope of the policy decision; currently MOVEMENT for XJ-TIMER-E. */
+    private String rowScope;
+    /** Requirement or current-row evidence cited by a rule-policy decision. */
+    private List<String> evidenceReferences = new ArrayList<String>();
     private String duplicateScope;
     private List<Integer> referenceRowIndexes = new ArrayList<Integer>();
     private List<String> matchedDimensions = new ArrayList<String>();
@@ -49,6 +57,38 @@ public class ReuseDegreeAdjustmentDecision {
 
     public void setSuggestedCfp(Double suggestedCfp) {
         this.suggestedCfp = suggestedCfp;
+    }
+
+    public String getDecisionType() {
+        return decisionType;
+    }
+
+    public void setDecisionType(String decisionType) {
+        this.decisionType = decisionType;
+    }
+
+    public String getRuleId() {
+        return ruleId;
+    }
+
+    public void setRuleId(String ruleId) {
+        this.ruleId = ruleId;
+    }
+
+    public String getRowScope() {
+        return rowScope;
+    }
+
+    public void setRowScope(String rowScope) {
+        this.rowScope = rowScope;
+    }
+
+    public List<String> getEvidenceReferences() {
+        return evidenceReferences;
+    }
+
+    public void setEvidenceReferences(List<String> evidenceReferences) {
+        this.evidenceReferences = evidenceReferences;
     }
 
     public String getDuplicateScope() {

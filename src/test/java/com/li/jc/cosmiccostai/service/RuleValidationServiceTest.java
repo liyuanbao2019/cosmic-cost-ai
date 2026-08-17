@@ -51,7 +51,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void flagsReadInCreateOrDeleteAndWriteInQueryOrExport() {
+    void flagsReadInCreateButAcceptsFileWriteInExport() {
         RuleValidationService service = new RuleValidationService();
 
         RuleValidationResponse createResponse = service.validate(Arrays.asList(
@@ -65,7 +65,8 @@ class RuleValidationServiceTest {
                 row("用户导出", "X", "导出结果", "文件内容", "新增")));
 
         assertTrue(hasCombinationIssue(createResponse, "不应包含 R"));
-        assertTrue(hasCombinationIssue(exportResponse, "缺少“文件在服务器持久保存”的明确依据"));
+        assertFalse(hasCombinationIssue(exportResponse, "不应包含 W"), describe(exportResponse));
+        assertFalse(hasCombinationIssue(exportResponse, "当前缺少"), describe(exportResponse));
     }
 
     @Test
@@ -88,6 +89,39 @@ class RuleValidationServiceTest {
                 row("订单修改", "W", "订单表", "订单状态", "新增"),
                 row("订单修改", "X", "修改结果", "处理状态", "新增")));
         assertFalse(hasCombinationIssue(directUpdate, "当前缺少 R"), describe(directUpdate));
+    }
+
+    @Test
+    void requiresSeparateWriteAndExitForImportAndDynamicExport() {
+        RuleValidationService service = new RuleValidationService();
+
+        RuleValidationResponse importResponse = service.validate(Arrays.asList(
+                row("用户导入", "E", "导入请求", "文件名称", "新增"),
+                row("用户导入", "R", "Excel导入文件", "文件数据", "新增"),
+                row("用户导入", "X", "导入结果", "成功数量、失败数量", "新增")));
+        RuleValidationResponse exportResponse = service.validate(Arrays.asList(
+                row("用户导出", "E", "导出请求", "导出条件", "新增"),
+                row("用户导出", "R", "业务数据表", "业务字段", "新增"),
+                row("用户导出", "X", "Excel导出结果", "文件名称、下载地址", "新增")));
+
+        assertTrue(hasCombinationIssue(importResponse,
+                "写入导入业务数据 W 与返回导入结果信息 X 拆成两个独立子过程，当前缺少 W"),
+                describe(importResponse));
+        assertTrue(hasCombinationIssue(exportResponse,
+                "生成/写入 Excel 等导出文件 W 与返回文件或导出结果 X 拆成两个独立子过程，当前缺少 W"),
+                describe(exportResponse));
+    }
+
+    @Test
+    void existingFileDownloadDoesNotRequireNewFileWrite() {
+        RuleValidationService service = new RuleValidationService();
+
+        RuleValidationResponse response = service.validate(Arrays.asList(
+                row("下载已有合同附件", "E", "下载请求", "附件编号", "新增"),
+                row("下载已有合同附件", "R", "合同附件文件", "文件名称、文件内容", "新增"),
+                row("下载已有合同附件", "X", "合同附件文件", "文件名称、文件内容", "新增")));
+
+        assertFalse(hasCombinationIssue(response, "当前缺少 W"), describe(response));
     }
 
     @Test
@@ -146,12 +180,12 @@ class RuleValidationServiceTest {
                 row("用户导出", "X", "Excel导出文件", "文件内容", "新增")));
 
         RuleValidationResponse statisticsResponse = service.validate(Arrays.asList(
-                withTrigger(row("定时统计订单数据", "E", "统计任务", "任务时间", "新增"), "定时触发"),
+                withTrigger(row("定时统计订单数据", "E", "统计任务", "任务时间", "复用"), "定时触发"),
                 withTrigger(row("定时统计订单数据", "R", "订单数据表", "订单字段", "新增"), "定时触发"),
                 withTrigger(row("定时统计订单数据", "W", "订单统计结果表", "统计字段", "新增"), "定时触发")));
 
         RuleValidationResponse messageResponse = service.validate(Arrays.asList(
-                withTrigger(row("定时发送短信", "E", "短信任务", "任务时间", "新增"), "定时触发"),
+                withTrigger(row("定时发送短信", "E", "短信任务", "任务时间", "复用"), "定时触发"),
                 withTrigger(row("定时发送短信", "R", "业务数据表", "短信内容字段", "新增"), "定时触发"),
                 withTrigger(row("定时发送短信", "W", "短信结果表", "发送状态", "新增"), "定时触发"),
                 withTrigger(row("定时发送短信", "X", "短信", "短信内容", "新增"), "定时触发")));
@@ -160,6 +194,27 @@ class RuleValidationServiceTest {
         assertEquals(0, exportResponse.getIssueCount());
         assertEquals(0, statisticsResponse.getIssueCount());
         assertEquals(0, messageResponse.getIssueCount());
+    }
+
+    @Test
+    void flagsOnlyEstablishedScheduledBusinessEntryThatMissedUnifiedReuseRule() {
+        RuleValidationService service = new RuleValidationService();
+        RuleValidationResponse missed = service.validate(Arrays.asList(
+                withTrigger(row("定时汇总库存", "E", "定时事件", "无业务数据", "新增"), "每日定时触发"),
+                withTrigger(row("定时汇总库存", "R", "库存明细表", "库存编号", "新增"), "每日定时触发"),
+                withTrigger(row("定时汇总库存", "W", "库存汇总表", "统计日期、库存数量", "新增"), "每日定时触发")));
+
+        assertTrue(hasIssue(missed, "初始触发 E 未按新疆统一规则设为复用 0.33"),
+                describe(missed));
+
+        FunctionSplitRow technicalEntry = withTrigger(
+                row("定时器保活", "E", "定时事件", "无业务数据", "新增"), "定时调度");
+        technicalEntry.setSubProcessDescription("执行内部轮询保活");
+        RuleValidationResponse technical = service.validate(Arrays.asList(
+                technicalEntry,
+                withTrigger(row("定时器保活", "W", "心跳状态表", "状态", "新增"), "定时调度")));
+
+        assertFalse(hasIssue(technical, "初始触发 E 未按新疆统一规则"), describe(technical));
     }
 
     @Test
@@ -175,11 +230,11 @@ class RuleValidationServiceTest {
                 withTrigger(row("同步订单数据(同步数据类)", "W", "订单数据表", "订单字段", "新增"), "接口调用触发"),
                 withTrigger(row("同步订单数据(同步数据类)", "X", "接口响应", "响应字段", "新增"), "接口调用触发")));
         RuleValidationResponse callerPull = service.validate(Arrays.asList(
-                withTrigger(row("同步订单数据(查询数据类)", "E", "同步任务", "任务时间", "新增"), "时钟触发"),
+                withTrigger(row("同步订单数据(查询数据类)", "E", "同步任务", "任务时间", "复用"), "时钟触发"),
                 withTrigger(row("同步订单数据(查询数据类)", "W", "订单数据表", "订单字段", "新增"), "时钟触发"),
                 withTrigger(row("同步订单数据(查询数据类)", "X", "同步结果", "处理状态", "新增"), "时钟触发")));
         RuleValidationResponse callerPush = service.validate(Arrays.asList(
-                withTrigger(row("推送订单数据(同步数据类)", "E", "推送任务", "任务时间", "新增"), "时钟触发"),
+                withTrigger(row("推送订单数据(同步数据类)", "E", "推送任务", "任务时间", "复用"), "时钟触发"),
                 withTrigger(row("推送订单数据(同步数据类)", "R", "订单数据表", "订单字段", "新增"), "时钟触发"),
                 withTrigger(row("推送订单数据(同步数据类)", "X", "推送报文", "订单字段", "新增"), "时钟触发")));
 
@@ -208,7 +263,7 @@ class RuleValidationServiceTest {
                 row("派发流程工单", "X", "派发结果", "处理状态", "新增")));
 
         RuleValidationResponse collection = service.validate(Arrays.asList(
-                withTrigger(row("定时文件采集", "E", "采集任务", "任务时间", "新增"), "定时触发"),
+                withTrigger(row("定时文件采集", "E", "采集任务", "任务时间", "复用"), "定时触发"),
                 withTrigger(row("定时文件采集", "W", "采集文件", "文件内容", "新增"), "定时触发"),
                 withTrigger(row("定时文件采集", "W", "业务数据表", "业务字段", "新增"), "定时触发")));
 
@@ -268,7 +323,7 @@ class RuleValidationServiceTest {
         RuleValidationService service = new RuleValidationService();
 
         RuleValidationResponse scheduledPush = service.validate(Arrays.asList(
-                withTrigger(row("定时统计告警并发送短信", "E", "定时任务", "无业务数据", "新增"), "定时触发"),
+                withTrigger(row("定时统计告警并发送短信", "E", "定时任务", "无业务数据", "复用"), "定时触发"),
                 withTrigger(row("定时统计告警并发送短信", "R", "告警数据表", "告警编号", "新增"), "定时触发"),
                 withTrigger(row("定时统计告警并发送短信", "W", "告警统计表", "统计结果", "新增"), "定时触发")));
         assertTrue(hasCombinationIssue(scheduledPush, "当前缺少 X"), describe(scheduledPush));
@@ -303,7 +358,7 @@ class RuleValidationServiceTest {
                 row("定时检索公告发布失败并发送短信提醒", "W", "短信通知记录表", "发送状态", "新增"), "定时触发");
         notificationWrite.setSubProcessDescription("保存短信发送记录和状态");
         RuleValidationResponse scheduledNotification = service.validate(Arrays.asList(
-                withTrigger(row("定时检索公告发布失败并发送短信提醒", "E", "定时任务", "无业务数据", "新增"), "定时触发"),
+                withTrigger(row("定时检索公告发布失败并发送短信提醒", "E", "定时任务", "无业务数据", "复用"), "定时触发"),
                 withTrigger(row("定时检索公告发布失败并发送短信提醒", "R", "公告数据表", "公告状态", "新增"), "定时触发"),
                 notificationWrite,
                 withTrigger(row("定时检索公告发布失败并发送短信提醒", "X", "短信通知", "短信内容", "新增"), "定时触发")));
@@ -335,14 +390,14 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void doesNotRequireWriteWhenExportObjectNameContainsDispatchInXinjiang() {
+    void exportObjectNameContainingDispatchStillRequiresOnlyTheExportFileWrite() {
         RuleValidationService service = new RuleValidationService();
         RuleValidationResponse response = service.validate(Arrays.asList(
                 row("导出盘点派发任务统计数据", "E", "导出请求", "规则名称、时间范围", "新增"),
                 row("导出盘点派发任务统计数据", "R", "盘点派发任务统计表", "规则名称、派发时间", "新增"),
                 row("导出盘点派发任务统计数据", "X", "盘点派发任务导出文件", "统计数据", "新增")));
 
-        assertFalse(hasCombinationIssue(response, "当前缺少 W"), describe(response));
+        assertTrue(hasCombinationIssue(response, "生成/写入 Excel 等导出文件 W"), describe(response));
         assertFalse(hasIssue(response, "派发/导出"), describe(response));
     }
 
@@ -459,7 +514,7 @@ class RuleValidationServiceTest {
     @Test
     void treatsWholeCellPendingAsMaterialRiskButAllowsMixedPendingWordingInXinjiang() {
         RuleValidationService service = new RuleValidationService();
-        FunctionSplitRow trigger = row("推送公告信息", "E", "定时触发信号", "无业务数据", "新增");
+        FunctionSplitRow trigger = row("推送公告信息", "E", "定时触发信号", "无业务数据", "复用");
         trigger.setTriggerEvent("定时任务触发");
         trigger.setSubProcessDescription("接收定时任务触发信号");
         trigger.setDataAttributes("无业务数据");

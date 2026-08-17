@@ -20,6 +20,10 @@ public class FunctionSplitRow {
     private String sequenceDiagram;
     private String reuseDegree;
     private double cfp;
+    /** Provenance for the current reuse value, such as RULE_POLICY. */
+    private String reuseBasis;
+    /** Rule id that last changed the reuse value, such as XJ-TIMER-E. */
+    private String reuseRuleId;
     private String evidence;
     private List<String> sourceReferences = new ArrayList<String>();
 
@@ -141,6 +145,22 @@ public class FunctionSplitRow {
 
     public void setCfp(double cfp) {
         this.cfp = cfp;
+    }
+
+    public String getReuseBasis() {
+        return reuseBasis;
+    }
+
+    public void setReuseBasis(String reuseBasis) {
+        this.reuseBasis = reuseBasis;
+    }
+
+    public String getReuseRuleId() {
+        return reuseRuleId;
+    }
+
+    public void setReuseRuleId(String reuseRuleId) {
+        this.reuseRuleId = reuseRuleId;
     }
 
     public String getEvidence() {

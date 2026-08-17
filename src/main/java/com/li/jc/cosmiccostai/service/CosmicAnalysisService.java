@@ -163,9 +163,7 @@ public class CosmicAnalysisService {
                     exit = profile.getRecommendedExitCount();
                 }
                 String evidence = safe(function.getFunction()) + " " + safe(function.getDescription());
-                if ("导出".equals(profile.getLabel())) {
-                    write = ActionMovementRule.hasPersistentExportEvidence(evidence) ? 1 : 0;
-                } else if ("发送/推送".equals(profile.getLabel())) {
+                if ("发送/推送".equals(profile.getLabel())) {
                     write = ActionMovementRule.hasMessageRecordEvidence(evidence) ? 1 : 0;
                 } else if ("定时文件采集".equals(profile.getLabel())
                         && ActionMovementRule.hasCombinedCollectionEvidence(evidence)) {

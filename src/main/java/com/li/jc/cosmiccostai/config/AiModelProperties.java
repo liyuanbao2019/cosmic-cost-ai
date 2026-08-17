@@ -17,7 +17,7 @@ public class AiModelProperties {
     private String model = "gpt-4o-mini";
     private long timeoutSeconds = 360;
     private int maxRetries = 2;
-    private int maxConcurrency = 100;
+    private int maxConcurrency = 1000;
     private String configPath = "storage/config/ai-models.json";
     private DeepSplit deepSplit = new DeepSplit();
     private List<Model> models = new ArrayList<Model>();
