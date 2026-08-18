@@ -67,9 +67,9 @@ public class AiGeneratedSplitQualityService {
     private FunctionSplitRow toRow(ExtractedFunction function, CosmicMovement movement) {
         FunctionSplitRow row = new FunctionSplitRow();
         row.setProjectName("AI 生成结果结构校验");
-        row.setLevel1Module(function == null ? "" : text(function.getModule()));
-        row.setLevel2Module(row.getLevel1Module());
-        row.setLevel3Module(row.getLevel1Module());
+        row.setLevel1Module(function == null ? "" : firstText(function.getLevel1Module(), function.getModule()));
+        row.setLevel2Module(function == null ? "" : text(function.getLevel2Module()));
+        row.setLevel3Module(function == null ? "" : text(function.getLevel3Module()));
         row.setFunctionalUser(function == null ? "" : text(function.getFunctionalUser()));
         row.setTriggerEvent(function == null ? "" : text(function.getTriggerEvent()));
         row.setFunctionProcess(function == null ? "" : text(function.getFunction()));
@@ -97,5 +97,9 @@ public class AiGeneratedSplitQualityService {
 
     private String text(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String firstText(String preferred, String fallback) {
+        return org.springframework.util.StringUtils.hasText(preferred) ? preferred.trim() : text(fallback);
     }
 }

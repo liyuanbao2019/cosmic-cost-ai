@@ -5,6 +5,7 @@ import com.li.jc.cosmiccostai.dto.AiPromptResponse;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.li.jc.cosmiccostai.dto.ExtractResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
+import com.li.jc.cosmiccostai.dto.RequirementChapterCoverage;
 import com.li.jc.cosmiccostai.model.ExtractedFunction;
 import com.li.jc.cosmiccostai.model.CosmicMovement;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
@@ -56,7 +57,9 @@ public class AiExtractionService {
     private final RequirementInputService requirementInputService;
     private final AiModelConfigService aiModelConfigService;
     private final AiGeneratedSplitQualityService aiGeneratedSplitQualityService;
+    private final RequirementHierarchyService requirementHierarchyService;
     private final Set<String> runningProjects = ConcurrentHashMap.newKeySet();
+    private final Map<String, Thread> runningThreads = new ConcurrentHashMap<String, Thread>();
 
     @Autowired
     public AiExtractionService(FileStorageService fileStorageService,
@@ -68,7 +71,8 @@ public class AiExtractionService {
                                SplitRuleConfigService splitRuleConfigService,
                                RequirementInputService requirementInputService,
                                AiModelConfigService aiModelConfigService,
-                               AiGeneratedSplitQualityService aiGeneratedSplitQualityService) {
+                               AiGeneratedSplitQualityService aiGeneratedSplitQualityService,
+                               RequirementHierarchyService requirementHierarchyService) {
         this.fileStorageService = fileStorageService;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
@@ -79,6 +83,7 @@ public class AiExtractionService {
         this.requirementInputService = requirementInputService;
         this.aiModelConfigService = aiModelConfigService;
         this.aiGeneratedSplitQualityService = aiGeneratedSplitQualityService;
+        this.requirementHierarchyService = requirementHierarchyService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -101,25 +106,36 @@ public class AiExtractionService {
         this.aiModelConfigService = null;
         this.aiGeneratedSplitQualityService = new AiGeneratedSplitQualityService(
                 new RuleValidationService(this.splitRuleConfigService));
+        this.requirementHierarchyService = new RequirementHierarchyService(fileStorageService);
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public ExtractResponse extract(String projectId) {
+        return extract(projectId, null);
+    }
+
+    public ExtractResponse extract(String projectId, AiRequestAttemptListener listener) {
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
         String requirementDetail = resolveRequirementDetail(metadata, projectDir);
 
-        String prompt = buildPrompt(requirementDetail);
+        String prompt = buildPrompt(projectId, requirementDetail);
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
         clearUserEditedPromptFlag(projectDir);
-        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener);
     }
 
     public ExtractResponse extractWithPrompt(String projectId, String prompt) {
+        return extractWithPrompt(projectId, prompt, null);
+    }
+
+    public ExtractResponse extractWithPrompt(String projectId,
+                                             String prompt,
+                                             AiRequestAttemptListener listener) {
         if (!StringUtils.hasText(prompt)) {
             throw new BusinessException("AI提示词不能为空");
         }
@@ -131,24 +147,33 @@ public class AiExtractionService {
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
         writeText(projectDir.resolve(USER_EDITED_PROMPT_FLAG), "true");
-        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener);
     }
 
     private ExtractResponse executeExtraction(String projectId,
                                               ProjectMetadata metadata,
                                               Path projectDir,
                                               String requirementDetail,
-                                              String prompt) {
+                                              String prompt,
+                                              AiRequestAttemptListener listener) {
         if (!runningProjects.add(projectId)) {
             throw new BusinessException("AI 拆分正在进行，请等待当前任务完成。");
         }
+        runningThreads.put(projectId, Thread.currentThread());
+        if (aiModelConfigService != null) {
+            aiModelConfigService.beginCancellableRequest(projectId);
+        }
         try {
             updateProcessingStatus(metadata, "AI_SPLITTING");
-            return executeExtractionInternal(projectId, metadata, projectDir, requirementDetail, prompt);
+            return executeExtractionInternal(projectId, metadata, projectDir, requirementDetail, prompt, listener);
         } catch (RuntimeException ex) {
             updateProcessingStatus(metadata, "AI_FAILED");
             throw ex;
         } finally {
+            if (aiModelConfigService != null) {
+                aiModelConfigService.endCancellableRequest(projectId);
+            }
+            runningThreads.remove(projectId, Thread.currentThread());
             runningProjects.remove(projectId);
         }
     }
@@ -157,10 +182,11 @@ public class AiExtractionService {
                                                       ProjectMetadata metadata,
                                                       Path projectDir,
                                                       String requirementDetail,
-                                                      String prompt) {
+                                                      String prompt,
+                                                      AiRequestAttemptListener listener) {
         log.info("Calling AI extraction, projectId={}, model={}, baseUrl={}, requirementDetailLength={}, promptLength={}, timeoutSeconds={}",
                 projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
-        String aiResult = callAi(prompt);
+        String aiResult = callAi(prompt, projectId, listener);
         log.info("AI extraction completed, projectId={}, responseLength={}", projectId, aiResult == null ? 0 : aiResult.length());
         List<ExtractedFunction> functions;
         try {
@@ -173,7 +199,7 @@ public class AiExtractionService {
                     + System.lineSeparator()
                     + "【结构化输出恢复要求】上一次响应未形成完整 JSON。本次请适当压缩 description、evidence、attributes，"
                     + "但不得遗漏功能；只输出一个完整闭合的 {\"functions\":[...]} JSON 对象，禁止在 JSON 后追加解释。";
-            aiResult = callAi(recoveryPrompt);
+            aiResult = callAi(recoveryPrompt, projectId, listener);
             log.info("AI extraction recovery completed, projectId={}, responseLength={}",
                     projectId, aiResult == null ? 0 : aiResult.length());
             functions = parseFunctions(aiResult);
@@ -193,11 +219,17 @@ public class AiExtractionService {
                     aiGeneratedSplitQualityService.summarize(initialReviewIssues));
         }
         attachRequirementEvidence(functions, requirementDetail);
+        requirementHierarchyService.enrichFunctions(projectId, requirementDetail, functions);
         RequirementSourceOrder.sortFunctions(functions);
 
         Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
         Path extractedPath = projectDir.resolve("extracted-functions.json");
+        // Persist the usable model result before running advisory coverage checks.
+        // A later reporting failure must not force the user to pay for the same
+        // model response again.
         writeJson(extractedPath, functions);
+        List<RequirementChapterCoverage> chapterCoverage = requirementHierarchyService
+                .validateAndWriteCoverage(projectId, requirementDetail, functions);
 
         metadata.setRequirementDetailPath(requirementDetailPath.toString());
         metadata.setExtractedFunctionsPath(extractedPath.toString());
@@ -224,6 +256,8 @@ public class AiExtractionService {
         response.setFunctionCount(functions.size());
         response.setStatus(metadata.getStatus());
         response.setFunctions(functions);
+        response.setChapterCoveragePath(projectDir.resolve("requirement-extraction-coverage.json").toString());
+        response.setChapterCoverage(chapterCoverage);
         return response;
     }
 
@@ -245,13 +279,13 @@ public class AiExtractionService {
             prompt = readText(promptPath);
         } else if (Files.exists(promptPath) && !"PARSED".equals(metadata.getStatus())) {
             prompt = readText(promptPath);
-            String expectedPrompt = buildPrompt(requirementDetail);
+            String expectedPrompt = buildPrompt(projectId, requirementDetail);
             if (!expectedPrompt.equals(prompt)) {
                 prompt = expectedPrompt;
                 writeText(promptPath, prompt);
             }
         } else {
-            prompt = buildPrompt(requirementDetail);
+            prompt = buildPrompt(projectId, requirementDetail);
             writeText(promptPath, prompt);
         }
 
@@ -340,9 +374,9 @@ public class AiExtractionService {
         return false;
     }
 
-    private String buildPrompt(String requirementDetail) {
+    private String buildPrompt(String projectId, String requirementDetail) {
         String splitRulesPrompt = buildSplitRulesPrompt();
-        String numberedRequirement = numberRequirementEvidence(requirementDetail);
+        String numberedRequirement = requirementHierarchyService.annotateRequirement(projectId, requirementDetail);
         boolean deepSeekPrompt = usesDeepSeekPrompt();
         String outputRequirement = deepSeekPrompt
                 ? "输出必须是严格JSON对象，顶层只能包含 functions 数组；不要Markdown代码块，不要解释，不要输出格式之外的额外字段。functions数组元素格式固定为："
@@ -371,7 +405,7 @@ public class AiExtractionService {
                 + System.lineSeparator()
                 + "5. 需求描述里只有示例、说明、背景、目标、角色职责时，不要臆造功能。"
                 + System.lineSeparator()
-                + "6. module填写需求细则中最贴近该功能的一级业务模块名称；如果无法明确识别，使用最上层业务对象名称。"
+                + "6. 每个REQ-L段落已附带后端从原始Word解析得到的【原文路径】。module必须复制该功能首要证据所在路径的最深一级原文标题，禁止改写、概括或自行创造模块名称；最终一级/二级/三级模块由后端按sourceReferences确定。"
                 + System.lineSeparator()
                 + "7. function使用5到20字左右的动宾短语，必须可直接作为Excel功能点拆分表中的“功能过程”。"
                 + System.lineSeparator()
@@ -401,6 +435,8 @@ public class AiExtractionService {
                 + "例如“更新调拨分派单状态为已出库，并更新库存及全生命周期流转记录”必须输出调拨分派单、库存、全生命周期流转记录 3 个独立 W，禁止合并成一个 W。"
                 + System.lineSeparator()
                 + "18. 【需求细则】每个非空段落带有 REQ-Lxxxx 编号。每个功能和每个 movement 必须填写实际支持它的 sourceReferences，并在 evidence 中摘录对应原文；不得编造不存在的编号。"
+                + System.lineSeparator()
+                + "18.1 输出前必须逐一检查【原文路径】中的每个一级业务章节：凡章节中存在系统处理、查询、生成、记录、重试或告警等明确业务动作，至少应有一个function或movement引用该章节的REQ-L证据；权限范围、存储留存等纯约束章节可以不强行生成功能。"
                 + System.lineSeparator()
                 + "19. 输出前对全部候选做三轮扫描：先按历史评审批注 N/NM/数字行号/O/OLD/UIUE/C/NR/算法/需求文档不涉及处理，再做当前输出的功能级语义查重，最后按子过程描述、数据移动类型、数据组、数据属性和功能逻辑检查复用。功能级重复/包含按 0，子过程级复用按 0.33，确有新增且有原文依据才按 1。"
                 + System.lineSeparator()
@@ -624,9 +660,10 @@ public class AiExtractionService {
                 + "【内部规则结束】";
     }
 
-    private String callAi(String prompt) {
+    private String callAi(String prompt, String projectId, AiRequestAttemptListener listener) {
         if (aiModelConfigService != null) {
-            return aiModelConfigService.generateForTask(prompt, AiPromptTask.EXTRACTION, false);
+            return aiModelConfigService.generateForTask(prompt, AiPromptTask.EXTRACTION, false,
+                    projectId, listener);
         }
         String resolvedApiKey = resolveApiKey();
         if (!StringUtils.hasText(resolvedApiKey)) {
@@ -639,7 +676,8 @@ public class AiExtractionService {
             profile.setBaseUrl(baseUrl);
             profile.setModel(model);
             return new DeepSeekChatClient(objectMapper).generate(
-                    profile, resolvedApiKey, AiPromptTask.EXTRACTION, prompt, timeoutSeconds, maxRetries);
+                    profile, resolvedApiKey, AiPromptTask.EXTRACTION, prompt, timeoutSeconds, maxRetries,
+                    null, listener);
         }
         ChatLanguageModel chatModel = OpenAiChatModel.builder()
                 .baseUrl(baseUrl)
@@ -659,6 +697,16 @@ public class AiExtractionService {
             }
             throw new BusinessException("AI调用失败：" + rootMessage(ex), ex);
         }
+    }
+
+    public boolean cancel(String projectId) {
+        boolean cancelled = aiModelConfigService != null && aiModelConfigService.cancelRequest(projectId);
+        Thread running = runningThreads.get(projectId);
+        if (running != null) {
+            running.interrupt();
+            cancelled = true;
+        }
+        return cancelled;
     }
 
     private String currentModel() {

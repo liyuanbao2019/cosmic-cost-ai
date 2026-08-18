@@ -49,7 +49,7 @@ final class FunctionSplitRowFactory {
             }
             hasEntry = hasEntry || "E".equals(type);
             hasResult = hasResult || "W".equals(type) || "X".equals(type);
-            FunctionSplitRow row = baseRow(metadata, result);
+            FunctionSplitRow row = baseRow(metadata, result, movement);
             row.setMovementType(type);
             row.setSubProcessDescription(firstText(movement.getDescription(),
                     fallbackDescription(type, result.getFunction())));
@@ -74,7 +74,7 @@ final class FunctionSplitRowFactory {
                                         int count,
                                         String description) {
         for (int i = 0; i < count; i++) {
-            FunctionSplitRow row = baseRow(metadata, result);
+            FunctionSplitRow row = baseRow(metadata, result, null);
             row.setSubProcessDescription(description);
             row.setMovementType(type);
             row.setDataGroup(PENDING);
@@ -83,18 +83,29 @@ final class FunctionSplitRowFactory {
         }
     }
 
-    private static FunctionSplitRow baseRow(ProjectMetadata metadata, CosmicResult result) {
+    private static FunctionSplitRow baseRow(ProjectMetadata metadata,
+                                            CosmicResult result,
+                                            CosmicMovement movement) {
         FunctionSplitRow row = new FunctionSplitRow();
         row.setProjectName(metadata.getName());
-        row.setLevel1Module(result.getModule());
-        row.setLevel2Module(result.getModule());
-        row.setLevel3Module(result.getModule());
+        boolean movementHierarchyResolved = movement != null
+                && movement.getSourceHeadingPaths() != null
+                && !movement.getSourceHeadingPaths().isEmpty();
+        row.setLevel1Module(movementHierarchyResolved
+                ? safe(movement.getLevel1Module())
+                : firstText(result.getLevel1Module(), result.getModule()));
+        row.setLevel2Module(movementHierarchyResolved
+                ? safe(movement.getLevel2Module()) : safe(result.getLevel2Module()));
+        row.setLevel3Module(movementHierarchyResolved
+                ? safe(movement.getLevel3Module()) : safe(result.getLevel3Module()));
         row.setFunctionalUser(firstText(result.getFunctionalUser(), defaultFunctionalUser(result.getSequenceDiagram())));
         row.setTriggerEvent(firstText(result.getTriggerEvent(), result.getFunction()));
         row.setFunctionProcess(result.getFunction());
         row.setFunctionDescription(result.getDescription());
         row.setEvidence(result.getEvidence());
         row.setSourceReferences(copyReferences(result.getSourceReferences(), null));
+        row.setSourceHeadingPaths(copyReferences(
+                movement == null ? null : movement.getSourceHeadingPaths(), result.getSourceHeadingPaths()));
         row.setReuseDegree("新增");
         row.setCfp(1);
         return row;

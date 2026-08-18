@@ -78,6 +78,22 @@ class ExcelReviewImportServiceTest {
         assertEquals(0, aiService.callCount);
     }
 
+    @Test
+    void ignoresTrailingTemplateInstructionRow() throws Exception {
+        FileStorageService fileStorageService = new FileStorageService(tempDir.toString());
+        ReviewService reviewService = new ReviewService(fileStorageService);
+        ExcelReviewImportService importService = new ExcelReviewImportService(fileStorageService, reviewService);
+
+        MockMultipartFile file = new MockMultipartFile("file", "split-with-note.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                workbookBytesWithInstructionRow());
+
+        ReviewResponse response = importService.importSplitExcel(file, "review-import-project");
+
+        assertEquals("EXCEL_IMPORTED", response.getStatus());
+        assertEquals(2, response.getSplitRows().size());
+    }
+
     private byte[] workbookBytes() throws Exception {
         try (Workbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
@@ -111,6 +127,37 @@ class ExcelReviewImportServiceTest {
             second.createCell(10).setCellValue("id,state");
             second.createCell(11).setCellValue("\u590d\u7528");
 
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        }
+    }
+
+    private byte[] workbookBytesWithInstructionRow() throws Exception {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("2、功能点拆分表");
+            Row header = sheet.createRow(2);
+            header.createCell(0).setCellValue("客户需求");
+            header.createCell(1).setCellValue("一级模块");
+            header.createCell(6).setCellValue("功能过程");
+            header.createCell(8).setCellValue("数据移动");
+            header.createCell(9).setCellValue("数据组");
+            header.createCell(11).setCellValue("复用度");
+            Row first = sheet.createRow(4);
+            first.createCell(0).setCellValue("review-import-project");
+            first.createCell(1).setCellValue("module-a");
+            first.createCell(6).setCellValue("process-a");
+            first.createCell(7).setCellValue("receive request");
+            first.createCell(8).setCellValue("E");
+            first.createCell(9).setCellValue("request");
+            first.createCell(10).setCellValue("id,status");
+            Row second = sheet.createRow(5);
+            second.createCell(7).setCellValue("write request");
+            second.createCell(8).setCellValue("W");
+            second.createCell(9).setCellValue("request record");
+            second.createCell(10).setCellValue("id,status,time");
+            Row note = sheet.createRow(6);
+            note.createCell(0).setCellValue("注意：A~M列之间不允许增加新列，说明文字提交时删除。");
             workbook.write(outputStream);
             return outputStream.toByteArray();
         }

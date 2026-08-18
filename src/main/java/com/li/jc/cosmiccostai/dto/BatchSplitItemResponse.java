@@ -22,6 +22,10 @@ public class BatchSplitItemResponse {
     private String startedAt;
     private String finishedAt;
     private int attempt;
+    private int aiAttempt;
+    private int aiMaxAttempts;
+    private String aiAttemptStartedAt;
+    private String aiAttemptDeadlineAt;
     private int issueCount;
     private int errorCount;
     private int riskCount;
@@ -64,6 +68,14 @@ public class BatchSplitItemResponse {
     public void setFinishedAt(String finishedAt) { this.finishedAt = finishedAt; }
     public int getAttempt() { return attempt; }
     public void setAttempt(int attempt) { this.attempt = attempt; }
+    public int getAiAttempt() { return aiAttempt; }
+    public void setAiAttempt(int aiAttempt) { this.aiAttempt = aiAttempt; }
+    public int getAiMaxAttempts() { return aiMaxAttempts; }
+    public void setAiMaxAttempts(int aiMaxAttempts) { this.aiMaxAttempts = aiMaxAttempts; }
+    public String getAiAttemptStartedAt() { return aiAttemptStartedAt; }
+    public void setAiAttemptStartedAt(String aiAttemptStartedAt) { this.aiAttemptStartedAt = aiAttemptStartedAt; }
+    public String getAiAttemptDeadlineAt() { return aiAttemptDeadlineAt; }
+    public void setAiAttemptDeadlineAt(String aiAttemptDeadlineAt) { this.aiAttemptDeadlineAt = aiAttemptDeadlineAt; }
     public int getIssueCount() { return issueCount; }
     public void setIssueCount(int issueCount) { this.issueCount = issueCount; }
     public int getErrorCount() { return errorCount; }

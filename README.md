@@ -62,12 +62,17 @@
 - 项目级全部需求拆分成功后同时生成两个独立产物：产物 1 是附件1至附件5组成的项目整合送审包；产物 2 是项目内每个需求各自附件1至附件3送审 ZIP 的全量总包。两个产物独立展示和下载，产物 2 个别需求生成失败时仍保留成功项并支持单独重试。
 - 项目级项目支持继续添加已有拆分结果，也支持上传新需求后只对新增需求执行解析、确认和智能拆分；已完成成员不会重跑。
 - 批量面板支持单独重新拆分一个已完成或失败的需求，其他成员结果保持不变；项目级重拆完成后生成新的 `Vn` 材料版本，旧版本目录继续保留。
+- 需求文档初拆单次等待上限默认 360 秒，失败后最多再请求 1 次；两次请求始终使用 DeepSeek V4 Pro `reasoning_effort=max`，不会因超时降级为 `high`。批量面板实时展示第几次请求、已等待时间和本次剩余时间。
+- 排队中或正在 AI 识别的单个需求可独立取消，不需要重启服务，也不会停止同批其他需求；请求真正结束后该项显示“已取消”，可直接重新拆分且仍使用 `max`。
 - 需求级和项目级批次完成后均可打开“拆分摘要”，查看批次汇总 CFP、功能过程数、拆分行数及逐需求明细；摘要可直接下载为带公式合计、筛选和失败原因的 Excel，便于传递与归档。
 
 ### 已拆分 Excel 导入
 
 - 上传入口在首页“已拆分 Excel”区域。
-- 支持 `xls` / `xlsx`。
+- 支持分多次从不同目录累计选择一个或多个 `xls` / `xlsx`；单文件需求级沿用单需求流程，多文件或项目级自动进入批量面板。
+- Excel 模式显示“复用度 AI 调整”开关并默认勾选。勾选时执行“Excel 载入 → 复用度 AI 调整 → 规则初审”；取消时不调用深度审核或复用度调整模型，保留表内人工确认的新增、复用、利旧及 CFP，只执行规则初审。
+- 单文件取消复用度 AI 调整后，规则校验通过会直接生成需求说明书、业务需求汇总表、功能点拆分表和送审 ZIP；如存在确定性错误则停在审核页提示修正。
+- Excel 批次与原始需求文档批次共用摘要、失败隔离、单项重跑和全量单需求送审包；项目级还会自动生成附件 1–5 项目整合包及项目全量单需求送审包。
 - 优先读取工作表 `2、功能点拆分表`；若找不到，会按表头特征自动识别包含功能点拆分数据的工作表。
 - 默认从第 6 行读取数据，也会尝试根据表头自动定位数据起始行。
 - 读取列范围为 `A:O`，其中 `N` 为功能描述，`O` 为时序图。
@@ -265,6 +270,9 @@ cosmic:
     model: ${OPENAI_MODEL:deepseek-v4-pro}
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:180}
     max-retries: ${OPENAI_MAX_RETRIES:2}
+    extraction:
+      timeout-seconds: ${COSMIC_AI_EXTRACTION_TIMEOUT_SECONDS:360}
+      max-retries: ${COSMIC_AI_EXTRACTION_MAX_RETRIES:1}
   rules:
     split-rules-path: ${COSMIC_SPLIT_RULES_PATH:classpath:/static/split-check-rules.md}
 ```
@@ -277,6 +285,8 @@ OPENAI_API_KEY=your-api-key
 OPENAI_MODEL=deepseek-v4-pro
 OPENAI_TIMEOUT_SECONDS=180
 OPENAI_MAX_RETRIES=2
+COSMIC_AI_EXTRACTION_TIMEOUT_SECONDS=360
+COSMIC_AI_EXTRACTION_MAX_RETRIES=1
 COSMIC_SPLIT_RULES_PATH=classpath:/static/split-check-rules.md
 ```
 
@@ -367,6 +377,7 @@ DEEPSEEK_API_KEY=your-api-key
 | `/api/projects/batch-split/{batchId}/summary/download` | GET | 下载需求级或项目级批次 CFP 摘要 Excel |
 | `/api/projects/batch-split/{batchId}/items` | POST | 向项目级项目追加已有拆分需求或新上传需求 |
 | `/api/projects/batch-split/{batchId}/items/{projectId}/rerun` | POST | 只重新拆分指定需求，保留批次内其他成功结果 |
+| `/api/projects/batch-split/{batchId}/items/{projectId}/cancel` | POST | 只取消指定需求的排队或 AI 识别请求，其他需求继续执行 |
 | `/api/projects/batch-split/{batchId}/items/{projectId}/ai-input` | PUT | 保存并确认单份文档的章节和最终 AI 输入 |
 | `/api/projects/batch-split/{batchId}/start` | POST | 全部文档确认后启动并发拆分 |
 | `/api/projects/batch-split/{batchId}/retry` | POST | 仅重试批次中的失败文档 |

@@ -4,6 +4,7 @@ public class SmartSplitStartRequest {
 
     private String sourceMode;
     private String prompt;
+    private boolean reuseDegreeAdjustmentEnabled = true;
 
     public String getSourceMode() {
         return sourceMode;
@@ -19,5 +20,13 @@ public class SmartSplitStartRequest {
 
     public void setPrompt(String prompt) {
         this.prompt = prompt;
+    }
+
+    public boolean isReuseDegreeAdjustmentEnabled() {
+        return reuseDegreeAdjustmentEnabled;
+    }
+
+    public void setReuseDegreeAdjustmentEnabled(boolean reuseDegreeAdjustmentEnabled) {
+        this.reuseDegreeAdjustmentEnabled = reuseDegreeAdjustmentEnabled;
     }
 }

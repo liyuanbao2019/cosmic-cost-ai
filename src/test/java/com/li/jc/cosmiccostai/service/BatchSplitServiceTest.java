@@ -77,6 +77,10 @@ class BatchSplitServiceTest {
         when(smartSplitPipelineService.runDocument(eq(metadata.getId()), eq(""),
                 any(SmartSplitPipelineService.StageListener.class)))
                 .thenReturn(new SmartSplitPipelineService.PipelineResult());
+        when(smartSplitPipelineService.runExistingRows(eq(metadata.getId()),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                any(SmartSplitPipelineService.StageListener.class)))
+                .thenReturn(new SmartSplitPipelineService.PipelineResult());
 
         service = new BatchSplitService(fileStorageService, documentParseService, chapterSelectionService,
                 requirementInputService, smartSplitPipelineService, projectMaterialExportService,
@@ -124,6 +128,82 @@ class BatchSplitServiceTest {
         BatchSplitJobResponse completed = service.start(created.getBatchId());
         assertEquals("COMPLETED", completed.getStatus());
         assertEquals(1, completed.getCompleted());
+    }
+
+    @Test
+    void cancelsOnlyCurrentQueuedRequirementAndAllowsMaxEffortRerun() {
+        PausedTaskExecutor splitExecutor = new PausedTaskExecutor();
+        BatchSplitService cancellableService = new BatchSplitService(fileStorageService, documentParseService,
+                chapterSelectionService, requirementInputService, smartSplitPipelineService,
+                projectMaterialExportService, new SyncTaskExecutor(), splitExecutor,
+                3, 2, tempDir.toString());
+        BatchSplitJobResponse created = cancellableService.create(createRequest());
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("已确认的需求正文");
+        cancellableService.confirm(created.getBatchId(), metadata.getId(), confirmation);
+        cancellableService.start(created.getBatchId());
+
+        BatchSplitJobResponse cancelling = cancellableService.cancelItem(created.getBatchId(), metadata.getId());
+        assertEquals("CANCEL_REQUESTED", cancelling.getItems().get(0).getStage());
+        splitExecutor.runNext();
+
+        BatchSplitJobResponse cancelled = cancellableService.get(created.getBatchId());
+        assertEquals("FAILED", cancelled.getItems().get(0).getStatus());
+        assertEquals("CANCELLED", cancelled.getItems().get(0).getStage());
+        assertTrue(cancelled.getItems().get(0).getErrorMessage().contains("max"));
+        verify(smartSplitPipelineService, never()).runDocument(eq(metadata.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+
+        cancellableService.rerunItem(created.getBatchId(), metadata.getId());
+        splitExecutor.runNext();
+        assertEquals("COMPLETED", cancellableService.get(created.getBatchId()).getStatus());
+        verify(smartSplitPipelineService, times(1)).runDocument(eq(metadata.getId()), eq(""),
+                any(SmartSplitPipelineService.StageListener.class));
+    }
+
+    @Test
+    void excelBatchPersistsManualReuseChoiceAndSkipsReuseAi() {
+        metadata.setSourceFileName("人工复核完成.xlsx");
+        metadata.setFileType("xlsx");
+        metadata.setStatus("EXCEL_IMPORTED");
+        BatchSplitCreateRequest request = createRequest();
+        request.setReuseDegreeAdjustmentEnabled(false);
+
+        BatchSplitJobResponse created = service.create(request);
+        assertEquals("READY", created.getStatus());
+        assertFalse(created.isReuseDegreeAdjustmentEnabled());
+
+        BatchSplitJobResponse completed = service.start(created.getBatchId());
+        assertEquals("COMPLETED", completed.getStatus());
+        assertFalse(completed.isReuseDegreeAdjustmentEnabled());
+        verify(smartSplitPipelineService).runExistingRows(eq(metadata.getId()), eq(false),
+                any(SmartSplitPipelineService.StageListener.class));
+        verify(smartSplitPipelineService, never()).runExistingRows(eq(metadata.getId()), eq(true),
+                any(SmartSplitPipelineService.StageListener.class));
+    }
+
+    @Test
+    void manualExcelProjectBatchStillGeneratesProjectAndRequirementArchives() {
+        metadata.setSourceFileName("人工复核完成.xlsx");
+        metadata.setFileType("xlsx");
+        metadata.setStatus("EXCEL_IMPORTED");
+        stubMaterialBundle(1, 12D);
+        BatchSplitCreateRequest request = createRequest();
+        request.setSplitLevel("PROJECT");
+        request.setReuseDegreeAdjustmentEnabled(false);
+
+        BatchSplitJobResponse created = service.create(request);
+        BatchSplitJobResponse completed = service.start(created.getBatchId());
+
+        assertEquals("COMPLETED", completed.getStatus());
+        assertEquals("COMPLETED", completed.getProjectMaterialStatus());
+        assertEquals("COMPLETED", completed.getRequirementMaterialStatus());
+        assertTrue(completed.getRequirementMaterialArchive() != null);
+        verify(projectMaterialExportService).export(
+                org.mockito.ArgumentMatchers.anyString(), eq(Arrays.asList(metadata.getId())));
+        verify(projectMaterialExportService).exportExistingRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(), eq(Arrays.asList(metadata.getId())),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
     }
 
     @Test

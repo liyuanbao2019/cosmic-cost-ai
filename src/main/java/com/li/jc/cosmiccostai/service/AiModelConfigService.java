@@ -35,11 +35,17 @@ public class AiModelConfigService {
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final DeepSeekChatClient deepSeekChatClient = new DeepSeekChatClient(objectMapper);
     private final Path configPath;
+    private final long extractionTimeoutSeconds;
+    private final int extractionMaxRetries;
     private final Map<String, Semaphore> limiters = new ConcurrentHashMap<String, Semaphore>();
     private volatile AiModelSettings settings;
 
     public AiModelConfigService(AiModelProperties properties) {
         this.configPath = Paths.get(properties.getConfigPath()).toAbsolutePath().normalize();
+        AiModelProperties.Extraction extraction = properties.getExtraction() == null
+                ? new AiModelProperties.Extraction() : properties.getExtraction();
+        this.extractionTimeoutSeconds = Math.max(5L, extraction.getTimeoutSeconds());
+        this.extractionMaxRetries = Math.max(0, extraction.getMaxRetries());
         this.settings = load(properties);
     }
 
@@ -87,13 +93,33 @@ public class AiModelConfigService {
         return generateForTask(prompt, task, deepSplit, deepSplit ? 0 : -1);
     }
 
+    public String generateForTask(String prompt,
+                                  AiPromptTask task,
+                                  boolean deepSplit,
+                                  String requestId,
+                                  AiRequestAttemptListener listener) {
+        int retries = task == AiPromptTask.EXTRACTION ? extractionMaxRetries : (deepSplit ? 0 : -1);
+        return generateForTask(prompt, task, deepSplit, retries, requestId, listener);
+    }
+
     public String generateForTask(String prompt, AiPromptTask task, boolean deepSplit, int maxRetriesOverride) {
+        return generateForTask(prompt, task, deepSplit, maxRetriesOverride, null, null);
+    }
+
+    private String generateForTask(String prompt,
+                                   AiPromptTask task,
+                                   boolean deepSplit,
+                                   int maxRetriesOverride,
+                                   String requestId,
+                                   AiRequestAttemptListener listener) {
         AiModelProfile profile = getActiveProfile();
         String apiKey = resolveApiKey(profile.getApiKey());
         if (!StringUtils.hasText(apiKey)) {
             throw new BusinessException("大模型 API Key 未配置，请进入“大模型管理”设置。");
         }
-        long timeout = deepSplit ? profile.getChunkTimeoutSeconds() : profile.getTimeoutSeconds();
+        long timeout = task == AiPromptTask.EXTRACTION
+                ? extractionTimeoutSeconds
+                : (deepSplit ? profile.getChunkTimeoutSeconds() : profile.getTimeoutSeconds());
         int retries = maxRetriesOverride >= 0 ? maxRetriesOverride : profile.getMaxRetries();
         Semaphore limiter = limiter(profile);
         boolean acquired = false;
@@ -103,7 +129,11 @@ public class AiModelConfigService {
                 throw new BusinessException("大模型并发已达到上限（" + profile.getMaxConcurrency() + "），等待超时，请稍后重试。");
             }
             if (task != null && task != AiPromptTask.GENERIC && DeepSeekPromptProfile.matches(profile)) {
-                return deepSeekChatClient.generate(profile, apiKey, task, prompt, timeout, retries);
+                return deepSeekChatClient.generate(profile, apiKey, task, prompt, timeout, retries,
+                        requestId, listener);
+            }
+            if (listener != null) {
+                listener.onAttempt(1, 1, timeout);
             }
             ChatLanguageModel chatModel = OpenAiChatModel.builder()
                     .baseUrl(profile.getBaseUrl())
@@ -122,6 +152,18 @@ public class AiModelConfigService {
                 limiter.release();
             }
         }
+    }
+
+    public void beginCancellableRequest(String requestId) {
+        deepSeekChatClient.beginRequest(requestId);
+    }
+
+    public void endCancellableRequest(String requestId) {
+        deepSeekChatClient.endRequest(requestId);
+    }
+
+    public boolean cancelRequest(String requestId) {
+        return deepSeekChatClient.cancel(requestId);
     }
 
     private Semaphore limiter(AiModelProfile profile) {

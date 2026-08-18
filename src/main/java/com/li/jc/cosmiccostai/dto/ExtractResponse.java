@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.dto;
 import com.li.jc.cosmiccostai.model.ExtractedFunction;
 
 import java.util.List;
+import java.util.ArrayList;
 
 public class ExtractResponse {
 
@@ -12,6 +13,8 @@ public class ExtractResponse {
     private int functionCount;
     private String status;
     private List<ExtractedFunction> functions;
+    private String chapterCoveragePath;
+    private List<RequirementChapterCoverage> chapterCoverage = new ArrayList<RequirementChapterCoverage>();
 
     public String getProjectId() {
         return projectId;
@@ -59,5 +62,21 @@ public class ExtractResponse {
 
     public void setFunctions(List<ExtractedFunction> functions) {
         this.functions = functions;
+    }
+
+    public String getChapterCoveragePath() {
+        return chapterCoveragePath;
+    }
+
+    public void setChapterCoveragePath(String chapterCoveragePath) {
+        this.chapterCoveragePath = chapterCoveragePath;
+    }
+
+    public List<RequirementChapterCoverage> getChapterCoverage() {
+        return chapterCoverage;
+    }
+
+    public void setChapterCoverage(List<RequirementChapterCoverage> chapterCoverage) {
+        this.chapterCoverage = chapterCoverage;
     }
 }

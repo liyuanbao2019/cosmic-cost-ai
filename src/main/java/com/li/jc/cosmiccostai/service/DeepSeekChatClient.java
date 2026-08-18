@@ -16,11 +16,17 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /** DeepSeek OpenAI-compatible transport with provider-specific structured-output controls. */
 final class DeepSeekChatClient {
 
     private final ObjectMapper objectMapper;
+    private final ConcurrentMap<String, HttpURLConnection> activeConnections =
+            new ConcurrentHashMap<String, HttpURLConnection>();
+    private final Set<String> cancelledRequests = ConcurrentHashMap.newKeySet();
 
     DeepSeekChatClient(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -32,38 +38,81 @@ final class DeepSeekChatClient {
                     String prompt,
                     long timeoutSeconds,
                     int maxRetries) {
-        int initialMaxTokens = outputTokenLimit(task);
-        try {
-            return generateWithRetries(profile, apiKey, task, prompt, timeoutSeconds,
-                    maxRetries, initialMaxTokens);
-        } catch (OutputTruncatedException ex) {
-            int expandedMaxTokens = Math.min(131072, initialMaxTokens * 2);
-            if (expandedMaxTokens <= initialMaxTokens) {
-                throw ex;
-            }
-            return generateWithRetries(profile, apiKey, task, prompt, timeoutSeconds,
-                    maxRetries, expandedMaxTokens);
+        return generate(profile, apiKey, task, prompt, timeoutSeconds, maxRetries, null, null);
+    }
+
+    String generate(AiModelProfile profile,
+                    String apiKey,
+                    AiPromptTask task,
+                    String prompt,
+                    long timeoutSeconds,
+                    int maxRetries,
+                    String requestId,
+                    AiRequestAttemptListener listener) {
+        return generateWithinAttemptBudget(profile, apiKey, task, prompt, timeoutSeconds,
+                maxRetries, requestId, listener);
+    }
+
+    void beginRequest(String requestId) {
+        if (hasRequestId(requestId)) {
+            cancelledRequests.remove(requestId);
         }
     }
 
-    private String generateWithRetries(AiModelProfile profile,
-                                       String apiKey,
-                                       AiPromptTask task,
-                                       String prompt,
-                                       long timeoutSeconds,
-                                       int maxRetries,
-                                       int maxTokens) {
+    void endRequest(String requestId) {
+        if (hasRequestId(requestId)) {
+            activeConnections.remove(requestId);
+            cancelledRequests.remove(requestId);
+        }
+    }
+
+    boolean cancel(String requestId) {
+        if (!hasRequestId(requestId)) return false;
+        cancelledRequests.add(requestId);
+        HttpURLConnection connection = activeConnections.get(requestId);
+        if (connection != null) {
+            connection.disconnect();
+        }
+        return connection != null;
+    }
+
+    private String generateWithinAttemptBudget(AiModelProfile profile,
+                                               String apiKey,
+                                               AiPromptTask task,
+                                               String prompt,
+                                               long timeoutSeconds,
+                                               int maxRetries,
+                                               String requestId,
+                                               AiRequestAttemptListener listener) {
         RuntimeException last = null;
-        int attempts = Math.max(0, maxRetries) + 1;
+        int retryBudget = Math.max(0, maxRetries);
+        // A truncated structured response may use one enlarged-output retry, but it
+        // shares the same overall request budget instead of starting another retry cycle.
+        int attempts = Math.max(2, retryBudget + 1);
+        int maxTokens = outputTokenLimit(task);
+        boolean outputExpanded = false;
         for (int attempt = 1; attempt <= attempts; attempt++) {
+            throwIfCancelled(requestId);
+            if (listener != null) {
+                listener.onAttempt(attempt, attempts, timeoutSeconds);
+            }
             try {
-                return execute(profile, apiKey, task, prompt, timeoutSeconds, maxTokens);
+                return execute(profile, apiKey, task, prompt, timeoutSeconds, maxTokens, requestId);
             } catch (OutputTruncatedException ex) {
-                // Retrying the same token ceiling only repeats a costly incomplete response.
-                // Let the outer call retry once with a larger output budget instead.
-                throw ex;
-            } catch (RuntimeException ex) {
                 last = ex;
+                int expandedMaxTokens = Math.min(131072, maxTokens * 2);
+                if (outputExpanded || expandedMaxTokens <= maxTokens || attempt >= attempts) {
+                    throw ex;
+                }
+                outputExpanded = true;
+                maxTokens = expandedMaxTokens;
+            } catch (RuntimeException ex) {
+                throwIfCancelled(requestId);
+                last = ex;
+                if (retryBudget <= 0 || attempt >= attempts) {
+                    throw ex;
+                }
+                retryBudget--;
                 if (attempt < attempts) {
                     waitBeforeRetry(attempt);
                 }
@@ -77,10 +126,19 @@ final class DeepSeekChatClient {
                            AiPromptTask task,
                            String prompt,
                            long timeoutSeconds,
-                           int maxTokens) {
+                           int maxTokens,
+                           String requestId) {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(chatCompletionsUrl(profile.getBaseUrl())).openConnection();
+            throwIfCancelled(requestId);
+            if (hasRequestId(requestId)) {
+                activeConnections.put(requestId, connection);
+                if (cancelledRequests.contains(requestId)) {
+                    connection.disconnect();
+                    throwIfCancelled(requestId);
+                }
+            }
             int timeoutMillis = timeoutMillis(timeoutSeconds);
             connection.setConnectTimeout(timeoutMillis);
             connection.setReadTimeout(timeoutMillis);
@@ -116,11 +174,25 @@ final class DeepSeekChatClient {
             }
             return content.asText();
         } catch (IOException ex) {
+            throwIfCancelled(requestId);
             throw new BusinessException("DeepSeek API 调用或结果解析失败：" + ex.getMessage(), ex);
         } finally {
+            if (hasRequestId(requestId) && connection != null) {
+                activeConnections.remove(requestId, connection);
+            }
             if (connection != null) {
                 connection.disconnect();
             }
+        }
+    }
+
+    private boolean hasRequestId(String requestId) {
+        return requestId != null && !requestId.trim().isEmpty();
+    }
+
+    private void throwIfCancelled(String requestId) {
+        if (hasRequestId(requestId) && cancelledRequests.contains(requestId)) {
+            throw new AiRequestCancelledException("AI 识别已由用户取消，可重新拆分当前需求。");
         }
     }
 

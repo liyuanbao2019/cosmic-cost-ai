@@ -135,7 +135,7 @@ final class RequirementSourceOrder {
         }
     }
 
-    private static int firstReferenceOrder(List<String> references) {
+    static int firstReferenceOrder(List<String> references) {
         int selected = UNKNOWN_SOURCE_ORDER;
         if (references == null) {
             return selected;

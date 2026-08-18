@@ -909,9 +909,10 @@ public class DeepSplitAiService {
             }
             FunctionSplitRow row = new FunctionSplitRow();
             row.setProjectName(firstText(source.getProjectName(), base.getProjectName()));
-            row.setLevel1Module(firstText(source.getLevel1Module(), base.getLevel1Module()));
-            row.setLevel2Module(firstText(source.getLevel2Module(), base.getLevel2Module(), row.getLevel1Module()));
-            row.setLevel3Module(firstText(source.getLevel3Module(), base.getLevel3Module(), row.getLevel2Module()));
+            // Requirement hierarchy comes from Word evidence and is immutable.
+            row.setLevel1Module(text(base.getLevel1Module()));
+            row.setLevel2Module(text(base.getLevel2Module()));
+            row.setLevel3Module(text(base.getLevel3Module()));
             row.setFunctionalUser(firstText(source.getFunctionalUser(), base.getFunctionalUser()));
             row.setTriggerEvent(firstText(source.getTriggerEvent(), source.getFunctionProcess(), base.getTriggerEvent()));
             row.setFunctionProcess(text(source.getFunctionProcess()));
@@ -926,6 +927,8 @@ public class DeepSplitAiService {
             row.setEvidence(firstText(source.getEvidence(), base.getEvidence()));
             row.setSourceReferences(source.getSourceReferences() == null
                     ? new ArrayList<String>() : new ArrayList<String>(source.getSourceReferences()));
+            row.setSourceHeadingPaths(base.getSourceHeadingPaths() == null
+                    ? new ArrayList<String>() : new ArrayList<String>(base.getSourceHeadingPaths()));
             result.add(row);
         }
         return result;

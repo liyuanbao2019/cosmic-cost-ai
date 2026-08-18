@@ -19,6 +19,7 @@ public class AiModelProperties {
     private int maxRetries = 2;
     private int maxConcurrency = 1000;
     private String configPath = "storage/config/ai-models.json";
+    private Extraction extraction = new Extraction();
     private DeepSplit deepSplit = new DeepSplit();
     private List<Model> models = new ArrayList<Model>();
 
@@ -40,10 +41,22 @@ public class AiModelProperties {
     public void setMaxConcurrency(int maxConcurrency) { this.maxConcurrency = maxConcurrency; }
     public String getConfigPath() { return configPath; }
     public void setConfigPath(String configPath) { this.configPath = configPath; }
+    public Extraction getExtraction() { return extraction; }
+    public void setExtraction(Extraction extraction) { this.extraction = extraction; }
     public DeepSplit getDeepSplit() { return deepSplit; }
     public void setDeepSplit(DeepSplit deepSplit) { this.deepSplit = deepSplit; }
     public List<Model> getModels() { return models; }
     public void setModels(List<Model> models) { this.models = models; }
+
+    public static class Extraction {
+        private long timeoutSeconds = 360;
+        private int maxRetries = 1;
+
+        public long getTimeoutSeconds() { return timeoutSeconds; }
+        public void setTimeoutSeconds(long timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
+        public int getMaxRetries() { return maxRetries; }
+        public void setMaxRetries(int maxRetries) { this.maxRetries = maxRetries; }
+    }
 
     public static class DeepSplit {
         private long chunkTimeoutSeconds = 180;

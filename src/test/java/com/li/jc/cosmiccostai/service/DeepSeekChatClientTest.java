@@ -16,6 +16,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,6 +34,7 @@ class DeepSeekChatClientTest {
     private final AtomicReference<String> requestPath = new AtomicReference<String>();
     private final AtomicInteger requestCount = new AtomicInteger();
     private final AtomicBoolean truncateFirstResponse = new AtomicBoolean();
+    private final AtomicBoolean failFirstResponse = new AtomicBoolean();
     private HttpServer server;
 
     @BeforeEach
@@ -114,6 +118,25 @@ class DeepSeekChatClientTest {
         assertEquals(131072, requestBody.get().path("max_tokens").asInt());
     }
 
+    @Test
+    void reportsTwoRealAttemptsWithoutLoweringExtractionReasoningEffort() {
+        failFirstResponse.set(true);
+        List<Integer> attempts = new ArrayList<Integer>();
+
+        String content = client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
+                "output json", 360, 1, "project-1",
+                (attempt, maxAttempts, timeoutSeconds) -> {
+                    attempts.add(attempt);
+                    assertEquals(2, maxAttempts);
+                    assertEquals(360, timeoutSeconds);
+                });
+
+        assertEquals("{\"functions\":[]}", content);
+        assertEquals(Arrays.asList(1, 2), attempts);
+        assertEquals(2, requestCount.get());
+        assertEquals("max", requestBody.get().path("reasoning_effort").asText());
+    }
+
     private DeepSeekChatClient client() {
         return new DeepSeekChatClient(objectMapper);
     }
@@ -132,6 +155,14 @@ class DeepSeekChatClientTest {
             requestPath.set(exchange.getRequestURI().getPath());
             requestBody.set(objectMapper.readTree(readFully(exchange.getRequestBody())));
             int currentRequest = requestCount.incrementAndGet();
+            if (failFirstResponse.get() && currentRequest == 1) {
+                byte[] failure = "temporary upstream failure".getBytes(StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(500, failure.length);
+                try (OutputStream output = exchange.getResponseBody()) {
+                    output.write(failure);
+                }
+                return;
+            }
             boolean truncated = truncateFirstResponse.get() && currentRequest == 1;
             String finishReason = truncated ? "length" : "stop";
             String content = truncated ? "{\\\"functions\\\":[" : "{\\\"functions\\\":[]}";

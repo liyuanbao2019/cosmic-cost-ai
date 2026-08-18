@@ -6,6 +6,11 @@ import java.util.ArrayList;
 public class ExtractedFunction {
 
     private String module;
+    /** Immutable hierarchy resolved from source requirement headings. */
+    private String level1Module;
+    private String level2Module;
+    private String level3Module;
+    private List<String> sourceHeadingPaths = new ArrayList<String>();
     private String function;
     private String description;
     private String functionalUser;
@@ -37,6 +42,38 @@ public class ExtractedFunction {
 
     public void setModule(String module) {
         this.module = module;
+    }
+
+    public String getLevel1Module() {
+        return level1Module;
+    }
+
+    public void setLevel1Module(String level1Module) {
+        this.level1Module = level1Module;
+    }
+
+    public String getLevel2Module() {
+        return level2Module;
+    }
+
+    public void setLevel2Module(String level2Module) {
+        this.level2Module = level2Module;
+    }
+
+    public String getLevel3Module() {
+        return level3Module;
+    }
+
+    public void setLevel3Module(String level3Module) {
+        this.level3Module = level3Module;
+    }
+
+    public List<String> getSourceHeadingPaths() {
+        return sourceHeadingPaths;
+    }
+
+    public void setSourceHeadingPaths(List<String> sourceHeadingPaths) {
+        this.sourceHeadingPaths = sourceHeadingPaths;
     }
 
     public String getFunction() {

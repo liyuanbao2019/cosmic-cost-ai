@@ -3,6 +3,8 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.dto.DeepSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DeepSplitRequest;
 import com.li.jc.cosmiccostai.dto.DeepSplitSuggestion;
+import com.li.jc.cosmiccostai.dto.ExtractResponse;
+import com.li.jc.cosmiccostai.dto.RequirementChapterCoverage;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
@@ -74,7 +76,8 @@ class SmartSplitPipelineServiceTest {
 
         InOrder order = inOrder(coverage, extraction, cosmic, review, deep, reuse, validation);
         order.verify(coverage).ensureReadyForExtraction("P1");
-        order.verify(extraction).extractWithPrompt("P1", "edited prompt");
+        order.verify(extraction).extractWithPrompt(eq("P1"), eq("edited prompt"),
+                any(AiRequestAttemptListener.class));
         order.verify(cosmic).analyze("P1");
         order.verify(review).getReview("P1");
         order.verify(deep).start(eq("P1"), any(DeepSplitRequest.class));
@@ -89,7 +92,8 @@ class SmartSplitPipelineServiceTest {
         assertTrue(stages.indexOf("DEEP_REVIEWING") < stages.indexOf("REUSE_ADJUSTING"));
         assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
         assertEquals("COMPLETED", stages.get(stages.size() - 1));
-        verify(extraction).extractWithPrompt("P1", "edited prompt");
+        verify(extraction).extractWithPrompt(eq("P1"), eq("edited prompt"),
+                any(AiRequestAttemptListener.class));
     }
 
     @Test
@@ -107,6 +111,12 @@ class SmartSplitPipelineServiceTest {
         ReviewResponse reviewResponse = new ReviewResponse();
         reviewResponse.setSplitRows(Collections.singletonList(row));
         when(review.getReview("P1")).thenReturn(reviewResponse);
+        ExtractResponse extractResponse = new ExtractResponse();
+        RequirementChapterCoverage missingChapter = new RequirementChapterCoverage();
+        missingChapter.setHeadingPath("异常重试与告警机制");
+        missingChapter.setStatus("MISSING_REVIEW");
+        extractResponse.setChapterCoverage(Collections.singletonList(missingChapter));
+        when(extraction.extract(eq("P1"), any(AiRequestAttemptListener.class))).thenReturn(extractResponse);
         ReuseDegreeAdjustmentResponse reuseResponse = new ReuseDegreeAdjustmentResponse();
         reuseResponse.setRows(Collections.singletonList(row));
         when(reuse.adjust(eq("P1"), any())).thenReturn(reuseResponse);
@@ -135,6 +145,41 @@ class SmartSplitPipelineServiceTest {
         assertEquals(0, result.getDeepSuggestionCount());
         assertFalse(result.isPartial());
         assertEquals("R-without-deep-review", result.getRuleVersion());
+        assertTrue(result.getWarnings().get(0).contains("异常重试与告警机制"));
+        assertTrue(result.getWarnings().get(0).contains("不影响拆分和导出"));
+    }
+
+    @Test
+    void excelCanPreserveManualReuseAndSkipEveryAiCalibrationStage() {
+        RequirementCoverageService coverage = mock(RequirementCoverageService.class);
+        AiExtractionService extraction = mock(AiExtractionService.class);
+        CosmicAnalysisService cosmic = mock(CosmicAnalysisService.class);
+        ReviewService review = mock(ReviewService.class);
+        DeepSplitAiService deep = mock(DeepSplitAiService.class);
+        ReuseDegreeAiAdjustmentService reuse = mock(ReuseDegreeAiAdjustmentService.class);
+        RuleValidationService validation = mock(RuleValidationService.class);
+        DeepSplitSuggestionApplyService apply = new DeepSplitSuggestionApplyService(validation);
+        ReviewResponse reviewResponse = new ReviewResponse();
+        reviewResponse.setSplitRows(Collections.singletonList(row()));
+        when(review.getReview("P1")).thenReturn(reviewResponse);
+        RuleValidationResponse validationResponse = new RuleValidationResponse();
+        validationResponse.setRuleVersion("R-manual-excel");
+        when(validation.validate(any())).thenReturn(validationResponse);
+
+        SmartSplitPipelineService service = new SmartSplitPipelineService(
+                coverage, extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
+        final List<String> stages = new ArrayList<String>();
+        SmartSplitPipelineService.PipelineResult result = service.runExistingRows(
+                "P1", false, (stage, progressPercent, message) -> stages.add(stage));
+
+        verifyNoInteractions(coverage, extraction, cosmic, deep, reuse);
+        verify(validation).validate(any());
+        assertFalse(stages.contains("DEEP_REVIEWING"));
+        assertFalse(stages.contains("REUSE_ADJUSTING"));
+        assertTrue(stages.contains("RULE_VALIDATING"));
+        assertEquals("SKIPPED_BY_USER", result.getDeepSplitStatus());
+        assertEquals("R-manual-excel", result.getRuleVersion());
+        assertTrue(result.getWarnings().get(0).contains("保留 Excel"));
     }
 
     private FunctionSplitRow row() {

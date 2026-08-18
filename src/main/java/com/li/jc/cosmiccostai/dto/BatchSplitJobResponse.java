@@ -9,6 +9,7 @@ public class BatchSplitJobResponse {
     private String splitLevel;
     private String projectGroupId;
     private String projectGroupName;
+    private boolean reuseDegreeAdjustmentEnabled = true;
     private String status;
     private String createdAt;
     private String updatedAt;
@@ -45,6 +46,8 @@ public class BatchSplitJobResponse {
     public void setProjectGroupId(String projectGroupId) { this.projectGroupId = projectGroupId; }
     public String getProjectGroupName() { return projectGroupName; }
     public void setProjectGroupName(String projectGroupName) { this.projectGroupName = projectGroupName; }
+    public boolean isReuseDegreeAdjustmentEnabled() { return reuseDegreeAdjustmentEnabled; }
+    public void setReuseDegreeAdjustmentEnabled(boolean reuseDegreeAdjustmentEnabled) { this.reuseDegreeAdjustmentEnabled = reuseDegreeAdjustmentEnabled; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getCreatedAt() { return createdAt; }

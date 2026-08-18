@@ -72,6 +72,11 @@ cosmic:
     max-retries: ${OPENAI_MAX_RETRIES:2}
     # 单个模型允许的全局在途请求数，所有 AI 场景共用这道并发保护
     max-concurrency: ${OPENAI_MAX_CONCURRENCY:1000}
+    extraction:
+      # COSMIC 初拆专用单次等待上限；所有请求仍使用 DeepSeek V4 Pro max 思考强度
+      timeout-seconds: ${COSMIC_AI_EXTRACTION_TIMEOUT_SECONDS:360}
+      # 初拆网络失败后最多重试 1 次，即页面展示第 1/2、2/2 次请求
+      max-retries: ${COSMIC_AI_EXTRACTION_MAX_RETRIES:1}
     batch-split:
       # 批量拆分按项目并发；单项目内部统一调用 smart-split 流水线并严格串行
       worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:1000}

@@ -81,6 +81,32 @@ class FunctionSplitRowFactoryTest {
                 rows.get(0).getSubProcessDescription());
     }
 
+    @Test
+    void usesMovementSourceHierarchyWithoutRepeatingOrBackfillingMissingLevels() {
+        CosmicResult result = result("查询库存基础数据列表");
+        result.setLevel1Module("月度基础数据自动运算规则");
+        result.setLevel2Module("不应回填到子过程");
+        CosmicMovement movement = movement("E", "发起库存查询", "查询条件", "账期");
+        movement.setLevel1Module("七类基础数据报表");
+        movement.setLevel2Module("库存基础数据报表");
+        movement.setLevel3Module("");
+        movement.setSourceHeadingPaths(Arrays.asList(
+                "需求描述 > 七类基础数据报表 > 库存基础数据报表"));
+        CosmicMovement exit = movement("X", "返回库存数据", "库存数据", "终端SN");
+        exit.setLevel1Module("七类基础数据报表");
+        exit.setLevel2Module("库存基础数据报表");
+        exit.setLevel3Module("");
+        exit.setSourceHeadingPaths(movement.getSourceHeadingPaths());
+        result.setMovements(Arrays.asList(movement, exit));
+
+        List<FunctionSplitRow> rows = FunctionSplitRowFactory.create(metadata(), result);
+
+        assertEquals("七类基础数据报表", rows.get(0).getLevel1Module());
+        assertEquals("库存基础数据报表", rows.get(0).getLevel2Module());
+        assertEquals("", rows.get(0).getLevel3Module());
+        assertEquals(movement.getSourceHeadingPaths(), rows.get(0).getSourceHeadingPaths());
+    }
+
     private CosmicResult result(String function) {
         CosmicResult result = new CosmicResult();
         result.setModule("投诉用户常驻小区采集与分析");

@@ -90,6 +90,7 @@ public class BatchSplitService {
     private final Map<String, Deque<String>> pendingExecutions = new LinkedHashMap<String, Deque<String>>();
     private final Deque<String> pendingBatchOrder = new ArrayDeque<String>();
     private final Set<String> scheduledExecutions = new HashSet<String>();
+    private final Set<String> cancelledExecutions = ConcurrentHashMap.newKeySet();
     private final Map<String, Integer> activeExecutionsByBatch = new HashMap<String, Integer>();
     private int activeExecutionCount;
 
@@ -223,6 +224,8 @@ public class BatchSplitService {
         BatchSplitState state = new BatchSplitState();
         state.setBatchId(batchId);
         state.setSplitLevel(normalizeSplitLevel(request == null ? null : request.getSplitLevel()));
+        state.setReuseDegreeAdjustmentEnabled(request == null
+                || request.isReuseDegreeAdjustmentEnabled());
         if ("PROJECT".equals(state.getSplitLevel())) {
             state.setProjectGroupId(generateProjectGroupId());
             state.setProjectGroupName(resolveProjectGroupName(null,
@@ -896,6 +899,52 @@ public class BatchSplitService {
         return get(batchId);
     }
 
+    public BatchSplitJobResponse cancelItem(String batchId, String projectId) {
+        final String key = executionKey(batchId, projectId);
+        final boolean removedFromQueue;
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            BatchSplitItemState item = findItem(state, projectId);
+            boolean queued = "QUEUED".equals(item.getStatus());
+            boolean recognizing = "RUNNING".equals(item.getStatus())
+                    && ("AI_EXTRACTING".equals(item.getStage()) || "CANCEL_REQUESTED".equals(item.getStage()));
+            if (!queued && !recognizing) {
+                throw new BusinessException("仅可取消排队中或正在 AI 识别的需求，其他需求不会受影响。");
+            }
+        }
+
+        removedFromQueue = removePendingExecution(batchId, projectId);
+        if (!removedFromQueue) {
+            cancelledExecutions.add(key);
+            smartSplitPipelineService.cancelDocument(projectId);
+        }
+
+        updateItem(batchId, projectId, new ItemMutation() {
+            @Override
+            public void apply(BatchSplitItemState item) {
+                item.setAiAttemptDeadlineAt(null);
+                if ("FAILED".equals(item.getStatus()) && "CANCELLED".equals(item.getStage())) {
+                    return;
+                }
+                if (removedFromQueue) {
+                    item.setStatus("FAILED");
+                    item.setStage("CANCELLED");
+                    item.setStageMessage("当前需求已取消，其他需求继续执行；可重新拆分当前需求");
+                    item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4 Pro max。");
+                    item.setFinishedAt(now());
+                } else {
+                    item.setStatus("RUNNING");
+                    item.setStage("CANCEL_REQUESTED");
+                    item.setStageMessage("正在取消当前需求的 AI 识别，其他需求继续执行");
+                }
+            }
+        });
+        if (removedFromQueue) {
+            assignedProjects.remove(projectId, batchId);
+        }
+        return get(batchId);
+    }
+
     public BatchSplitJobResponse retryFailed(String batchId) {
         List<String> preparationIds = new ArrayList<String>();
         List<String> executionIds = new ArrayList<String>();
@@ -1141,12 +1190,15 @@ public class BatchSplitService {
         try {
             BatchSplitItemState current = findItem(loadState(batchId), projectId);
             if (current.isExistingRows()) {
+                final boolean adjustReuseDegree = loadState(batchId).isReuseDegreeAdjustmentEnabled();
                 updateItem(batchId, projectId, new ItemMutation() {
                     @Override
                     public void apply(BatchSplitItemState item) {
                         item.setStatus("CONFIRMED");
                         item.setStage("INPUT_CONFIRMED");
-                        item.setStageMessage("已导入拆分表，将执行统一智能校准");
+                        item.setStageMessage(adjustReuseDegree
+                                ? "已导入拆分表，将执行复用度 AI 调整和规则初审"
+                                : "已导入拆分表，将保留人工复用度并执行规则初审");
                         item.setProgressPercent(0);
                         item.setConfirmedAt(now());
                         item.setLastCompletedStage("IMPORT");
@@ -1282,7 +1334,29 @@ public class BatchSplitService {
         return batchId + "/" + projectId;
     }
 
+    private boolean removePendingExecution(String batchId, String projectId) {
+        synchronized (executionScheduleLock) {
+            Deque<String> projects = pendingExecutions.get(batchId);
+            if (projects == null || !projects.remove(projectId)) {
+                return false;
+            }
+            scheduledExecutions.remove(executionKey(batchId, projectId));
+            if (projects.isEmpty()) {
+                pendingExecutions.remove(batchId);
+                while (pendingBatchOrder.remove(batchId)) {
+                    // Remove every stale round-robin occurrence for this batch.
+                }
+            }
+            return true;
+        }
+    }
+
     private void executeItem(String batchId, String projectId) {
+        final String currentExecutionKey = executionKey(batchId, projectId);
+        if (cancelledExecutions.remove(currentExecutionKey)) {
+            failCancelledItem(batchId, projectId);
+            return;
+        }
         updateItem(batchId, projectId, new ItemMutation() {
             @Override
             public void apply(BatchSplitItemState item) {
@@ -1290,16 +1364,26 @@ public class BatchSplitService {
                 item.setAttempt(item.getAttempt() + 1);
                 item.setStartedAt(now());
                 item.setFinishedAt(null);
+                item.setAiAttempt(0);
+                item.setAiMaxAttempts(0);
+                item.setAiAttemptStartedAt(null);
+                item.setAiAttemptDeadlineAt(null);
             }
         });
         try {
-            BatchSplitItemState current = findItem(loadState(batchId), projectId);
+            BatchSplitState currentState = loadState(batchId);
+            BatchSplitItemState current = findItem(currentState, projectId);
+            final boolean adjustReuseDegree = currentState.isReuseDegreeAdjustmentEnabled();
             SmartSplitPipelineService.StageListener listener = new SmartSplitPipelineService.StageListener() {
                 @Override
                 public void onStage(final String stage, final int progressPercent, final String stageMessage) {
                     updateItem(batchId, projectId, new ItemMutation() {
                         @Override
                         public void apply(BatchSplitItemState item) {
+                            if (cancelledExecutions.contains(currentExecutionKey)
+                                    || "CANCEL_REQUESTED".equals(item.getStage())) {
+                                return;
+                            }
                             item.setStatus("RUNNING");
                             item.setStage(stage);
                             item.setProgressPercent(progressPercent);
@@ -1307,14 +1391,40 @@ public class BatchSplitService {
                         }
                     });
                 }
+
+                @Override
+                public void onAiAttempt(final int attempt, final int maxAttempts, final long timeoutSeconds) {
+                    updateItem(batchId, projectId, new ItemMutation() {
+                        @Override
+                        public void apply(BatchSplitItemState item) {
+                            if (cancelledExecutions.contains(currentExecutionKey)
+                                    || "CANCEL_REQUESTED".equals(item.getStage())) {
+                                return;
+                            }
+                            LocalDateTime started = LocalDateTime.now();
+                            item.setStatus("RUNNING");
+                            item.setStage("AI_EXTRACTING");
+                            item.setProgressPercent(Math.max(8, item.getProgressPercent()));
+                            item.setAiAttempt(attempt);
+                            item.setAiMaxAttempts(maxAttempts);
+                            item.setAiAttemptStartedAt(started.format(DATE_TIME_FORMATTER));
+                            item.setAiAttemptDeadlineAt(started.plusSeconds(timeoutSeconds).format(DATE_TIME_FORMATTER));
+                            item.setStageMessage("AI 识别第 " + attempt + "/" + maxAttempts
+                                    + " 次请求，DeepSeek V4 Pro max，单次最长 " + timeoutSeconds + " 秒");
+                        }
+                    });
+                }
             };
             final SmartSplitPipelineService.PipelineResult pipeline;
             if (current.isExistingRows()) {
-                pipeline = smartSplitPipelineService.runExistingRows(projectId, listener);
+                pipeline = smartSplitPipelineService.runExistingRows(projectId, adjustReuseDegree, listener);
             } else {
                 String frozenInput = readInputSnapshot(batchId, projectId);
                 requirementInputService.saveManualInput(projectId, frozenInput);
                 pipeline = smartSplitPipelineService.runDocument(projectId, "", listener);
+            }
+            if (cancelledExecutions.remove(currentExecutionKey)) {
+                throw new AiRequestCancelledException("AI 识别已由用户取消");
             }
             final RuleValidationResponse validation = pipeline.getValidation();
             updateItem(batchId, projectId, new ItemMutation() {
@@ -1323,9 +1433,11 @@ public class BatchSplitService {
                     item.setStatus("COMPLETED");
                     item.setStage("COMPLETED");
                     item.setProgressPercent(100);
-                    item.setStageMessage(pipeline.isPartial()
+                    item.setStageMessage(current.isExistingRows() && !adjustReuseDegree
+                            ? "已保留 Excel 人工拆分结果并完成规则初审"
+                            : (pipeline.isPartial()
                             ? "智能拆分部分完成，已进入人工审核"
-                            : "智能拆分、复用度调整和规则初审已完成");
+                            : "智能拆分、复用度调整和规则初审已完成"));
                     item.setLastCompletedStage("RULE_VALIDATION");
                     item.setIssueCount(validation == null ? 0 : validation.getIssueCount());
                     item.setErrorCount(validation == null ? 0 : validation.getErrorCount());
@@ -1336,13 +1448,37 @@ public class BatchSplitService {
                     item.setPartial(pipeline.isPartial());
                     item.setFinishedAt(now());
                     item.setErrorMessage(null);
+                    item.setAiAttemptDeadlineAt(null);
                 }
             });
             assignedProjects.remove(projectId, batchId);
             maybeGenerateProjectMaterials(batchId);
         } catch (RuntimeException ex) {
-            failItem(batchId, projectId, currentStage(batchId, projectId), message(ex));
+            boolean cancelled = ex instanceof AiRequestCancelledException;
+            if (cancelledExecutions.remove(currentExecutionKey)) {
+                cancelled = true;
+            }
+            if (cancelled) {
+                failCancelledItem(batchId, projectId);
+            } else {
+                failItem(batchId, projectId, currentStage(batchId, projectId), message(ex));
+            }
         }
+    }
+
+    private void failCancelledItem(String batchId, String projectId) {
+        updateItem(batchId, projectId, new ItemMutation() {
+            @Override
+            public void apply(BatchSplitItemState item) {
+                item.setStatus("FAILED");
+                item.setStage("CANCELLED");
+                item.setStageMessage("当前需求已取消，其他需求继续执行；可重新拆分当前需求");
+                item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4 Pro max。");
+                item.setFinishedAt(now());
+                item.setAiAttemptDeadlineAt(null);
+            }
+        });
+        assignedProjects.remove(projectId, batchId);
     }
 
     private void failItem(String batchId, String projectId, final String stage, final String errorMessage) {
@@ -1353,6 +1489,7 @@ public class BatchSplitService {
                 item.setStage(stage);
                 item.setErrorMessage(compactErrorMessage(errorMessage));
                 item.setFinishedAt(now());
+                item.setAiAttemptDeadlineAt(null);
             }
         });
     }
@@ -1738,6 +1875,10 @@ public class BatchSplitService {
         item.setErrorMessage(null);
         item.setStartedAt(null);
         item.setFinishedAt(null);
+        item.setAiAttempt(0);
+        item.setAiMaxAttempts(0);
+        item.setAiAttemptStartedAt(null);
+        item.setAiAttemptDeadlineAt(null);
         item.setIssueCount(0);
         item.setErrorCount(0);
         item.setRiskCount(0);
@@ -1822,6 +1963,7 @@ public class BatchSplitService {
         response.setSplitLevel(normalizeSplitLevel(state.getSplitLevel()));
         response.setProjectGroupId(state.getProjectGroupId());
         response.setProjectGroupName(state.getProjectGroupName());
+        response.setReuseDegreeAdjustmentEnabled(state.isReuseDegreeAdjustmentEnabled());
         response.setStatus(state.getStatus());
         response.setCreatedAt(state.getCreatedAt());
         response.setUpdatedAt(state.getUpdatedAt());
@@ -1882,6 +2024,10 @@ public class BatchSplitService {
             target.setStartedAt(item.getStartedAt());
             target.setFinishedAt(item.getFinishedAt());
             target.setAttempt(item.getAttempt());
+            target.setAiAttempt(item.getAiAttempt());
+            target.setAiMaxAttempts(item.getAiMaxAttempts());
+            target.setAiAttemptStartedAt(item.getAiAttemptStartedAt());
+            target.setAiAttemptDeadlineAt(item.getAiAttemptDeadlineAt());
             target.setIssueCount(item.getIssueCount());
             target.setErrorCount(item.getErrorCount());
             target.setRiskCount(item.getRiskCount());
@@ -2043,6 +2189,7 @@ public class BatchSplitService {
         private String splitLevel = "REQUIREMENT";
         private String projectGroupId;
         private String projectGroupName;
+        private boolean reuseDegreeAdjustmentEnabled = true;
         private String status;
         private String createdAt;
         private String updatedAt;
@@ -2070,6 +2217,8 @@ public class BatchSplitService {
         public void setProjectGroupId(String projectGroupId) { this.projectGroupId = projectGroupId; }
         public String getProjectGroupName() { return projectGroupName; }
         public void setProjectGroupName(String projectGroupName) { this.projectGroupName = projectGroupName; }
+        public boolean isReuseDegreeAdjustmentEnabled() { return reuseDegreeAdjustmentEnabled; }
+        public void setReuseDegreeAdjustmentEnabled(boolean reuseDegreeAdjustmentEnabled) { this.reuseDegreeAdjustmentEnabled = reuseDegreeAdjustmentEnabled; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
         public String getCreatedAt() { return createdAt; }
@@ -2133,6 +2282,10 @@ public class BatchSplitService {
         private String startedAt;
         private String finishedAt;
         private int attempt;
+        private int aiAttempt;
+        private int aiMaxAttempts;
+        private String aiAttemptStartedAt;
+        private String aiAttemptDeadlineAt;
         private int issueCount;
         private int errorCount;
         private int riskCount;
@@ -2177,6 +2330,14 @@ public class BatchSplitService {
         public void setFinishedAt(String finishedAt) { this.finishedAt = finishedAt; }
         public int getAttempt() { return attempt; }
         public void setAttempt(int attempt) { this.attempt = attempt; }
+        public int getAiAttempt() { return aiAttempt; }
+        public void setAiAttempt(int aiAttempt) { this.aiAttempt = aiAttempt; }
+        public int getAiMaxAttempts() { return aiMaxAttempts; }
+        public void setAiMaxAttempts(int aiMaxAttempts) { this.aiMaxAttempts = aiMaxAttempts; }
+        public String getAiAttemptStartedAt() { return aiAttemptStartedAt; }
+        public void setAiAttemptStartedAt(String aiAttemptStartedAt) { this.aiAttemptStartedAt = aiAttemptStartedAt; }
+        public String getAiAttemptDeadlineAt() { return aiAttemptDeadlineAt; }
+        public void setAiAttemptDeadlineAt(String aiAttemptDeadlineAt) { this.aiAttemptDeadlineAt = aiAttemptDeadlineAt; }
         public int getIssueCount() { return issueCount; }
         public void setIssueCount(int issueCount) { this.issueCount = issueCount; }
         public int getErrorCount() { return errorCount; }

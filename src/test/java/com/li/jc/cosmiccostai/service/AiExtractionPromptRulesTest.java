@@ -16,10 +16,10 @@ class AiExtractionPromptRulesTest {
     void promptIncludesSplitCheckRulesMarkdown() throws Exception {
         AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
                 "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
-        Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class);
+        Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class, String.class);
         method.setAccessible(true);
 
-        String prompt = (String) method.invoke(service, "用户提交规则校验需求");
+        String prompt = (String) method.invoke(service, "prompt-project", "用户提交规则校验需求");
 
         assertTrue(prompt.contains("【内部拆分校验与可计量改写规则】"));
         assertTrue(prompt.contains("COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）"));
@@ -77,10 +77,10 @@ class AiExtractionPromptRulesTest {
         AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
                 "https://api.deepseek.com/v1", "", "deepseek-v4-pro", 1, 0,
                 "classpath:/static/split-check-rules.md");
-        Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class);
+        Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class, String.class);
         method.setAccessible(true);
 
-        String prompt = (String) method.invoke(service, "用户提交规则校验需求");
+        String prompt = (String) method.invoke(service, "prompt-project", "用户提交规则校验需求");
         String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）";
 
         assertTrue(prompt.contains("DeepSeek 专项执行协议"));

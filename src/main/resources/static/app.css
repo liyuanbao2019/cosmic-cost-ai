@@ -1198,6 +1198,20 @@ button.flow-rule-config-btn:hover {
   font-size: 11px;
 }
 
+.batch-ai-attempt-info {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 6px 10px;
+  border: 1px solid #7dd3fc;
+  border-radius: 999px;
+  color: #075985;
+  background: #f0f9ff;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .batch-requirement-warning {
   margin-bottom: 10px;
   padding: 9px 11px;
@@ -1337,6 +1351,39 @@ button.flow-rule-config-btn:hover {
 
 .upload-field .upload-field-head label span {
   margin-bottom: 0;
+}
+
+.excel-upload-head {
+  min-height: 24px;
+}
+
+.excel-upload-head .excel-reuse-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin: 0;
+  padding: 3px 9px;
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+  background: #f0f9ff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.excel-upload-head .excel-reuse-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.excel-upload-head .excel-reuse-toggle span {
+  display: inline;
+  margin: 0;
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .upload-field label em {

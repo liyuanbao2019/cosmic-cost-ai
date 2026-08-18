@@ -25,10 +25,12 @@ import java.util.regex.Pattern;
 @Service
 public class RequirementCoverageService {
 
-    private static final Pattern BUSINESS_SECTION = Pattern.compile("^\\d+[.．]?\\s*业务功能(?:需求)?\\s*$");
-    // The space after the full number is essential: without it, "2.1.1.1 功能描述"
-    // can be incorrectly shortened to module "2.1.1" with title "1 功能描述".
-    private static final Pattern MODULE_HEADING = Pattern.compile("^(\\d+(?:[.．]\\d+)+)[.．]?\\s+(.+)$");
+    private static final Pattern BUSINESS_SECTION = Pattern.compile(
+            "^(\\d+)[.．]?\\s*(业务功能(?:需求)?|业务需求|功能需求|需求描述|需求细则)\\s*$");
+    // Require the title to start with a non-digit so the complete number is consumed,
+    // while still supporting Word headings such as "3.1月度基础数据自动运算规则".
+    private static final Pattern MODULE_HEADING = Pattern.compile(
+            "^(\\d+(?:[.．]\\d+)+)[.．]?\\s*(\\D.*)$");
 
     private final FileStorageService fileStorageService;
     private final RequirementInputService requirementInputService;
@@ -136,13 +138,16 @@ public class RequirementCoverageService {
     private List<ModuleBlock> findNumberedSourceModules(String documentText) {
         String[] lines = documentText.split("\\r?\\n");
         boolean inBusinessSection = false;
+        int businessDepth = 0;
         List<ModuleBlock> modules = new ArrayList<>();
         ModuleBlock current = null;
         for (String raw : lines) {
             String line = raw == null ? "" : raw.trim();
             if (!inBusinessSection) {
-                if (BUSINESS_SECTION.matcher(line).matches()) {
+                Matcher section = BUSINESS_SECTION.matcher(line);
+                if (section.matches()) {
                     inBusinessSection = true;
+                    businessDepth = headingDepth(section.group(1));
                 }
                 continue;
             }
@@ -150,7 +155,10 @@ public class RequirementCoverageService {
                 break;
             }
             Matcher heading = MODULE_HEADING.matcher(line);
-            if (heading.matches() && headingDepth(heading.group(1)) == 3 && !isSupplementalTitle(heading.group(2))) {
+            int depth = heading.matches() ? headingDepth(heading.group(1)) : -1;
+            if (heading.matches()
+                    && !isSupplementalTitle(heading.group(2))
+                    && (depth == businessDepth + 1 || isFunctionalOutlineTitle(heading.group(2)))) {
                 if (current != null) {
                     modules.add(current);
                 }
@@ -188,12 +196,14 @@ public class RequirementCoverageService {
             String normalized = normalizeTitle(markers.get(i).title);
             if (businessIndex < 0 && ("业务功能需求".equals(normalized)
                     || "业务功能".equals(normalized)
+                    || "业务需求".equals(normalized)
                     || "功能需求".equals(normalized)
-                    || "需求细则".equals(normalized))) {
+                    || "需求细则".equals(normalized)
+                    || "需求描述".equals(normalized))) {
                 businessIndex = i;
                 continue;
             }
-            if (businessIndex >= 0 && markers.get(i).level == 1) {
+            if (businessIndex >= 0 && markers.get(i).level <= markers.get(businessIndex).level) {
                 endIndex = i;
                 break;
             }
@@ -204,7 +214,9 @@ public class RequirementCoverageService {
         List<OutlineMarker> candidates = new ArrayList<OutlineMarker>();
         for (int i = businessIndex + 1; i < endIndex; i++) {
             OutlineMarker marker = markers.get(i);
-            if (marker.level >= 3 && isFunctionalOutlineTitle(marker.title)) {
+            int businessLevel = markers.get(businessIndex).level;
+            if (marker.level > businessLevel
+                    && (marker.level == businessLevel + 1 || isFunctionalOutlineTitle(marker.title))) {
                 candidates.add(marker);
             }
         }
@@ -234,7 +246,11 @@ public class RequirementCoverageService {
         for (int i = 0; i < starts.size(); i++) {
             int end = i + 1 < starts.size() ? starts.get(i + 1) : businessEndLine;
             OutlineMarker candidate = locatedCandidates.get(i);
-            ModuleBlock module = new ModuleBlock("OUTLINE" + (i + 1), candidate.title);
+            Matcher numbered = MODULE_HEADING.matcher(candidate.title);
+            String number = numbered.matches()
+                    ? numbered.group(1).replace('．', '.') : "OUTLINE" + (i + 1);
+            String title = numbered.matches() ? numbered.group(2).trim() : candidate.title;
+            ModuleBlock module = new ModuleBlock(number, title);
             for (int line = starts.get(i); line < end; line++) {
                 if (StringUtils.hasText(documentLines[line])) {
                     module.text.append(documentLines[line].trim()).append(System.lineSeparator());
@@ -260,6 +276,10 @@ public class RequirementCoverageService {
         return normalized.endsWith("模块")
                 || normalized.endsWith("报")
                 || normalized.endsWith("报告")
+                || normalized.endsWith("报表")
+                || normalized.endsWith("台账")
+                || normalized.endsWith("管控")
+                || normalized.endsWith("留存")
                 || containsAny(normalized, "查询", "新增", "修改", "删除", "上报", "填报", "归档", "配置", "派发", "评分", "汇总");
     }
 

@@ -382,6 +382,8 @@ public class ProjectMaterialExportService {
         target.setEvidence(source.getEvidence());
         target.setSourceReferences(source.getSourceReferences() == null
                 ? new ArrayList<String>() : new ArrayList<String>(source.getSourceReferences()));
+        target.setSourceHeadingPaths(source.getSourceHeadingPaths() == null
+                ? new ArrayList<String>() : new ArrayList<String>(source.getSourceHeadingPaths()));
         return target;
     }
 

@@ -8,6 +8,7 @@ public class BatchSplitCreateRequest {
     private List<String> projectIds = new ArrayList<String>();
     private String splitLevel = "REQUIREMENT";
     private boolean reuseCompletedResults;
+    private boolean reuseDegreeAdjustmentEnabled = true;
     private String projectGroupName;
 
     public List<String> getProjectIds() {
@@ -32,6 +33,14 @@ public class BatchSplitCreateRequest {
 
     public void setReuseCompletedResults(boolean reuseCompletedResults) {
         this.reuseCompletedResults = reuseCompletedResults;
+    }
+
+    public boolean isReuseDegreeAdjustmentEnabled() {
+        return reuseDegreeAdjustmentEnabled;
+    }
+
+    public void setReuseDegreeAdjustmentEnabled(boolean reuseDegreeAdjustmentEnabled) {
+        this.reuseDegreeAdjustmentEnabled = reuseDegreeAdjustmentEnabled;
     }
 
     public String getProjectGroupName() {

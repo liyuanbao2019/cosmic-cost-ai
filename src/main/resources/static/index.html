@@ -307,10 +307,16 @@
           <input id="fileInput" type="file" accept=".doc,.docx" multiple onchange="onDocumentFilesChanged()">
         </div>
         <div id="excelUploadField" class="upload-field hidden">
-          <label for="splitExcelInput">
-            <span>已拆分 Excel <em>（按附件3功能点拆分表导入）</em></span>
-          </label>
-          <input id="splitExcelInput" type="file" accept=".xlsx,.xls">
+          <div class="upload-field-head excel-upload-head">
+            <label for="splitExcelInput">
+              <span>已拆分 Excel <em>（可批量追加 xlsx 或 xls）</em><small id="batchExcelFileHint" class="batch-file-hint">每次选择都会追加到已选列表。</small></span>
+            </label>
+            <label class="excel-reuse-toggle" title="关闭后保留 Excel 中人工确认的复用度和 CFP，不调用复用度调整模型">
+              <input id="excelReuseAdjustmentEnabled" type="checkbox" checked onchange="updateReviewStageGuide()">
+              <span>复用度 AI 调整</span>
+            </label>
+          </div>
+          <input id="splitExcelInput" type="file" accept=".xlsx,.xls" multiple onchange="onExcelFilesChanged()">
         </div>
         <div class="actions">
           <button id="runBtn" type="button" onclick="startSplit()">开始拆分</button>
@@ -337,6 +343,7 @@
           <button id="batchAddExistingBtn" type="button" class="ghost hidden" onclick="addExistingRequirementsToProjectGroup()">添加已拆分需求</button>
           <button id="batchAddNewBtn" type="button" class="ghost hidden" onclick="chooseNewProjectGroupDocuments()">上传并添加新需求</button>
           <input id="batchAddFileInput" class="hidden" type="file" accept=".doc,.docx" multiple onchange="uploadAndAddProjectGroupDocuments()">
+          <button id="batchCancelItemBtn" type="button" class="ghost danger hidden" onclick="cancelCurrentBatchItem()">取消当前需求</button>
           <button id="batchRerunItemBtn" type="button" class="ghost hidden" onclick="rerunCurrentProjectGroupItem()">重新拆分当前需求</button>
           <button id="batchRetryBtn" type="button" class="ghost hidden" onclick="retryBatchSplitFailed()">恢复失败/中断项</button>
           <button id="batchStartBtn" type="button" onclick="startBatchSplitExecution()" disabled>等待全部确认</button>
@@ -362,6 +369,7 @@
             <div>
               <h3 id="batchDocumentTitle">请选择文档</h3>
               <span id="batchDocumentMeta" class="muted">-</span>
+              <div id="batchAiAttemptInfo" class="batch-ai-attempt-info hidden"></div>
             </div>
             <button id="batchOpenProjectBtn" type="button" class="ghost hidden" onclick="openBatchProject()">进入项目</button>
           </div>
@@ -681,6 +689,7 @@
     let cellEditorState = null;
     let splitMode = "document";
     let selectedDocumentFiles = [];
+    let selectedExcelFiles = [];
     let currentProjectSourceType = "";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
@@ -719,6 +728,7 @@
       subProcessDescription: "子过程描述",
       dataAttributes: "数据属性"
     };
+    const SPLIT_EXCEL_IMPORT_TIMEOUT_MS = 180000;
 
     function $(id) {
       return document.getElementById(id);
@@ -783,11 +793,16 @@
     }
 
     function smartSplitDeepReviewEnabled(job) {
-      return !!(job && job.deepSplitStatus !== "DISABLED");
+      return !!(job && job.deepSplitStatus !== "DISABLED"
+        && job.deepSplitStatus !== "SKIPPED_BY_USER");
     }
 
     function applySmartSplitDeepReviewMode(job) {
       const enabled = smartSplitDeepReviewEnabled(job);
+      const excelMode = isCurrentProjectExcelMode() || (job && job.sourceMode === "EXCEL");
+      const reuseEnabled = !excelMode || (job && job.sourceMode === "EXCEL"
+        ? job.reuseDegreeAdjustmentEnabled !== false
+        : excelReuseAdjustmentEnabled());
       ["smartStageDeepReview", "smartStageApply", "smartSplitDialogSuggestionStat",
         "smartSplitDialogAppliedStat", "deepSplitBtn"].forEach(function (id) {
         const element = $(id);
@@ -798,17 +813,21 @@
       if (!enabled && $("deepSplitPanel")) {
         $("deepSplitPanel").classList.add("hidden");
       }
+      if ($("smartStageReuse")) {
+        $("smartStageReuse").classList.toggle("hidden", !reuseEnabled);
+      }
       if ($("smartStageReuseIndex")) {
         $("smartStageReuseIndex").textContent = enabled ? "4" : "2";
       }
       if ($("smartStageRulesIndex")) {
-        $("smartStageRulesIndex").textContent = enabled ? "5" : "3";
+        $("smartStageRulesIndex").textContent = enabled ? (reuseEnabled ? "5" : "4") : (reuseEnabled ? "3" : "2");
       }
       if ($("smartSplitStageOrder")) {
         const firstStage = isCurrentProjectExcelMode() ? "Excel 载入" : "COSMIC 初拆";
         $("smartSplitStageOrder").textContent = enabled
-          ? firstStage + " → AI 深度审核 → 安全建议采纳 → 复用度调整 → 规则初审。"
-          : firstStage + " → 复用度调整 → 规则初审。";
+          ? firstStage + " → AI 深度审核 → 安全建议采纳"
+            + (reuseEnabled ? " → 复用度调整" : "") + " → 规则初审。"
+          : firstStage + (reuseEnabled ? " → 复用度调整" : "") + " → 规则初审。";
       }
       return enabled;
     }
@@ -844,10 +863,13 @@
       $("smartSplitDialogErrors").textContent = job ? Number(job.errorCount || 0) : "-";
       $("smartSplitDialogRisks").textContent = job ? Number(job.structureRiskCount || 0) : "-";
 
+      const reuseEnabled = !(job && job.sourceMode === "EXCEL"
+        && job.reuseDegreeAdjustmentEnabled === false);
       const stages = deepReviewEnabled
-        ? ["smartStageCosmic", "smartStageDeepReview", "smartStageApply", "smartStageReuse", "smartStageRules"]
-        : ["smartStageCosmic", "smartStageReuse", "smartStageRules"];
-      let currentIndex = smartSplitInternalStageIndex(job && job.stage, progress, deepReviewEnabled);
+        ? ["smartStageCosmic", "smartStageDeepReview", "smartStageApply"]
+          .concat(reuseEnabled ? ["smartStageReuse"] : []).concat(["smartStageRules"])
+        : ["smartStageCosmic"].concat(reuseEnabled ? ["smartStageReuse"] : []).concat(["smartStageRules"]);
+      let currentIndex = smartSplitInternalStageIndex(job && job.stage, progress, deepReviewEnabled, reuseEnabled);
       const completed = status === "COMPLETED" || status === "PARTIAL";
       stages.forEach(function (id, index) {
         let state = "pending";
@@ -880,13 +902,13 @@
       return normalized || emptyText || "—";
     }
 
-    function smartSplitInternalStageIndex(stage, progress, deepReviewEnabled) {
+    function smartSplitInternalStageIndex(stage, progress, deepReviewEnabled, reuseEnabled) {
       if (!deepReviewEnabled) {
         if (stage === "REUSE_ADJUSTING") return 1;
-        if (stage === "RULE_VALIDATING") return 2;
-        if (stage === "COMPLETED") return 3;
+        if (stage === "RULE_VALIDATING") return reuseEnabled === false ? 1 : 2;
+        if (stage === "COMPLETED") return reuseEnabled === false ? 2 : 3;
         if (stage === "FAILED") {
-          if (progress >= 88) return 2;
+          if (progress >= 88) return reuseEnabled === false ? 1 : 2;
           if (progress >= 62) return 1;
         }
         return stage ? 0 : -1;
@@ -894,8 +916,8 @@
       if (stage === "DEEP_REVIEWING" || stage === "DEEP_REVIEW_RETRYING") return 1;
       if (stage === "APPLYING_DEEP_REVIEW") return 2;
       if (stage === "REUSE_ADJUSTING") return 3;
-      if (stage === "RULE_VALIDATING") return 4;
-      if (stage === "COMPLETED") return 5;
+      if (stage === "RULE_VALIDATING") return reuseEnabled === false ? 3 : 4;
+      if (stage === "COMPLETED") return reuseEnabled === false ? 4 : 5;
       if (stage === "FAILED") {
         if (progress >= 94) return 4;
         if (progress >= 80) return 3;
@@ -1269,9 +1291,11 @@
       }
       if (!keepFiles) {
         selectedDocumentFiles = [];
+        selectedExcelFiles = [];
         $("fileInput").value = "";
         $("splitExcelInput").value = "";
         onDocumentFilesChanged();
+        onExcelFilesChanged();
       }
       if (resetFlow) {
         resetFlowStateForMode();
@@ -1282,15 +1306,18 @@
 
     function updateReviewStageGuide() {
       const excelMode = isCurrentProjectExcelMode();
+      const adjustExcelReuse = !excelMode || excelReuseAdjustmentEnabled();
       const deepReviewEnabled = applySmartSplitDeepReviewMode(currentSmartSplitJob);
       if ($("reviewStageSubtitle")) {
-        $("reviewStageSubtitle").textContent = deepReviewEnabled
+        $("reviewStageSubtitle").textContent = excelMode && !adjustExcelReuse
+          ? "一次启动，载入 Excel、保留人工复用度并完成规则校验"
+          : (deepReviewEnabled
           ? (excelMode
             ? "一次启动，自动完成表格深审、复用度调整和规则校验"
             : "一次启动，自动完成 COSMIC 初拆、原文深审、复用度调整和规则校验")
           : (excelMode
             ? "一次启动，自动完成 Excel 载入、复用度调整和规则校验"
-            : "一次启动，自动完成 COSMIC 初拆、复用度调整和规则校验");
+            : "一次启动，自动完成 COSMIC 初拆、复用度调整和规则校验"));
       }
       if ($("stageAiSplitTitle")) {
         $("stageAiSplitTitle").textContent = excelMode
@@ -1313,11 +1340,13 @@
           : "AI 对照原文检查漏功能、错拆、重复计量和 E/R/W/X 缺失；有证据、无冲突且不增加确定性错误的建议会自动采纳。";
       }
       if ($("reviewStageNoteText")) {
-        $("reviewStageNoteText").textContent = deepReviewEnabled
+        $("reviewStageNoteText").textContent = excelMode && !adjustExcelReuse
+          ? "已按用户选择跳过复用度 AI 调整，Excel 中人工确认的新增、复用、利旧和 CFP 将保持不变。"
+          : (deepReviewEnabled
           ? (excelMode
             ? "以上内部步骤使用同一规则自动执行；Excel 模式的深度审核仅依据当前表格。"
             : "以上内部步骤使用同一规则自动执行；人工大幅修改表格后可重新执行深度审核。")
-          : "AI 深度审核已暂时关闭，流程不会发起深审模型请求。";
+          : "AI 深度审核已暂时关闭，流程不会发起深审模型请求。");
       }
       if (deepReviewEnabled && $("deepSplitBtn")) {
         $("deepSplitBtn").title = excelMode
@@ -1635,18 +1664,26 @@
       renderSmartSplitDialog(currentSmartSplitJob);
       const progress = Math.max(0, Math.min(100, Number(currentSmartSplitJob.progressPercent) || 0));
       const message = textOr(currentSmartSplitJob.stageMessage, "正在执行 AI 智能拆分");
-      setMessage("AI 智能拆分 " + progress + "%：" + message,
+      const prefix = currentSmartSplitJob.sourceMode === "EXCEL"
+        && currentSmartSplitJob.reuseDegreeAdjustmentEnabled === false
+        ? "Excel 送审处理 " : "AI 智能拆分 ";
+      setMessage(prefix + progress + "%：" + message,
         currentSmartSplitJob.status === "FAILED" ? "error" : "");
     }
 
-    async function executeSmartSplitWorkflow(sourceMode, prompt) {
+    async function executeSmartSplitWorkflow(sourceMode, prompt, reuseDegreeAdjustmentEnabled) {
       const workflowProjectId = currentProjectId;
+      const adjustReuseDegree = reuseDegreeAdjustmentEnabled !== false;
       markActive("ai");
       setAiCosmicSplitRunning(true, "ai");
       const response = await request("/api/projects/" + workflowProjectId + "/smart-split", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceMode: sourceMode || "DOCUMENT", prompt: prompt || "" })
+        body: JSON.stringify({
+          sourceMode: sourceMode || "DOCUMENT",
+          prompt: prompt || "",
+          reuseDegreeAdjustmentEnabled: adjustReuseDegree
+        })
       });
       let workflowJob = response.data || {};
       if (currentProjectId === workflowProjectId) {
@@ -1681,13 +1718,17 @@
       markActive("review");
       setAiCosmicSplitRunning(false);
       const deepReviewEnabled = smartSplitDeepReviewEnabled(currentSmartSplitJob);
-      const summary = "AI 智能拆分" + (currentSmartSplitJob.status === "PARTIAL" ? "部分" : "全部")
+      const skippedExcelReuse = currentSmartSplitJob.sourceMode === "EXCEL"
+        && currentSmartSplitJob.reuseDegreeAdjustmentEnabled === false;
+      const summary = skippedExcelReuse
+        ? "Excel 已载入，已保留人工确认的复用度和 CFP，并完成规则初审。"
+        : ("AI 智能拆分" + (currentSmartSplitJob.status === "PARTIAL" ? "部分" : "全部")
         + "完成：" + (deepReviewEnabled
           ? "深度审核提出 " + Number(currentSmartSplitJob.deepSuggestionCount || 0)
             + " 条建议，自动采纳 " + Number(currentSmartSplitJob.appliedSuggestionCount || 0) + " 条；"
           : "AI 深度审核已关闭；")
         + "确定性错误 " + Number(currentSmartSplitJob.errorCount || 0)
-        + " 条，结构风险 " + Number(currentSmartSplitJob.structureRiskCount || 0) + " 条。";
+        + " 条，结构风险 " + Number(currentSmartSplitJob.structureRiskCount || 0) + " 条。");
       setMessage(summary, currentSmartSplitJob.status === "PARTIAL" ? "error" : "success");
       return currentSmartSplitJob;
     }
@@ -1769,9 +1810,13 @@
         $("splitLevel").value = "REQUIREMENT";
       }
       selectedDocumentFiles = [];
+      selectedExcelFiles = [];
       $("fileInput").value = "";
       if ($("splitExcelInput")) {
         $("splitExcelInput").value = "";
+      }
+      if ($("excelReuseAdjustmentEnabled")) {
+        $("excelReuseAdjustmentEnabled").checked = true;
       }
       if ($("polishFunctionDescriptionInput")) {
         $("polishFunctionDescriptionInput").checked = false;
@@ -1795,6 +1840,7 @@
       $("batchSplitPanel").classList.add("hidden");
       $("singleFlowPanel").classList.remove("hidden");
       onDocumentFilesChanged();
+      onExcelFilesChanged();
       $("parsePanel").classList.add("hidden");
       $("chapterSelectionPanel").classList.add("hidden");
       $("reviewPanel").classList.add("hidden");
@@ -1808,7 +1854,11 @@
 
     async function startSplit() {
       if (splitMode === "excel") {
-        await importSplitExcel();
+        if (selectedExcelFiles.length > 1 || selectedSplitLevel() === "PROJECT") {
+          await startBatchExcelPreparation();
+        } else {
+          await importSplitExcel();
+        }
         return;
       }
       if (selectedDocumentFiles.length > 1 || selectedSplitLevel() === "PROJECT") {
@@ -1837,7 +1887,7 @@
           : "每次选择都会追加到已选列表，可继续点击选择其他目录。";
       }
       const button = $("runBtn");
-      if (button && !button.disabled) {
+      if (button && !button.disabled && splitMode === "document") {
         button.textContent = count === 0 ? "开始拆分"
           : (count > 1 || selectedSplitLevel() === "PROJECT"
             ? "导入并确认（" + count + "）" : "开始拆分");
@@ -1850,6 +1900,7 @@
 
     function onSplitLevelChange() {
       onDocumentFilesChanged();
+      onExcelFilesChanged();
       const projectLevel = selectedSplitLevel() === "PROJECT";
       setMessage(projectLevel
         ? "项目级将在逐份确认并完成智能拆分后，同时生成各需求送审材料和项目级附件 1–5。"
@@ -1962,6 +2013,145 @@
       return results;
     }
 
+    async function startBatchExcelPreparation() {
+      if (!$("projectName").value) {
+        showDialog("请选择项目名称", "请先选择本批拆分表所属的备案项目名称。");
+        return;
+      }
+      const files = selectedExcelFiles.slice();
+      if (!files.length) {
+        showDialog("请先上传已拆分 Excel", "请选择一份或多份 xlsx、xls 格式的功能点拆分表。");
+        return;
+      }
+      const invalid = files.filter(function (file) {
+        return !/\.(xlsx|xls)$/i.test(file.name || "");
+      });
+      if (invalid.length) {
+        showDialog("文件格式不支持", "以下文件不是 xlsx 或 xls：\n"
+          + invalid.map(function (file) { return file.name; }).join("\n"));
+        return;
+      }
+      await withBusy(async function () {
+        setBatchModeActive(true);
+        setMessage("正在导入并解析 " + files.length + " 份拆分表...");
+        const importResult = await uploadBatchSplitExcels(files, $("projectName").value);
+        const projectIds = importResult.projectIds;
+        const importFailures = importResult.failures;
+        if (!projectIds.length) {
+          const failureDetails = formatBatchExcelImportFailures(importFailures);
+          setMessage("拆分表导入完成：成功 0，失败 " + importFailures.length + "。", "error");
+          showDialog("全部拆分表导入失败", failureDetails);
+          return;
+        }
+        const adjustReuseDegree = excelReuseAdjustmentEnabled();
+        const response = await request("/api/projects/batch-split", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectIds: projectIds,
+            splitLevel: selectedSplitLevel(),
+            reuseDegreeAdjustmentEnabled: adjustReuseDegree
+          })
+        });
+        currentBatchSplitJob = response.data || null;
+        history.replaceState(null, "", "/index.html?batchId=" + encodeURIComponent(currentBatchSplitJob.batchId));
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        const started = await waitForBatchExcelReadyAndStart(currentBatchSplitJob.batchId);
+        const successMessage = started
+          ? (adjustReuseDegree
+            ? "Excel 已批量导入，正在并发执行复用度 AI 调整和规则初审。"
+            : "Excel 已批量导入，正在并发保留人工复用度并执行规则初审；完成后可生成送审总包。")
+          : "Excel 已导入，后台仍在载入批次；就绪后可点击“开始并发处理”。";
+        if (importFailures.length) {
+          setMessage("拆分表已全部处理：成功 " + projectIds.length + "，失败 " + importFailures.length
+            + "；成功项已进入批次继续处理。", "error");
+          showDialog("部分拆分表导入失败",
+            "成功 " + projectIds.length + " 份，失败 " + importFailures.length
+            + " 份。成功项不会受影响，已进入当前批次。\n\n"
+            + formatBatchExcelImportFailures(importFailures));
+        } else {
+          setMessage(successMessage, "success");
+        }
+      });
+    }
+
+    async function waitForBatchExcelReadyAndStart(batchId) {
+      for (let attempt = 0; attempt < 80; attempt++) {
+        const response = await request("/api/projects/batch-split/" + encodeURIComponent(batchId));
+        currentBatchSplitJob = response.data || currentBatchSplitJob;
+        renderBatchSplitJob();
+        if (currentBatchSplitJob.status === "READY") {
+          const started = await request("/api/projects/batch-split/" + encodeURIComponent(batchId)
+            + "/start", { method: "POST" });
+          currentBatchSplitJob = started.data || currentBatchSplitJob;
+          renderBatchSplitJob();
+          startBatchSplitPolling();
+          return true;
+        }
+        if (currentBatchSplitJob.failed > 0 || currentBatchSplitJob.status === "PARTIAL_COMPLETED") {
+          return false;
+        }
+        await new Promise(function (resolve) { window.setTimeout(resolve, 250); });
+      }
+      return false;
+    }
+
+    async function uploadBatchSplitExcels(files, projectName) {
+      const results = new Array(files.length);
+      const failures = [];
+      let nextIndex = 0;
+      let completedCount = 0;
+      let successCount = 0;
+      const workerCount = Math.min(3, files.length);
+      const workers = [];
+      for (let worker = 0; worker < workerCount; worker++) {
+        workers.push((async function () {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= files.length) return;
+            const currentFile = files[index];
+            const formData = new FormData();
+            formData.append("file", currentFile);
+            formData.append("projectName", projectName || currentFile.name.replace(/\.[^.]+$/, ""));
+            formData.append("splitLevel", "REQUIREMENT");
+            setMessage("正在导入拆分表... 已处理 " + completedCount + "/" + files.length
+              + "；当前：" + currentFile.name);
+            try {
+              const imported = await requestWithTimeout("/api/files/upload-split-excel", {
+                method: "POST",
+                body: formData
+              }, SPLIT_EXCEL_IMPORT_TIMEOUT_MS, "导入“" + currentFile.name + "”");
+              results[index] = imported.data.projectId;
+              successCount++;
+            } catch (error) {
+              failures.push({
+                index: index,
+                fileName: currentFile.name,
+                message: buildSplitExcelImportError(error)
+              });
+            } finally {
+              completedCount++;
+              setMessage("正在导入拆分表... 已处理 " + completedCount + "/" + files.length
+                + "，成功 " + successCount + "，失败 " + failures.length);
+            }
+          }
+        })());
+      }
+      await Promise.all(workers);
+      failures.sort(function (left, right) { return left.index - right.index; });
+      return {
+        projectIds: results.filter(Boolean),
+        failures: failures
+      };
+    }
+
+    function formatBatchExcelImportFailures(failures) {
+      return (failures || []).map(function (failure, index) {
+        return (index + 1) + ". " + failure.fileName + "\n" + failure.message;
+      }).join("\n\n");
+    }
+
     function setBatchModeActive(active) {
       $("batchSplitPanel").classList.toggle("hidden", !active);
       $("singleFlowPanel").classList.toggle("hidden", active);
@@ -1977,6 +2167,11 @@
       setBatchModeActive(true);
       const response = await request("/api/projects/batch-split/" + encodeURIComponent(batchId));
       currentBatchSplitJob = response.data || null;
+      const batchItems = currentBatchSplitJob && currentBatchSplitJob.items || [];
+      if (batchItems.length && batchItems.every(function (item) { return item.existingRows; })) {
+        setSplitMode("excel", true, false);
+        $("excelReuseAdjustmentEnabled").checked = currentBatchSplitJob.reuseDegreeAdjustmentEnabled !== false;
+      }
       if ($("splitLevel") && currentBatchSplitJob && currentBatchSplitJob.splitLevel) {
         $("splitLevel").value = currentBatchSplitJob.splitLevel;
       }
@@ -2100,6 +2295,7 @@
         }
       }
       updateBatchProjectActions();
+      renderBatchSelectedItemStatus();
     }
 
     async function openBatchSummaryDialog() {
@@ -2219,6 +2415,9 @@
     }
 
     function batchJobSummary(job) {
+      const excelBatch = (job.items || []).length > 0 && (job.items || []).every(function (item) {
+        return item.existingRows;
+      });
       const interruptedCount = (job.items || []).filter(function (item) {
         return item.status === "FAILED" && item.stage === "RESTART_INTERRUPTED";
       }).length;
@@ -2227,12 +2426,17 @@
           + " 个未完成任务，不会自动恢复；已完成结果保留，请手动点击“恢复中断项”。";
       }
       if (job.status === "PREPARING") {
-        return "正在解析文档：实际解析 " + (job.preparing || 0) + "，等待解析 "
+        return (excelBatch ? "正在载入拆分表：实际处理 " : "正在解析文档：实际解析 ")
+          + (job.preparing || 0) + (excelBatch ? "，等待处理 " : "，等待解析 ")
           + (job.parseQueued || 0) + "，已就绪 " + (job.awaitingConfirmation + job.confirmed)
           + "/" + job.total + "。";
       }
       if (job.status === "READY") {
-        return "全部文档的 AI 输入已经确认，可以开始并发拆分。";
+        return excelBatch
+          ? (job.reuseDegreeAdjustmentEnabled === false
+            ? "全部拆分表已载入，可以并发执行规则初审；将保留人工复用度和 CFP。"
+            : "全部拆分表已载入，可以并发执行复用度 AI 调整和规则初审。")
+          : "全部文档的 AI 输入已经确认，可以开始并发拆分。";
       }
       if (job.status === "RUNNING") {
         return "正在并发拆分（跨批次公平调度）：实际执行 " + (job.running || 0) + "，排队 " + (job.queued || 0)
@@ -2247,8 +2451,10 @@
       }
       if (job.status === "COMPLETED") {
         return job.splitLevel === "PROJECT"
-          ? "全部 " + job.total + " 份需求已完成智能拆分，单需求及项目级送审材料均已生成。"
-          : "全部 " + job.total + " 份需求文档已完成智能拆分和规则初审。";
+          ? "全部 " + job.total + " 份需求已完成处理，单需求及项目级送审材料均已生成。"
+          : (excelBatch && job.reuseDegreeAdjustmentEnabled === false
+            ? "全部 " + job.total + " 份拆分表已保留人工复用度并完成规则初审，可生成全量单需求送审包。"
+            : "全部 " + job.total + " 份需求文档已完成智能拆分和规则初审。");
       }
       if (job.status === "PARTIAL_COMPLETED") {
         return "批量拆分部分完成：成功 " + job.completed + "，失败 " + job.failed + "。"
@@ -2280,13 +2486,18 @@
       if (status === "QUEUED") return "排队中";
       if (status === "RUNNING") return batchStageText(item.stage);
       if (status === "COMPLETED") return "已完成";
-      if (status === "FAILED") return item.stage === "RESTART_INTERRUPTED" ? "已中断" : "失败";
+      if (status === "FAILED") {
+        if (item.stage === "RESTART_INTERRUPTED") return "已中断";
+        if (item.stage === "CANCELLED") return "已取消";
+        return "失败";
+      }
       return status || "-";
     }
 
     function batchStageText(stage) {
       if (stage === "INPUT_COVERAGE_CHECK") return "正文完整性校验";
       if (stage === "AI_EXTRACTING") return "AI 识别功能";
+      if (stage === "CANCEL_REQUESTED") return "正在取消";
       if (stage === "COSMIC_SPLITTING") return "COSMIC 初拆";
       if (stage === "DEEP_REVIEWING" || stage === "DEEP_REVIEW_RETRYING") return "AI 深度审核";
       if (stage === "APPLYING_DEEP_REVIEW") return "安全建议采纳";
@@ -2401,26 +2612,17 @@
       if (!item) {
         return;
       }
-      $("batchDocumentTitle").textContent = item.sourceFileName || item.projectId;
-      $("batchDocumentMeta").textContent = item.projectId + " · " + batchItemStatusText(item)
-        + (item.progressPercent ? " · " + Number(item.progressPercent) + "%" : "")
-        + (item.inputLength ? " · 已确认 " + Number(item.inputLength).toLocaleString() + " 字" : "")
-        + (item.stageMessage ? " · " + item.stageMessage : "");
-      const currentRequirementWarning = item.confirmedAt || Number(item.inputLength || 0) > 0
-        ? "" : (item.requirementWarning || "");
-      $("batchRequirementWarning").textContent = currentRequirementWarning;
-      $("batchRequirementWarning").classList.toggle("hidden", !currentRequirementWarning);
-      $("batchSelectedItemErrorText").textContent = item.errorMessage || "";
-      $("batchSelectedItemError").classList.toggle("hidden", !item.errorMessage);
-      $("batchOpenProjectBtn").classList.toggle("hidden", item.status !== "COMPLETED");
-      updateBatchProjectActions();
+      renderBatchSelectedItemStatus();
 
       if (item.existingRows) {
         batchLoadedProjectId = "";
         batchChapterSelectionData = null;
         $("batchInputEditor").classList.add("hidden");
         $("batchInputEmpty").classList.remove("hidden");
-        $("batchInputEmpty").textContent = item.stageMessage || "已导入拆分表，将执行统一智能校准。";
+        $("batchInputEmpty").textContent = item.stageMessage
+          || (currentBatchSplitJob && currentBatchSplitJob.reuseDegreeAdjustmentEnabled === false
+            ? "已导入拆分表，将保留人工复用度并执行规则初审。"
+            : "已导入拆分表，将执行复用度 AI 调整和规则初审。");
         return;
       }
 
@@ -2713,7 +2915,64 @@
       const item = currentBatchItem();
       const rerunnable = currentBatchSplitJob && item
         && (item.status === "COMPLETED" || item.status === "FAILED");
+      const cancellable = currentBatchSplitJob && item && (item.status === "QUEUED"
+        || (item.status === "RUNNING" && item.stage === "AI_EXTRACTING"));
       $("batchRerunItemBtn").classList.toggle("hidden", !rerunnable);
+      $("batchCancelItemBtn").classList.toggle("hidden", !cancellable);
+    }
+
+    function renderBatchSelectedItemStatus() {
+      const item = currentBatchItem();
+      if (!item) {
+        $("batchAiAttemptInfo").classList.add("hidden");
+        return;
+      }
+      $("batchDocumentTitle").textContent = item.sourceFileName || item.projectId;
+      $("batchDocumentMeta").textContent = item.projectId + " · " + batchItemStatusText(item)
+        + (item.progressPercent ? " · " + Number(item.progressPercent) + "%" : "")
+        + (item.inputLength ? " · 已确认 " + Number(item.inputLength).toLocaleString() + " 字" : "")
+        + (item.stageMessage ? " · " + item.stageMessage : "");
+      const currentRequirementWarning = item.confirmedAt || Number(item.inputLength || 0) > 0
+        ? "" : (item.requirementWarning || "");
+      $("batchRequirementWarning").textContent = currentRequirementWarning;
+      $("batchRequirementWarning").classList.toggle("hidden", !currentRequirementWarning);
+      $("batchSelectedItemErrorText").textContent = item.errorMessage || "";
+      $("batchSelectedItemError").classList.toggle("hidden", !item.errorMessage);
+      $("batchOpenProjectBtn").classList.toggle("hidden", item.status !== "COMPLETED");
+      renderBatchAiAttemptInfo(item);
+      updateBatchProjectActions();
+    }
+
+    function parseBatchDateTime(value) {
+      if (!value) return null;
+      const parsed = new Date(String(value).replace(" ", "T"));
+      return isNaN(parsed.getTime()) ? null : parsed;
+    }
+
+    function formatBatchDuration(totalSeconds) {
+      const seconds = Math.max(0, Math.floor(Number(totalSeconds || 0)));
+      const minutes = Math.floor(seconds / 60);
+      const remainder = seconds % 60;
+      return String(minutes).padStart(2, "0") + ":" + String(remainder).padStart(2, "0");
+    }
+
+    function renderBatchAiAttemptInfo(item) {
+      const panel = $("batchAiAttemptInfo");
+      if (!item || !item.aiAttempt || !item.aiMaxAttempts
+          || (item.stage !== "AI_EXTRACTING" && item.stage !== "CANCEL_REQUESTED")) {
+        panel.classList.add("hidden");
+        return;
+      }
+      const nowTime = Date.now();
+      const started = parseBatchDateTime(item.aiAttemptStartedAt);
+      const deadline = parseBatchDateTime(item.aiAttemptDeadlineAt);
+      const elapsed = started ? formatBatchDuration((nowTime - started.getTime()) / 1000) : "--:--";
+      const remaining = deadline ? formatBatchDuration((deadline.getTime() - nowTime) / 1000) : "--:--";
+      panel.textContent = "第 " + item.aiAttempt + "/" + item.aiMaxAttempts + " 次请求"
+        + " · 已等待 " + elapsed
+        + (item.stage === "CANCEL_REQUESTED" ? " · 正在取消请求" : " · 本次超时剩余约 " + remaining)
+        + " · 推理强度始终为 max（无 high 降级）";
+      panel.classList.remove("hidden");
     }
 
     async function addExistingRequirementsToProjectGroup() {
@@ -2895,6 +3154,56 @@
       }
     }
 
+    function onExcelFilesChanged() {
+      const input = $("splitExcelInput");
+      const incoming = input && input.files ? Array.prototype.slice.call(input.files) : [];
+      if (incoming.length) {
+        incoming.forEach(function (file) {
+          selectedExcelFiles.push(file);
+        });
+        input.value = "";
+      }
+      const count = selectedExcelFiles.length;
+      const hint = $("batchExcelFileHint");
+      if (hint) {
+        hint.textContent = count > 0
+          ? "已累计选择 " + count + " 份拆分表；可继续追加其它目录。"
+          : "每次选择都会追加到已选列表。";
+      }
+      const button = $("runBtn");
+      if (button && !button.disabled && splitMode === "excel") {
+        button.textContent = count === 0 ? "开始拆分"
+          : (count > 1 || selectedSplitLevel() === "PROJECT"
+            ? "导入并开始批量处理（" + count + "）" : "导入并处理");
+      }
+    }
+
+    function excelReuseAdjustmentEnabled() {
+      return !$("excelReuseAdjustmentEnabled") || $("excelReuseAdjustmentEnabled").checked;
+    }
+
+    async function cancelCurrentBatchItem() {
+      const item = currentBatchItem();
+      if (!currentBatchSplitJob || !item) return;
+      if (!window.confirm("确认取消“" + (item.sourceFileName || item.projectId)
+        + "”当前这次 AI 识别？\n\n只取消这一项，批次中的其他需求会继续执行；取消完成后可重新拆分。")) return;
+      const button = $("batchCancelItemBtn");
+      button.disabled = true;
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/items/"
+          + encodeURIComponent(item.projectId) + "/cancel", { method: "POST" });
+        currentBatchSplitJob = response.data || currentBatchSplitJob;
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("已提交当前需求的取消请求；其他需求继续执行，推理强度不会降级。", "success");
+      } catch (error) {
+        showDialog("取消当前需求失败", error.message || "请稍后重试。");
+      } finally {
+        button.disabled = false;
+      }
+    }
+
     function openBatchProject() {
       if (batchSelectedProjectId) {
         location.href = "/index.html?projectId=" + encodeURIComponent(batchSelectedProjectId);
@@ -3068,7 +3377,7 @@
         showDialog("请选择项目名称", "请先选择项目名称，再导入已拆分 Excel。");
         return;
       }
-      const file = $("splitExcelInput").files[0];
+      const file = selectedExcelFiles[0];
       if (!file) {
         showDialog("请先上传已拆分 Excel", "请选择 xlsx 或 xls 格式的功能点拆分表。");
         return;
@@ -3087,12 +3396,22 @@
           $("projectBadge").className = "badge";
           history.replaceState(null, "", "/index.html?projectId=" + encodeURIComponent(currentProjectId));
 
-          $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n系统将自动执行复用度调整和规则初审，再进入人工审核。";
+          const adjustReuseDegree = excelReuseAdjustmentEnabled();
+          $("preview").value = "已从 Excel 导入功能点拆分数据，共 " + ((imported.data.splitRows || []).length) + " 行。\n\n"
+            + (adjustReuseDegree
+              ? "系统将自动执行复用度 AI 调整和规则初审，再进入人工审核。"
+              : "系统将保留 Excel 中人工确认的复用度和 CFP，仅执行规则初审。完成后可直接生成送审材料。");
           $("parsePanel").classList.add("hidden");
           $("chapterSelectionPanel").classList.add("hidden");
           await loadReview();
-          setMessage("Excel 已导入，正在自动执行复用度调整和规则初审...");
-          await executeSmartSplitWorkflow("EXCEL", "");
+          setMessage(adjustReuseDegree
+            ? "Excel 已导入，正在自动执行复用度 AI 调整和规则初审..."
+            : "Excel 已导入，正在保留人工复用度并执行规则初审...");
+          await executeSmartSplitWorkflow("EXCEL", "", adjustReuseDegree);
+          if (!adjustReuseDegree) {
+            setMessage("人工复用度已保留，正在直接生成 Word、汇总表、功能点表和送审压缩包...");
+            await exportReviewMaterials();
+          }
         });
       } catch (error) {
         markActive("ai");
@@ -5496,6 +5815,23 @@
       return payload;
     }
 
+    async function requestWithTimeout(url, options, timeoutMs, operationLabel) {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(function () { controller.abort(); }, timeoutMs);
+      const requestOptions = Object.assign({}, options || {}, { signal: controller.signal });
+      try {
+        return await request(url, requestOptions);
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          throw new Error((operationLabel || "请求") + "超过 " + Math.round(timeoutMs / 1000)
+            + " 秒仍未完成，已停止等待；其他文件会继续处理。");
+        }
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
     function formatCfp(value) {
       const number = Number(value || 0);
       if (Math.abs(number - Math.round(number)) < 0.000001) {
@@ -5514,6 +5850,9 @@
     }
 
     window.addEventListener("DOMContentLoaded", function () {
+      window.setInterval(function () {
+        renderBatchAiAttemptInfo(currentBatchItem());
+      }, 1000);
       setSplitMode("document", true, true);
       const params = new URLSearchParams(location.search);
       const batchId = params.get("batchId");

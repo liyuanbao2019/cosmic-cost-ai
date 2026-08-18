@@ -51,6 +51,8 @@ public class SingleSmartSplitService {
         fileStorageService.loadMetadata(projectId);
         final String sourceMode = normalizeSourceMode(request == null ? null : request.getSourceMode());
         final String prompt = request == null ? "" : text(request.getPrompt());
+        final boolean reuseDegreeAdjustmentEnabled = request == null
+                || request.isReuseDegreeAdjustmentEnabled();
         synchronized (lockFor(projectId)) {
             String activeJobId = activeJobs.get(projectId);
             if (StringUtils.hasText(activeJobId)) {
@@ -66,9 +68,12 @@ public class SingleSmartSplitService {
                     + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase(Locale.ROOT));
             state.setProjectId(projectId);
             state.setSourceMode(sourceMode);
+            state.setReuseDegreeAdjustmentEnabled(reuseDegreeAdjustmentEnabled);
             state.setStatus("QUEUED");
             state.setStage("QUEUED");
-            state.setStageMessage("AI 智能拆分任务已进入队列");
+            state.setStageMessage("EXCEL".equals(sourceMode) && !reuseDegreeAdjustmentEnabled
+                    ? "Excel 载入与送审校验任务已进入队列"
+                    : "AI 智能拆分任务已进入队列");
             state.setDeepSplitStatus(pipelineService.isDeepReviewEnabled() ? "PENDING" : "DISABLED");
             state.setProgressPercent(0);
             state.setCreatedAt(now());
@@ -80,7 +85,8 @@ public class SingleSmartSplitService {
                     @Override
                     public void run() {
                         SingleSmartSplitService.this.run(
-                                state.getProjectId(), state.getJobId(), sourceMode, prompt);
+                                state.getProjectId(), state.getJobId(), sourceMode, prompt,
+                                reuseDegreeAdjustmentEnabled);
                     }
                 });
             } catch (RuntimeException ex) {
@@ -101,7 +107,8 @@ public class SingleSmartSplitService {
         fileStorageService.loadMetadata(projectId);
         synchronized (lockFor(projectId)) {
             SmartSplitJobResponse state = loadState(projectId);
-            if (!pipelineService.isDeepReviewEnabled()) {
+            if (!pipelineService.isDeepReviewEnabled()
+                    && !"SKIPPED_BY_USER".equals(state.getDeepSplitStatus())) {
                 state.setDeepSplitStatus("DISABLED");
             }
             if (active(state.getStatus()) && !state.getJobId().equals(activeJobs.get(projectId))) {
@@ -120,13 +127,16 @@ public class SingleSmartSplitService {
     private void run(final String projectId,
                      final String jobId,
                      String sourceMode,
-                     String prompt) {
+                     String prompt,
+                     boolean reuseDegreeAdjustmentEnabled) {
         update(projectId, jobId, new StateMutation() {
             @Override
             public void apply(SmartSplitJobResponse state) {
                 state.setStatus("RUNNING");
                 state.setStage("STARTING");
-                state.setStageMessage("正在启动统一 AI 智能拆分流水线");
+                state.setStageMessage("EXCEL".equals(sourceMode) && !reuseDegreeAdjustmentEnabled
+                        ? "正在载入 Excel 并保留人工复用度"
+                        : "正在启动统一 AI 智能拆分流水线");
                 state.setProgressPercent(2);
                 if (!StringUtils.hasText(state.getStartedAt())) {
                     state.setStartedAt(now());
@@ -149,7 +159,7 @@ public class SingleSmartSplitService {
                 }
             };
             final SmartSplitPipelineService.PipelineResult result = "EXCEL".equals(sourceMode)
-                    ? pipelineService.runExistingRows(projectId, listener)
+                    ? pipelineService.runExistingRows(projectId, reuseDegreeAdjustmentEnabled, listener)
                     : pipelineService.runDocument(projectId, prompt, listener);
             update(projectId, jobId, new StateMutation() {
                 @Override
@@ -157,9 +167,11 @@ public class SingleSmartSplitService {
                     RuleValidationResponse validation = result.getValidation();
                     state.setStatus(result.isPartial() ? "PARTIAL" : "COMPLETED");
                     state.setStage("COMPLETED");
-                    state.setStageMessage(result.isPartial()
+                    state.setStageMessage(!state.isReuseDegreeAdjustmentEnabled() && "EXCEL".equals(state.getSourceMode())
+                            ? "已保留 Excel 人工拆分结果并完成规则初审"
+                            : (result.isPartial()
                             ? "智能拆分部分完成，已进入人工审核"
-                            : "智能拆分、复用度调整和规则初审已完成");
+                            : "智能拆分、复用度调整和规则初审已完成"));
                     state.setProgressPercent(100);
                     state.setDeepSplitJobId(result.getDeepSplitJobId());
                     state.setDeepSplitStatus(result.getDeepSplitStatus());

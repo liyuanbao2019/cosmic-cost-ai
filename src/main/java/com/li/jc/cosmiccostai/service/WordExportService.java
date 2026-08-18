@@ -66,6 +66,7 @@ public class WordExportService {
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
+    private final RequirementHierarchyService requirementHierarchyService;
 
     public WordExportService(FileStorageService fileStorageService,
                              @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
@@ -93,6 +94,7 @@ public class WordExportService {
         this.functionDescriptionAiService = functionDescriptionAiService;
         this.exportProgressService = exportProgressService;
         this.ruleValidationService = ruleValidationService;
+        this.requirementHierarchyService = new RequirementHierarchyService(fileStorageService);
         this.objectMapper = new ObjectMapper();
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
@@ -104,6 +106,7 @@ public class WordExportService {
 
         List<CosmicResult> results = readCosmicResults(Paths.get(metadata.getCosmicResultsPath()));
         List<FunctionSplitRow> rows = readReviewedRows(metadata);
+        requirementHierarchyService.enrichRows(metadata, rows);
         RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         ruleValidationService.ensureReadyForExport(rows, "导出送审 Word");
         List<FunctionGroup> groups = groupRows(rows);
@@ -309,8 +312,17 @@ public class WordExportService {
                     continue;
                 }
                 currentProject = carry(currentProject, cellText(row.getCell(0), formatter, evaluator));
-                currentLevel1 = carry(currentLevel1, cellText(row.getCell(1), formatter, evaluator));
-                currentLevel2 = carry(currentLevel2, cellText(row.getCell(2), formatter, evaluator));
+                String level1Cell = cellText(row.getCell(1), formatter, evaluator);
+                if (StringUtils.hasText(level1Cell) && !level1Cell.equals(currentLevel1)) {
+                    currentLevel2 = "";
+                    currentLevel3 = "";
+                }
+                currentLevel1 = carry(currentLevel1, level1Cell);
+                String level2Cell = cellText(row.getCell(2), formatter, evaluator);
+                if (StringUtils.hasText(level2Cell) && !level2Cell.equals(currentLevel2)) {
+                    currentLevel3 = "";
+                }
+                currentLevel2 = carry(currentLevel2, level2Cell);
                 currentLevel3 = carry(currentLevel3, cellText(row.getCell(3), formatter, evaluator));
                 currentUser = carry(currentUser, cellText(row.getCell(4), formatter, evaluator));
                 currentTrigger = carry(currentTrigger, cellText(row.getCell(5), formatter, evaluator));
@@ -325,8 +337,8 @@ public class WordExportService {
                 FunctionSplitRow splitRow = new FunctionSplitRow();
                 splitRow.setProjectName(currentProject);
                 splitRow.setLevel1Module(currentLevel1);
-                splitRow.setLevel2Module(StringUtils.hasText(currentLevel2) ? currentLevel2 : currentLevel1);
-                splitRow.setLevel3Module(StringUtils.hasText(currentLevel3) ? currentLevel3 : splitRow.getLevel2Module());
+                splitRow.setLevel2Module(currentLevel2);
+                splitRow.setLevel3Module(currentLevel3);
                 splitRow.setFunctionalUser(currentUser);
                 splitRow.setTriggerEvent(currentTrigger);
                 splitRow.setFunctionProcess(currentProcess);
@@ -429,14 +441,9 @@ public class WordExportService {
         if (!StringUtils.hasText(row.getLevel1Module())) {
             row.setLevel1Module(zh("\u672a\u5206\u7c7b\u6a21\u5757"));
         }
-        if (!StringUtils.hasText(row.getLevel2Module())) {
-            row.setLevel2Module(row.getLevel1Module());
-        }
-        if (!StringUtils.hasText(row.getLevel3Module())) {
-            row.setLevel3Module(row.getLevel2Module());
-        }
         if (!StringUtils.hasText(row.getFunctionProcess())) {
-            row.setFunctionProcess(row.getLevel3Module());
+            row.setFunctionProcess(StringUtils.hasText(row.getLevel3Module()) ? row.getLevel3Module()
+                    : StringUtils.hasText(row.getLevel2Module()) ? row.getLevel2Module() : row.getLevel1Module());
         }
         if (!StringUtils.hasText(row.getSubProcessDescription())) {
             row.setSubProcessDescription(row.getFunctionProcess());

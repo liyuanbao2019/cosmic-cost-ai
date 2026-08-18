@@ -10,6 +10,7 @@ public class SmartSplitJobResponse {
     private String jobId;
     private String projectId;
     private String sourceMode;
+    private boolean reuseDegreeAdjustmentEnabled = true;
     private String status;
     private String stage;
     private String stageMessage;
@@ -40,6 +41,8 @@ public class SmartSplitJobResponse {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getSourceMode() { return sourceMode; }
     public void setSourceMode(String sourceMode) { this.sourceMode = sourceMode; }
+    public boolean isReuseDegreeAdjustmentEnabled() { return reuseDegreeAdjustmentEnabled; }
+    public void setReuseDegreeAdjustmentEnabled(boolean reuseDegreeAdjustmentEnabled) { this.reuseDegreeAdjustmentEnabled = reuseDegreeAdjustmentEnabled; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getStage() { return stage; }

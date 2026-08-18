@@ -41,6 +41,7 @@ public class ReviewService {
     private final FunctionDescriptionAiService functionDescriptionAiService;
     private final RuleValidationService ruleValidationService;
     private final ObjectMapper objectMapper;
+    private final RequirementHierarchyService requirementHierarchyService;
 
     public ReviewService(FileStorageService fileStorageService) {
         this(fileStorageService, new FunctionDescriptionAiService(), new RuleValidationService());
@@ -57,6 +58,7 @@ public class ReviewService {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
         this.ruleValidationService = ruleValidationService;
+        this.requirementHierarchyService = new RequirementHierarchyService(fileStorageService);
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
@@ -112,6 +114,7 @@ public class ReviewService {
         long startedAt = System.currentTimeMillis();
         log.info("Saving review rows. projectId={}, status={}, rows={}, polishFunctionDescription={}",
                 projectId, status, rows.size(), polishFunctionDescription);
+        requirementHierarchyService.enrichRows(metadata, rows);
         normalizeRows(metadata, rows, polishFunctionDescription);
         RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         if (!"EXCEL_IMPORTED".equals(status) && !"REUSE_ADJUSTED".equals(status)
@@ -158,6 +161,7 @@ public class ReviewService {
                 List<FunctionSplitRow> rows = objectMapper.readValue(Paths.get(metadata.getFunctionSplitRowsPath()).toFile(),
                         new TypeReference<List<FunctionSplitRow>>() {
                         });
+                requirementHierarchyService.enrichRows(metadata, rows);
                 normalizeRows(metadata, rows, false);
                 RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
                 return rows;
@@ -171,6 +175,7 @@ public class ReviewService {
         for (CosmicResult result : results) {
             rows.addAll(toSplitRows(metadata, result));
         }
+        requirementHierarchyService.enrichRows(metadata, rows);
         normalizeRows(metadata, rows, false);
         RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
         return rows;
@@ -198,8 +203,6 @@ public class ReviewService {
 
     private void normalizeRows(ProjectMetadata metadata, List<FunctionSplitRow> rows, boolean polishFunctionDescription) {
         String lastLevel1 = "";
-        String lastLevel2 = "";
-        String lastLevel3 = "";
         String lastProcess = "";
         for (FunctionSplitRow row : rows) {
             if (!StringUtils.hasText(row.getProjectName())) {
@@ -211,14 +214,10 @@ public class ReviewService {
             if (!StringUtils.hasText(row.getLevel1Module())) {
                 row.setLevel1Module(zh("\u672a\u5206\u7c7b\u6a21\u5757"));
             }
-            if (!StringUtils.hasText(row.getLevel2Module())) {
-                row.setLevel2Module(row.getLevel1Module());
-            }
-            if (!StringUtils.hasText(row.getLevel3Module())) {
-                row.setLevel3Module(row.getLevel2Module());
-            }
             if (!StringUtils.hasText(row.getFunctionProcess())) {
-                row.setFunctionProcess(StringUtils.hasText(lastProcess) ? lastProcess : row.getLevel3Module());
+                String deepestModule = StringUtils.hasText(row.getLevel3Module()) ? row.getLevel3Module()
+                        : StringUtils.hasText(row.getLevel2Module()) ? row.getLevel2Module() : row.getLevel1Module();
+                row.setFunctionProcess(StringUtils.hasText(lastProcess) ? lastProcess : deepestModule);
             }
             if (!StringUtils.hasText(row.getSubProcessDescription())) {
                 row.setSubProcessDescription(row.getFunctionProcess());
@@ -247,8 +246,6 @@ public class ReviewService {
             row.setReuseDegree(normalizeReuseDegree(row.getReuseDegree()));
             row.setCfp(cfpByReuse(row.getReuseDegree()));
             lastLevel1 = row.getLevel1Module();
-            lastLevel2 = row.getLevel2Module();
-            lastLevel3 = row.getLevel3Module();
             lastProcess = row.getFunctionProcess();
         }
         if (polishFunctionDescription) {
@@ -465,17 +462,27 @@ public class ReviewService {
         Map<String, CosmicResult> map = new LinkedHashMap<String, CosmicResult>();
         for (FunctionSplitRow row : rows) {
             String process = row.getFunctionProcess();
-            CosmicResult result = map.get(process);
+            String key = FunctionProcessKey.of(row);
+            CosmicResult result = map.get(key);
             if (result == null) {
                 result = new CosmicResult();
-                result.setModule(row.getLevel1Module());
+                result.setModule(StringUtils.hasText(row.getLevel3Module()) ? row.getLevel3Module()
+                        : StringUtils.hasText(row.getLevel2Module()) ? row.getLevel2Module() : row.getLevel1Module());
+                result.setLevel1Module(row.getLevel1Module());
+                result.setLevel2Module(row.getLevel2Module());
+                result.setLevel3Module(row.getLevel3Module());
+                result.setSourceHeadingPaths(row.getSourceHeadingPaths() == null
+                        ? new ArrayList<String>() : new ArrayList<String>(row.getSourceHeadingPaths()));
                 result.setFunction(process);
                 result.setDescription(row.getFunctionDescription());
                 result.setFunctionalUser(row.getFunctionalUser());
                 result.setTriggerEvent(row.getTriggerEvent());
                 result.setSequenceDiagram(row.getSequenceDiagram());
                 result.setMovements(new ArrayList<CosmicMovement>());
-                map.put(process, result);
+                result.setEvidence(row.getEvidence());
+                result.setSourceReferences(row.getSourceReferences() == null
+                        ? new ArrayList<String>() : new ArrayList<String>(row.getSourceReferences()));
+                map.put(key, result);
             }
             CosmicMovement movement = new CosmicMovement();
             movement.setType(row.getMovementType());
@@ -483,6 +490,14 @@ public class ReviewService {
             movement.setDataGroup(row.getDataGroup());
             movement.setDataAttributes(row.getDataAttributes());
             movement.setSequenceDiagram(row.getSequenceDiagram());
+            movement.setEvidence(row.getEvidence());
+            movement.setSourceReferences(row.getSourceReferences() == null
+                    ? new ArrayList<String>() : new ArrayList<String>(row.getSourceReferences()));
+            movement.setLevel1Module(row.getLevel1Module());
+            movement.setLevel2Module(row.getLevel2Module());
+            movement.setLevel3Module(row.getLevel3Module());
+            movement.setSourceHeadingPaths(row.getSourceHeadingPaths() == null
+                    ? new ArrayList<String>() : new ArrayList<String>(row.getSourceHeadingPaths()));
             result.getMovements().add(movement);
             if ("E".equals(row.getMovementType())) {
                 result.setEntry(result.getEntry() + 1);

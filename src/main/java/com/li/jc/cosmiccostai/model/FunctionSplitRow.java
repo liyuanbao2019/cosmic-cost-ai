@@ -26,6 +26,8 @@ public class FunctionSplitRow {
     private String reuseRuleId;
     private String evidence;
     private List<String> sourceReferences = new ArrayList<String>();
+    /** Original Word heading paths supporting this movement. */
+    private List<String> sourceHeadingPaths = new ArrayList<String>();
 
     public String getProjectName() {
         return projectName;
@@ -177,5 +179,13 @@ public class FunctionSplitRow {
 
     public void setSourceReferences(List<String> sourceReferences) {
         this.sourceReferences = sourceReferences;
+    }
+
+    public List<String> getSourceHeadingPaths() {
+        return sourceHeadingPaths;
+    }
+
+    public void setSourceHeadingPaths(List<String> sourceHeadingPaths) {
+        this.sourceHeadingPaths = sourceHeadingPaths;
     }
 }

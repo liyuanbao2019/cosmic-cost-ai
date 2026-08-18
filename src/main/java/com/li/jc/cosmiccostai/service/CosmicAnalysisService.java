@@ -36,20 +36,24 @@ public class CosmicAnalysisService {
 
     private final FileStorageService fileStorageService;
     private final AiGeneratedSplitQualityService aiGeneratedSplitQualityService;
+    private final RequirementHierarchyService requirementHierarchyService;
     private final ObjectMapper objectMapper;
     private final Set<String> runningProjects = ConcurrentHashMap.newKeySet();
 
     @Autowired
     public CosmicAnalysisService(FileStorageService fileStorageService,
-                                 AiGeneratedSplitQualityService aiGeneratedSplitQualityService) {
+                                 AiGeneratedSplitQualityService aiGeneratedSplitQualityService,
+                                 RequirementHierarchyService requirementHierarchyService) {
         this.fileStorageService = fileStorageService;
         this.aiGeneratedSplitQualityService = aiGeneratedSplitQualityService;
+        this.requirementHierarchyService = requirementHierarchyService;
         this.objectMapper = new ObjectMapper();
         this.objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
     }
 
     public CosmicAnalysisService(FileStorageService fileStorageService) {
-        this(fileStorageService, new AiGeneratedSplitQualityService(new RuleValidationService()));
+        this(fileStorageService, new AiGeneratedSplitQualityService(new RuleValidationService()),
+                new RequirementHierarchyService(fileStorageService));
     }
 
     public CosmicAnalyzeResponse analyze(String projectId) {
@@ -71,6 +75,15 @@ public class CosmicAnalysisService {
 
     private CosmicAnalyzeResponse analyzeInternal(String projectId, ProjectMetadata metadata) {
         List<ExtractedFunction> functions = readExtractedFunctions(Paths.get(metadata.getExtractedFunctionsPath()));
+        if (StringUtils.hasText(metadata.getRequirementDetailPath())) {
+            Path requirementPath = Paths.get(metadata.getRequirementDetailPath());
+            if (Files.exists(requirementPath)) {
+                String requirementDetail = readText(requirementPath);
+                requirementHierarchyService.enrichFunctions(projectId, requirementDetail, functions);
+                requirementHierarchyService.validateAndWriteCoverage(projectId, requirementDetail, functions);
+                writeExtractedFunctions(Paths.get(metadata.getExtractedFunctionsPath()), functions);
+            }
+        }
         List<RuleValidationIssue> structureIssues = aiGeneratedSplitQualityService.validate(functions);
         if (!structureIssues.isEmpty()) {
             log.warn("COSMIC conversion keeps AI issues for manual initial review. "
@@ -178,6 +191,10 @@ public class CosmicAnalysisService {
 
         CosmicResult result = new CosmicResult();
         result.setModule(function.getModule());
+        result.setLevel1Module(function.getLevel1Module());
+        result.setLevel2Module(function.getLevel2Module());
+        result.setLevel3Module(function.getLevel3Module());
+        result.setSourceHeadingPaths(function.getSourceHeadingPaths());
         result.setFunction(function.getFunction());
         result.setDescription(function.getDescription());
         result.setFunctionalUser(function.getFunctionalUser());
@@ -260,6 +277,22 @@ public class CosmicAnalysisService {
             objectMapper.writeValue(path.toFile(), results);
         } catch (IOException ex) {
             throw new BusinessException("Write COSMIC results failed: " + path, ex);
+        }
+    }
+
+    private void writeExtractedFunctions(Path path, List<ExtractedFunction> functions) {
+        try {
+            objectMapper.writeValue(path.toFile(), functions);
+        } catch (IOException ex) {
+            throw new BusinessException("Write enriched extracted functions failed: " + path, ex);
+        }
+    }
+
+    private String readText(Path path) {
+        try {
+            return new String(Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException ex) {
+            throw new BusinessException("Read requirement detail failed: " + path, ex);
         }
     }
 }

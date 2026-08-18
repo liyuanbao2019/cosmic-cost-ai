@@ -3,6 +3,8 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.DeepSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DeepSplitRequest;
+import com.li.jc.cosmiccostai.dto.ExtractResponse;
+import com.li.jc.cosmiccostai.dto.RequirementChapterCoverage;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
@@ -63,23 +65,43 @@ public class SmartSplitPipelineService {
         notify(listener, "INPUT_COVERAGE_CHECK", 5, "正在校验已确认正文是否覆盖原文功能章节");
         requirementCoverageService.ensureReadyForExtraction(projectId);
         notify(listener, "AI_EXTRACTING", 8, "正文完整性校验通过，正在识别需求功能并生成结构化功能清单");
-        if (StringUtils.hasText(editedPrompt)) {
-            aiExtractionService.extractWithPrompt(projectId, editedPrompt.trim());
-        } else {
-            aiExtractionService.extract(projectId);
-        }
+        AiRequestAttemptListener attemptListener = listener == null ? null : new AiRequestAttemptListener() {
+            @Override
+            public void onAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
+                listener.onAiAttempt(attempt, maxAttempts, timeoutSeconds);
+            }
+        };
+        ExtractResponse extraction = StringUtils.hasText(editedPrompt)
+                ? aiExtractionService.extractWithPrompt(projectId, editedPrompt.trim(), attemptListener)
+                : aiExtractionService.extract(projectId, attemptListener);
 
         notify(listener, "COSMIC_SPLITTING", 28, "正在生成 COSMIC 功能过程和 E/R/W/X 初稿");
         cosmicAnalysisService.analyze(projectId);
-        return finishFromCurrentRows(projectId, listener);
+        PipelineResult result = finishFromCurrentRows(projectId, listener);
+        appendChapterCoverageWarnings(result, extraction);
+        return result;
     }
 
     public PipelineResult runExistingRows(String projectId, StageListener listener) {
-        notify(listener, "LOADING_ROWS", 25, "已载入拆分表，准备执行统一智能校准");
-        return finishFromCurrentRows(projectId, listener);
+        return runExistingRows(projectId, true, listener);
+    }
+
+    public PipelineResult runExistingRows(String projectId,
+                                          boolean reuseDegreeAdjustmentEnabled,
+                                          StageListener listener) {
+        notify(listener, "LOADING_ROWS", 25, reuseDegreeAdjustmentEnabled
+                ? "已载入拆分表，准备执行统一智能校准"
+                : "已载入拆分表，将保留人工复用度并直接执行规则初审");
+        return finishFromCurrentRows(projectId, listener, reuseDegreeAdjustmentEnabled);
     }
 
     private PipelineResult finishFromCurrentRows(String projectId, StageListener listener) {
+        return finishFromCurrentRows(projectId, listener, true);
+    }
+
+    private PipelineResult finishFromCurrentRows(String projectId,
+                                                 StageListener listener,
+                                                 boolean aiCalibrationEnabled) {
         ReviewResponse review = reviewService.getReview(projectId);
         List<FunctionSplitRow> rows = review.getSplitRows();
         if (rows == null || rows.isEmpty()) {
@@ -87,7 +109,7 @@ public class SmartSplitPipelineService {
         }
 
         PipelineResult result = new PipelineResult();
-        if (deepReviewEnabled) {
+        if (deepReviewEnabled && aiCalibrationEnabled) {
             notify(listener, "DEEP_REVIEWING", 42, "正在结合原文证据执行 AI 深度结构审核");
             DeepSplitRequest request = new DeepSplitRequest();
             request.setRows(rows);
@@ -128,13 +150,17 @@ public class SmartSplitPipelineService {
                 result.warnings.add("AI 深度审核仅部分完成；已完成建议已处理，失败批次保留为人工风险提示。");
             }
         } else {
-            result.deepSplitStatus = "DISABLED";
+            result.deepSplitStatus = aiCalibrationEnabled ? "DISABLED" : "SKIPPED_BY_USER";
         }
 
-        notify(listener, "REUSE_ADJUSTING", deepReviewEnabled ? 80 : 62,
-                "正在按完整拆分表统一调整新增、复用和利旧");
-        ReuseDegreeAdjustmentResponse reuse = reuseDegreeAiAdjustmentService.adjust(projectId, rows);
-        rows = reuse.getRows();
+        if (aiCalibrationEnabled) {
+            notify(listener, "REUSE_ADJUSTING", deepReviewEnabled ? 80 : 62,
+                    "正在按完整拆分表统一调整新增、复用和利旧");
+            ReuseDegreeAdjustmentResponse reuse = reuseDegreeAiAdjustmentService.adjust(projectId, rows);
+            rows = reuse.getRows();
+        } else {
+            result.warnings.add("已按用户选择跳过复用度 AI 调整，保留 Excel 中人工确认的新增、复用、利旧和 CFP。");
+        }
 
         notify(listener, "RULE_VALIDATING", deepReviewEnabled ? 94 : 88,
                 "正在执行最终确定性规则校验并生成风险提示");
@@ -143,14 +169,37 @@ public class SmartSplitPipelineService {
         result.totalCfp = totalCfp(rows);
         result.validation = validation;
         result.ruleVersion = validation.getRuleVersion();
-        notify(listener, "COMPLETED", 100, result.partial
+        notify(listener, "COMPLETED", 100, !aiCalibrationEnabled
+                ? "已保留 Excel 人工拆分结果并完成规则初审"
+                : (result.partial
                 ? "智能拆分部分完成，已进入人工审核"
-                : "智能拆分、复用度调整和规则初审已完成");
+                : "智能拆分、复用度调整和规则初审已完成"));
         return result;
     }
 
     public boolean isDeepReviewEnabled() {
         return deepReviewEnabled;
+    }
+
+    public boolean cancelDocument(String projectId) {
+        return aiExtractionService.cancel(projectId);
+    }
+
+    private void appendChapterCoverageWarnings(PipelineResult result, ExtractResponse extraction) {
+        if (result == null || extraction == null || extraction.getChapterCoverage() == null) {
+            return;
+        }
+        List<String> missing = new ArrayList<String>();
+        for (RequirementChapterCoverage item : extraction.getChapterCoverage()) {
+            if (item != null && "MISSING_REVIEW".equals(item.getStatus())
+                    && StringUtils.hasText(item.getHeadingPath())) {
+                missing.add(item.getHeadingPath());
+            }
+        }
+        if (!missing.isEmpty()) {
+            result.warnings.add("原文章节未被本次功能过程引用，已保留为人工审核提醒，不影响拆分和导出："
+                    + String.join("、", missing));
+        }
     }
 
     private DeepSplitJobResponse awaitDeepReview(String projectId,
@@ -212,6 +261,10 @@ public class SmartSplitPipelineService {
 
     public interface StageListener {
         void onStage(String stage, int progressPercent, String message);
+
+        default void onAiAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
+            // Existing single-document listeners do not need to persist transport-level progress.
+        }
     }
 
     public static class PipelineResult {

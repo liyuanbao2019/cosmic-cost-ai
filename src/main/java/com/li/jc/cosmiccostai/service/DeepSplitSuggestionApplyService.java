@@ -176,6 +176,8 @@ public class DeepSplitSuggestionApplyService {
             copy.setEvidence(row.getEvidence());
             copy.setSourceReferences(row.getSourceReferences() == null
                     ? new ArrayList<String>() : new ArrayList<String>(row.getSourceReferences()));
+            copy.setSourceHeadingPaths(row.getSourceHeadingPaths() == null
+                    ? new ArrayList<String>() : new ArrayList<String>(row.getSourceHeadingPaths()));
             result.add(copy);
         }
         return result;

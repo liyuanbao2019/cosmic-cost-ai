@@ -18,6 +18,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RequirementCoverageServiceTest {
 
     @Test
+    void recognizesRequirementDescriptionAndNoSpaceHeadingNumbers() throws Exception {
+        FileStorageService storage = new FileStorageService("target/test-description-coverage-storage");
+        String projectId = "description-coverage-project";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path documentText = projectDir.resolve("document-text.txt");
+        Path aiInput = projectDir.resolve("requirement-detail.txt");
+        String source = "3需求描述\n"
+                + "3.1月度基础数据自动运算规则\n生成月度快照。\n"
+                + "3.2七类基础数据报表\n"
+                + "3.2.1库存基础数据报表\n查询并导出库存。\n"
+                + "3.8分权分域权限管控\n地市管理员仅查看本市数据。\n";
+        Files.write(documentText, source.getBytes(StandardCharsets.UTF_8));
+        Files.write(aiInput, source.substring(0, source.indexOf("3.8分权分域权限管控"))
+                .getBytes(StandardCharsets.UTF_8));
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setDocumentTextPath(documentText.toString());
+        metadata.setRequirementDetailPath(aiInput.toString());
+        storage.saveMetadata(metadata);
+
+        RequirementCoverageResponse response = new RequirementCoverageService(storage).getCoverage(projectId);
+
+        assertEquals(4, response.getSourceModuleCount());
+        assertEquals(3, response.getIncludedModuleCount());
+        assertEquals(1, response.getMissingModuleCount());
+        assertFalse(response.isReadyForExtraction());
+        assertEquals("3.8", response.getModules().get(3).getNumber());
+    }
+
+    @Test
     void usesWordOutlineForUnnumberedFunctionalModules() throws Exception {
         FileStorageService storage = new FileStorageService("target/test-outline-coverage-storage");
         String projectId = "outline-coverage-project";
@@ -45,8 +76,8 @@ class RequirementCoverageServiceTest {
         storage.saveMetadata(metadata);
 
         RequirementCoverageResponse response = new RequirementCoverageService(storage).getCoverage(projectId);
-        assertEquals(3, response.getSourceModuleCount());
-        assertEquals(3, response.getIncludedModuleCount());
+        assertEquals(4, response.getSourceModuleCount());
+        assertEquals(4, response.getIncludedModuleCount());
         assertTrue(response.isReadyForExtraction());
     }
 

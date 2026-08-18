@@ -58,10 +58,16 @@ public class ExcelReviewImportService {
         log.info("Import split Excel started. file={}, size={} bytes, projectName={}, polishFunctionDescription={} (ignored; Word export generates descriptions)",
                 originalFilename, fileSize, projectName, polishFunctionDescription);
         ProjectMetadata metadata = fileStorageService.uploadSplitExcel(file, projectName, splitLevel);
-        List<FunctionSplitRow> rows = readRows(metadata);
-        log.info("Import split Excel parsed successfully. projectId={}, storedFile={}, rows={}",
-                metadata.getId(), metadata.getStoredFilePath(), rows.size());
-        return reviewService.importReview(metadata.getId(), rows, false);
+        try {
+            List<FunctionSplitRow> rows = readRows(metadata);
+            log.info("Import split Excel parsed successfully. projectId={}, storedFile={}, rows={}",
+                    metadata.getId(), metadata.getStoredFilePath(), rows.size());
+            return reviewService.importReview(metadata.getId(), rows, false);
+        } catch (RuntimeException ex) {
+            metadata.setStatus("EXCEL_IMPORT_FAILED");
+            fileStorageService.saveMetadata(metadata);
+            throw ex;
+        }
     }
 
     private List<FunctionSplitRow> readRows(ProjectMetadata metadata) {
@@ -184,7 +190,7 @@ public class ExcelReviewImportService {
                 continue;
             }
             String[] values = readValues(excelRow);
-            if (isBlankRow(values) || isCfpSummaryRow(values)) {
+            if (isBlankRow(values) || isCfpSummaryRow(values) || isTemplateInstructionRow(values)) {
                 continue;
             }
 
@@ -283,6 +289,19 @@ public class ExcelReviewImportService {
             }
         }
         return true;
+    }
+
+    private boolean isTemplateInstructionRow(String[] values) {
+        if (!StringUtils.hasText(values[0])) {
+            return false;
+        }
+        for (int i = 1; i < values.length; i++) {
+            if (StringUtils.hasText(values[i])) {
+                return false;
+            }
+        }
+        String note = clean(values[0]);
+        return note.startsWith(zh("\u6ce8\u610f")) || note.startsWith(zh("\u8bf4\u660e"));
     }
 
     private void validateRow(FunctionSplitRow row, int rowNumber, String rawMovementType, String rawReuseDegree, List<String> errors) {

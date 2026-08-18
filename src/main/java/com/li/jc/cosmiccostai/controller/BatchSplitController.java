@@ -135,6 +135,13 @@ public class BatchSplitController {
         return ApiResponse.ok(batchSplitService.rerunItem(batchId, projectId));
     }
 
+    @Operation(summary = "Cancel current AI recognition", description = "Cancel one queued or AI-recognizing requirement without stopping the batch or service.")
+    @PostMapping("/{batchId}/items/{projectId}/cancel")
+    public ApiResponse<BatchSplitJobResponse> cancelItem(@PathVariable String batchId,
+                                                         @PathVariable String projectId) {
+        return ApiResponse.ok(batchSplitService.cancelItem(batchId, projectId));
+    }
+
     @Operation(summary = "Retry failed batch items", description = "Retry failed preparation or split items without rerunning successful items.")
     @PostMapping("/{batchId}/retry")
     public ApiResponse<BatchSplitJobResponse> retry(@PathVariable String batchId) {

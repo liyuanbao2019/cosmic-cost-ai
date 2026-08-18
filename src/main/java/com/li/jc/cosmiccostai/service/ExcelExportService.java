@@ -45,6 +45,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
@@ -76,6 +77,7 @@ public class ExcelExportService {
     private final ObjectMapper objectMapper;
     private final Path outputBaseDir;
     private final String configuredTemplatePath;
+    private final RequirementHierarchyService requirementHierarchyService;
 
     public ExcelExportService(FileStorageService fileStorageService,
                               @Value("${cosmic.output.base-dir:output}") String outputBaseDir,
@@ -100,6 +102,7 @@ public class ExcelExportService {
         this.fileStorageService = fileStorageService;
         this.functionDescriptionAiService = functionDescriptionAiService;
         this.ruleValidationService = ruleValidationService;
+        this.requirementHierarchyService = new RequirementHierarchyService(fileStorageService);
         this.outputBaseDir = Paths.get(outputBaseDir);
         this.configuredTemplatePath = configuredTemplatePath;
         this.objectMapper = new ObjectMapper();
@@ -342,6 +345,7 @@ public class ExcelExportService {
                 List<FunctionSplitRow> rows = objectMapper.readValue(Paths.get(metadata.getFunctionSplitRowsPath()).toFile(),
                         new TypeReference<List<FunctionSplitRow>>() {
                         });
+                requirementHierarchyService.enrichRows(metadata, rows);
                 normalizeSplitRows(metadata, rows);
                 return rows;
             } catch (IOException ex) {
@@ -352,6 +356,7 @@ public class ExcelExportService {
         for (CosmicResult result : results) {
             rows.addAll(toSplitRows(metadata, result));
         }
+        requirementHierarchyService.enrichRows(metadata, rows);
         normalizeSplitRows(metadata, rows);
         return rows;
     }
@@ -536,6 +541,7 @@ public class ExcelExportService {
 
     private List<BusinessRequirementGroup> groupBusinessRequirements(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
         Map<String, BusinessRequirementGroup> groupMap = new LinkedHashMap<String, BusinessRequirementGroup>();
+        int groupIndex = 0;
         for (FunctionSplitRow row : rows) {
             String level1 = safeText(row.getLevel1Module());
             String level2 = safeText(row.getLevel2Module());
@@ -548,14 +554,27 @@ public class ExcelExportService {
                 group.level2 = level2;
                 group.level3 = level3;
                 group.changeType = businessChangeType(row.getReuseDegree());
+                group.originalIndex = groupIndex++;
                 groupMap.put(key, group);
             }
+            group.sourceOrder = Math.min(group.sourceOrder,
+                    RequirementSourceOrder.firstReferenceOrder(row.getSourceReferences()));
             if (zh("\u65b0\u589e").equals(row.getReuseDegree())) {
                 group.changeType = zh("\u65b0\u589e");
             }
             group.cfp += row.getCfp();
         }
-        return new ArrayList<BusinessRequirementGroup>(groupMap.values());
+        List<BusinessRequirementGroup> result = new ArrayList<BusinessRequirementGroup>(groupMap.values());
+        Collections.sort(result, new java.util.Comparator<BusinessRequirementGroup>() {
+            @Override
+            public int compare(BusinessRequirementGroup left, BusinessRequirementGroup right) {
+                if (left.sourceOrder != right.sourceOrder) {
+                    return Integer.compare(left.sourceOrder, right.sourceOrder);
+                }
+                return Integer.compare(left.originalIndex, right.originalIndex);
+            }
+        });
+        return result;
     }
 
     private String projectName(ProjectMetadata metadata) {
@@ -1066,14 +1085,10 @@ public class ExcelExportService {
             if (!StringUtils.hasText(row.getLevel1Module())) {
                 row.setLevel1Module(zh("\u672a\u5206\u7c7b\u6a21\u5757"));
             }
-            if (!StringUtils.hasText(row.getLevel2Module())) {
-                row.setLevel2Module(row.getLevel1Module());
-            }
-            if (!StringUtils.hasText(row.getLevel3Module())) {
-                row.setLevel3Module(row.getLevel2Module());
-            }
             if (!StringUtils.hasText(row.getFunctionProcess())) {
-                row.setFunctionProcess(StringUtils.hasText(lastProcess) ? lastProcess : row.getLevel3Module());
+                String deepestModule = StringUtils.hasText(row.getLevel3Module()) ? row.getLevel3Module()
+                        : StringUtils.hasText(row.getLevel2Module()) ? row.getLevel2Module() : row.getLevel1Module();
+                row.setFunctionProcess(StringUtils.hasText(lastProcess) ? lastProcess : deepestModule);
             }
             if (!StringUtils.hasText(row.getSubProcessDescription())) {
                 row.setSubProcessDescription(row.getFunctionProcess());
@@ -1308,5 +1323,7 @@ public class ExcelExportService {
         private String level3;
         private String changeType;
         private double cfp;
+        private int sourceOrder = Integer.MAX_VALUE;
+        private int originalIndex;
     }
 }
