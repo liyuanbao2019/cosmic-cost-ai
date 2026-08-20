@@ -75,6 +75,7 @@ public class CosmicAnalysisService {
 
     private CosmicAnalyzeResponse analyzeInternal(String projectId, ProjectMetadata metadata) {
         List<ExtractedFunction> functions = readExtractedFunctions(Paths.get(metadata.getExtractedFunctionsPath()));
+        FunctionProcessIdentity.ensureFunctions(functions);
         if (StringUtils.hasText(metadata.getRequirementDetailPath())) {
             Path requirementPath = Paths.get(metadata.getRequirementDetailPath());
             if (Files.exists(requirementPath)) {
@@ -190,6 +191,7 @@ public class CosmicAnalysisService {
         }
 
         CosmicResult result = new CosmicResult();
+        result.setFunctionProcessId(function.getFunctionProcessId());
         result.setModule(function.getModule());
         result.setLevel1Module(function.getLevel1Module());
         result.setLevel2Module(function.getLevel2Module());

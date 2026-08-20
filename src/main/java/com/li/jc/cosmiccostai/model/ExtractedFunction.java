@@ -5,6 +5,8 @@ import java.util.ArrayList;
 
 public class ExtractedFunction {
 
+    /** Stable identity of one functional process across all downstream stages. */
+    private String functionProcessId;
     private String module;
     /** Immutable hierarchy resolved from source requirement headings. */
     private String level1Module;
@@ -34,6 +36,14 @@ public class ExtractedFunction {
         this.function = function;
         this.description = description;
         this.sequenceDiagram = sequenceDiagram;
+    }
+
+    public String getFunctionProcessId() {
+        return functionProcessId;
+    }
+
+    public void setFunctionProcessId(String functionProcessId) {
+        this.functionProcessId = functionProcessId;
     }
 
     public String getModule() {

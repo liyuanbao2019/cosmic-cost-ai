@@ -45,10 +45,14 @@ class BatchSplitUiRegressionTest {
                 && html.contains("function waitForBatchExcelReadyAndStart(batchId)"));
         assertTrue(html.contains("SPLIT_EXCEL_IMPORT_TIMEOUT_MS = 180000")
                 && html.contains("function formatBatchExcelImportFailures(failures)")
-                && html.contains("成功项不会受影响，已进入当前批次")
+                && html.contains("function validateBatchSplitExcels(files, projectName)")
+                && html.contains("/api/files/validate-split-excel")
+                && html.contains("function renderBatchExcelImportFailures(failures, totalCount)")
+                && html.contains("整个批次已暂停")
                 && html.contains("已处理 \" + completedCount + \"/\" + files.length"));
         assertTrue(html.contains("reuseDegreeAdjustmentEnabled: adjustReuseDegree")
-                && html.contains("保留人工复用度"));
+                && html.contains("保留人工复用度")
+                && html.contains("function confirmExcelProcessingOptions(fileCount)"));
         assertTrue(html.contains("let selectedDocumentFiles = []"));
         assertTrue(html.contains("selectedDocumentFiles.push(file)"));
         assertTrue(html.contains("input.value = \"\"")
@@ -97,6 +101,7 @@ class BatchSplitUiRegressionTest {
                 && html.contains("第 \" + item.aiAttempt + \"/\" + item.aiMaxAttempts")
                 && html.contains("推理强度始终为 max（无 high 降级）"));
         assertTrue(css.contains(".batch-ai-attempt-info"));
+        assertTrue(css.contains(".batch-input-empty.excel-import-failure-detail"));
         assertTrue(html.contains("id=\"batchSelectedItemError\"")
                 && html.contains("copyBatchSelectedItemError"));
         assertTrue(html.contains("item.confirmedAt || Number(item.inputLength || 0) > 0"));

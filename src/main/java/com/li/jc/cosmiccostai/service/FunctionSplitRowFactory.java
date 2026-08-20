@@ -87,17 +87,13 @@ final class FunctionSplitRowFactory {
                                             CosmicResult result,
                                             CosmicMovement movement) {
         FunctionSplitRow row = new FunctionSplitRow();
+        row.setFunctionProcessId(result.getFunctionProcessId());
         row.setProjectName(metadata.getName());
-        boolean movementHierarchyResolved = movement != null
-                && movement.getSourceHeadingPaths() != null
-                && !movement.getSourceHeadingPaths().isEmpty();
-        row.setLevel1Module(movementHierarchyResolved
-                ? safe(movement.getLevel1Module())
-                : firstText(result.getLevel1Module(), result.getModule()));
-        row.setLevel2Module(movementHierarchyResolved
-                ? safe(movement.getLevel2Module()) : safe(result.getLevel2Module()));
-        row.setLevel3Module(movementHierarchyResolved
-                ? safe(movement.getLevel3Module()) : safe(result.getLevel3Module()));
+        // Module columns identify the functional process, not individual data
+        // movements. Movement-specific paths remain in sourceHeadingPaths only.
+        row.setLevel1Module(firstText(result.getLevel1Module(), result.getModule()));
+        row.setLevel2Module(safe(result.getLevel2Module()));
+        row.setLevel3Module(firstText(result.getLevel3Module(), result.getFunction()));
         row.setFunctionalUser(firstText(result.getFunctionalUser(), defaultFunctionalUser(result.getSequenceDiagram())));
         row.setTriggerEvent(firstText(result.getTriggerEvent(), result.getFunction()));
         row.setFunctionProcess(result.getFunction());

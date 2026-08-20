@@ -82,10 +82,11 @@ class FunctionSplitRowFactoryTest {
     }
 
     @Test
-    void usesMovementSourceHierarchyWithoutRepeatingOrBackfillingMissingLevels() {
+    void keepsOneFunctionHierarchyAcrossMovementsAndFillsMissingLeafWithProcess() {
         CosmicResult result = result("查询库存基础数据列表");
+        result.setFunctionProcessId("FP-0001");
         result.setLevel1Module("月度基础数据自动运算规则");
-        result.setLevel2Module("不应回填到子过程");
+        result.setLevel2Module("库存基础数据报表");
         CosmicMovement movement = movement("E", "发起库存查询", "查询条件", "账期");
         movement.setLevel1Module("七类基础数据报表");
         movement.setLevel2Module("库存基础数据报表");
@@ -101,9 +102,13 @@ class FunctionSplitRowFactoryTest {
 
         List<FunctionSplitRow> rows = FunctionSplitRowFactory.create(metadata(), result);
 
-        assertEquals("七类基础数据报表", rows.get(0).getLevel1Module());
+        assertEquals("FP-0001", rows.get(0).getFunctionProcessId());
+        assertEquals("月度基础数据自动运算规则", rows.get(0).getLevel1Module());
         assertEquals("库存基础数据报表", rows.get(0).getLevel2Module());
-        assertEquals("", rows.get(0).getLevel3Module());
+        assertEquals("查询库存基础数据列表", rows.get(0).getLevel3Module());
+        assertEquals(rows.get(0).getLevel1Module(), rows.get(1).getLevel1Module());
+        assertEquals(rows.get(0).getLevel2Module(), rows.get(1).getLevel2Module());
+        assertEquals(rows.get(0).getLevel3Module(), rows.get(1).getLevel3Module());
         assertEquals(movement.getSourceHeadingPaths(), rows.get(0).getSourceHeadingPaths());
     }
 

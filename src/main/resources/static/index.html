@@ -99,7 +99,7 @@
       <div class="project-group-dialog-header">
         <div>
           <h3 id="projectGroupAddDialogTitle" class="dialog-title">添加已拆分需求</h3>
-          <p>在当前项目中选择已有拆分结果，不跳转项目列表；添加后自动生成下一版项目级材料。</p>
+          <p>在当前项目中选择已有拆分结果，不跳转项目列表；添加后由人工确认并生成下一版项目级材料。</p>
         </div>
         <button type="button" class="ghost" onclick="closeProjectGroupAddDialog()">关闭</button>
       </div>
@@ -408,9 +408,9 @@
         <div class="batch-materials-heading">
           <div>
             <h3>产物 1 · 项目整合送审材料</h3>
-            <p id="batchProjectMaterialsSummary" class="muted">全部需求完成智能拆分后自动生成。</p>
+            <p id="batchProjectMaterialsSummary" class="muted">全部需求完成后，由人工点击生成。</p>
           </div>
-          <button id="batchMaterialRetryBtn" type="button" class="ghost hidden" onclick="retryBatchProjectMaterials()">重试生成</button>
+          <button id="batchMaterialRetryBtn" type="button" class="ghost hidden" onclick="retryBatchProjectMaterials()">生成项目整合材料</button>
         </div>
         <div id="batchProjectMaterialFiles" class="batch-material-file-list"></div>
       </div>
@@ -690,6 +690,8 @@
     let splitMode = "document";
     let selectedDocumentFiles = [];
     let selectedExcelFiles = [];
+    let batchExcelImportFailures = [];
+    let selectedBatchExcelImportFailureIndex = 0;
     let currentProjectSourceType = "";
     let validationIssuesByRow = {};
     let lastValidationResult = null;
@@ -1854,6 +1856,9 @@
 
     async function startSplit() {
       if (splitMode === "excel") {
+        if (!confirmExcelProcessingOptions(selectedExcelFiles.length || 1)) {
+          return;
+        }
         if (selectedExcelFiles.length > 1 || selectedSplitLevel() === "PROJECT") {
           await startBatchExcelPreparation();
         } else {
@@ -1866,6 +1871,14 @@
         return;
       }
       await runAll();
+    }
+
+    function confirmExcelProcessingOptions(fileCount) {
+      const enabled = excelReuseAdjustmentEnabled();
+      return window.confirm("请再次确认本次 Excel 处理设置：\n\n"
+        + "拆分表数量：" + Number(fileCount || 0) + " 份\n"
+        + "复用度 AI 调整：" + (enabled ? "已勾选（会执行 AI 调整）" : "未勾选（保留人工复用度和 CFP）")
+        + "\n\n确认按以上设置继续？");
     }
 
     function onDocumentFilesChanged() {
@@ -2033,14 +2046,33 @@
       }
       await withBusy(async function () {
         setBatchModeActive(true);
-        setMessage("正在导入并解析 " + files.length + " 份拆分表...");
+        setMessage("正在逐份校验 " + files.length + " 份拆分表；全部通过前不会创建批次或生成材料...");
+        const validationFailures = await validateBatchSplitExcels(files, $("projectName").value);
+        if (validationFailures.length) {
+          renderBatchExcelImportFailures(validationFailures, files.length);
+          setMessage("Excel 导入校验未通过：发现 " + validationFailures.length
+            + " 份问题文档，整个批次已暂停，未开始拆分或生成材料。", "error");
+          showDialog("Excel 导入校验未通过", "发现 " + validationFailures.length
+            + " 份问题文档，整个批次已经停在校验阶段。请在批量面板右侧逐份查看具体行列问题。");
+          return;
+        }
+        batchExcelImportFailures = [];
+        setMessage("全部拆分表校验通过，正在正式导入 " + files.length + " 份拆分表...");
         const importResult = await uploadBatchSplitExcels(files, $("projectName").value);
         const projectIds = importResult.projectIds;
         const importFailures = importResult.failures;
-        if (!projectIds.length) {
-          const failureDetails = formatBatchExcelImportFailures(importFailures);
-          setMessage("拆分表导入完成：成功 0，失败 " + importFailures.length + "。", "error");
-          showDialog("全部拆分表导入失败", failureDetails);
+        if (importFailures.length || projectIds.length !== files.length) {
+          if (!importFailures.length) {
+            importFailures.push({
+              index: projectIds.length,
+              fileName: "未完成导入的 Excel",
+              message: "正式导入返回的成功数量与所选文件数量不一致（成功 " + projectIds.length
+                + "/" + files.length + "）。为避免遗漏，整个批次已停止，请重新导入。"
+            });
+          }
+          renderBatchExcelImportFailures(importFailures, files.length);
+          setMessage("Excel 正式导入未全部成功，整个批次已暂停；未开始拆分或生成材料。", "error");
+          showDialog("Excel 正式导入未完成", "正式导入阶段有文件失败，整个批次已经停下。请在右侧查看具体问题。");
           return;
         }
         const adjustReuseDegree = excelReuseAdjustmentEnabled();
@@ -2063,17 +2095,87 @@
             ? "Excel 已批量导入，正在并发执行复用度 AI 调整和规则初审。"
             : "Excel 已批量导入，正在并发保留人工复用度并执行规则初审；完成后可生成送审总包。")
           : "Excel 已导入，后台仍在载入批次；就绪后可点击“开始并发处理”。";
-        if (importFailures.length) {
-          setMessage("拆分表已全部处理：成功 " + projectIds.length + "，失败 " + importFailures.length
-            + "；成功项已进入批次继续处理。", "error");
-          showDialog("部分拆分表导入失败",
-            "成功 " + projectIds.length + " 份，失败 " + importFailures.length
-            + " 份。成功项不会受影响，已进入当前批次。\n\n"
-            + formatBatchExcelImportFailures(importFailures));
-        } else {
-          setMessage(successMessage, "success");
-        }
+        setMessage(successMessage + " 处理结束后请人工点击生成送审材料。", "success");
       });
+    }
+
+    async function validateBatchSplitExcels(files, projectName) {
+      const failures = [];
+      let nextIndex = 0;
+      let completedCount = 0;
+      const workerCount = Math.min(3, files.length);
+      const workers = [];
+      for (let worker = 0; worker < workerCount; worker++) {
+        workers.push((async function () {
+          while (true) {
+            const index = nextIndex++;
+            if (index >= files.length) return;
+            const currentFile = files[index];
+            const formData = new FormData();
+            formData.append("file", currentFile);
+            formData.append("projectName", projectName || currentFile.name.replace(/\.[^.]+$/, ""));
+            try {
+              await requestWithTimeout("/api/files/validate-split-excel", {
+                method: "POST",
+                body: formData
+              }, SPLIT_EXCEL_IMPORT_TIMEOUT_MS, "校验“" + currentFile.name + "”");
+            } catch (error) {
+              failures.push({ index: index, fileName: currentFile.name, message: buildSplitExcelImportError(error) });
+            } finally {
+              completedCount++;
+              setMessage("正在校验拆分表... 已处理 " + completedCount + "/" + files.length
+                + "，发现问题 " + failures.length + " 份");
+            }
+          }
+        })());
+      }
+      await Promise.all(workers);
+      failures.sort(function (left, right) { return left.index - right.index; });
+      return failures;
+    }
+
+    function renderBatchExcelImportFailures(failures, totalCount) {
+      currentBatchSplitJob = null;
+      batchExcelImportFailures = failures || [];
+      selectedBatchExcelImportFailureIndex = 0;
+      setBatchModeActive(true);
+      $("batchProjectGroupBadge").classList.add("hidden");
+      $("batchSplitBadge").textContent = "Excel 校验未通过";
+      $("batchSplitBadge").className = "badge danger";
+      $("batchSplitSummary").textContent = "整个批次已暂停：请修正全部问题文档后重新导入；当前未开始拆分，也未生成送审材料。";
+      $("batchTotalCount").textContent = totalCount || batchExcelImportFailures.length;
+      ["batchAwaitingCount", "batchConfirmedCount", "batchParseQueuedCount", "batchPreparingCount",
+        "batchQueuedCount", "batchRunningCount", "batchCompletedCount"].forEach(function (id) { $(id).textContent = "0"; });
+      $("batchFailedCount").textContent = batchExcelImportFailures.length;
+      $("batchStartBtn").disabled = true;
+      $("batchStartBtn").textContent = "请先修正问题文档";
+      $("batchRetryBtn").classList.add("hidden");
+      $("batchProjectMaterials").classList.add("hidden");
+      $("batchRequirementMaterials").classList.add("hidden");
+      selectBatchExcelImportFailure(0);
+    }
+
+    function selectBatchExcelImportFailure(index) {
+      if (!batchExcelImportFailures.length) return;
+      selectedBatchExcelImportFailureIndex = Math.max(0, Math.min(index, batchExcelImportFailures.length - 1));
+      $("batchDocumentList").innerHTML = batchExcelImportFailures.map(function (failure, failureIndex) {
+        return "<button type=\"button\" class=\"batch-document-item"
+          + (failureIndex === selectedBatchExcelImportFailureIndex ? " active" : "")
+          + "\" onclick=\"selectBatchExcelImportFailure(" + failureIndex + ")\">"
+          + "<span class=\"batch-document-index\">" + (failureIndex + 1) + "</span>"
+          + "<span class=\"batch-document-name\">" + escapeHtml(failure.fileName)
+          + "<span class=\"batch-document-error\">校验失败</span></span></button>";
+      }).join("");
+      const failure = batchExcelImportFailures[selectedBatchExcelImportFailureIndex];
+      $("batchDocumentTitle").textContent = failure.fileName;
+      $("batchDocumentMeta").textContent = "Excel 导入校验失败 · 已阻止整个批次继续处理";
+      $("batchOpenProjectBtn").classList.add("hidden");
+      $("batchInputEditor").classList.add("hidden");
+      $("batchInputEmpty").classList.remove("hidden");
+      $("batchInputEmpty").classList.add("excel-import-failure-detail");
+      $("batchInputEmpty").textContent = failure.message;
+      $("batchSelectedItemError").classList.add("hidden");
+      $("batchRequirementWarning").classList.add("hidden");
     }
 
     async function waitForBatchExcelReadyAndStart(batchId) {
@@ -2222,7 +2324,7 @@
 
     function batchJobNeedsPolling(job) {
       return !!job && (job.status === "PREPARING" || job.status === "RUNNING"
-        || job.status === "MATERIAL_PENDING" || job.status === "GENERATING_MATERIALS"
+        || job.status === "GENERATING_MATERIALS"
         || job.requirementMaterialStatus === "GENERATING");
     }
 
@@ -2231,6 +2333,8 @@
       if (!job) {
         return;
       }
+      batchExcelImportFailures = [];
+      $("batchInputEmpty").classList.remove("excel-import-failure-detail");
       setBatchModeActive(true);
       const projectLevel = job.splitLevel === "PROJECT" && !!job.projectGroupId;
       $("batchProjectGroupBadge").textContent = job.projectGroupId || "-";
@@ -2443,15 +2547,18 @@
           + "，完成 " + job.completed + "/" + job.total + "，失败 " + job.failed
           + (job.failed > 0 ? "（可立即重试，不影响其他任务）" : "") + "。";
       }
-      if (job.status === "MATERIAL_PENDING" || job.status === "GENERATING_MATERIALS") {
-        return "全部需求已完成智能拆分，正在生成各需求送审材料并汇总项目级附件 1–5。";
+      if (job.status === "MATERIAL_PENDING") {
+        return "全部需求已完成处理，送审材料尚未生成；请人工检查后点击下方按钮生成。";
+      }
+      if (job.status === "GENERATING_MATERIALS") {
+        return "已由人工启动，正在生成项目级送审材料。";
       }
       if (job.status === "MATERIAL_FAILED") {
         return "需求拆分已完成，但项目级送审材料生成失败；可在下方查看原因并重试。";
       }
       if (job.status === "COMPLETED") {
         return job.splitLevel === "PROJECT"
-          ? "全部 " + job.total + " 份需求已完成处理，单需求及项目级送审材料均已生成。"
+          ? "全部 " + job.total + " 份需求已完成处理；送审材料仅在人工点击后生成。"
           : (excelBatch && job.reuseDegreeAdjustmentEnabled === false
             ? "全部 " + job.total + " 份拆分表已保留人工复用度并完成规则初审，可生成全量单需求送审包。"
             : "全部 " + job.total + " 份需求文档已完成智能拆分和规则初审。");
@@ -2513,6 +2620,8 @@
       panel.classList.toggle("hidden", !projectLevel);
       if (!projectLevel) return;
       const status = job.projectMaterialStatus || "PENDING";
+      const allCompleted = Number(job.total || 0) > 0 && Number(job.completed || 0) === Number(job.total || 0)
+        && Number(job.failed || 0) === 0;
       const summary = $("batchProjectMaterialsSummary");
       if (status === "COMPLETED") {
         summary.textContent = "V" + Number(job.projectMaterialVersion || 1) + " 已汇总 " + Number(job.projectMaterialRequirementCount || 0)
@@ -2523,9 +2632,11 @@
       } else if (status === "FAILED") {
         summary.textContent = job.projectMaterialMessage || "项目级送审材料生成失败。";
       } else {
-        summary.textContent = job.projectMaterialMessage || "全部需求完成智能拆分后自动生成。";
+        summary.textContent = job.projectMaterialMessage || "全部需求已完成后，由人工点击生成项目级附件 1–5。";
       }
-      $("batchMaterialRetryBtn").classList.toggle("hidden", status !== "FAILED");
+      const materialButton = $("batchMaterialRetryBtn");
+      materialButton.classList.toggle("hidden", !allCompleted || status === "GENERATING");
+      materialButton.textContent = status === "COMPLETED" ? "重新生成项目整合材料" : "生成项目整合材料";
       const labels = {
         attachment1: "附件1 需求说明书",
         attachment2: "附件2 业务需求汇总表",
@@ -2560,7 +2671,7 @@
         : "单需求送审材料整合包";
       summary.textContent = job.requirementMaterialMessage
         || (projectLevel
-          ? "项目整合时自动为全部需求分别生成附件 1–3 和单需求 ZIP，再汇总为第二个总 ZIP。"
+          ? "人工确认后，为全部需求分别准备附件 1–3 和单需求 ZIP，再汇总为第二个总 ZIP。"
           : "将为 " + Number(job.completed || 0) + " 个已完成需求分别生成附件 1–3 和单需求 ZIP，再汇总为一个总 ZIP。");
       button.disabled = status === "GENERATING";
       button.textContent = status === "GENERATING" ? "正在生成，请稍候…"
@@ -2831,10 +2942,15 @@
         return;
       }
       const splitCount = Number(currentBatchSplitJob.confirmed || 0);
+      const excelBatch = (currentBatchSplitJob.items || []).length > 0
+        && (currentBatchSplitJob.items || []).every(function (item) { return item.existingRows; });
       const confirmed = window.confirm("确认开始并发拆分 " + splitCount
         + " 份已确认的需求文档？\n\n只会启动本次新增并已确认的需求，不会重复执行已完成成员。"
+        + (excelBatch ? "\n\n复用度 AI 调整当前："
+          + (currentBatchSplitJob.reuseDegreeAdjustmentEnabled === false
+            ? "未勾选（保留人工结果）" : "已勾选（执行 AI 调整）") : "")
         + (currentBatchSplitJob.splitLevel === "PROJECT"
-          ? "\n全部完成后将自动生成各需求送审材料和项目级附件 1–5。" : ""));
+          ? "\n全部完成后不会自动生成材料，需人工点击生成。" : ""));
       if (!confirmed) {
         return;
       }
@@ -2870,7 +2986,7 @@
         currentBatchSplitJob = response.data || currentBatchSplitJob;
         renderBatchSplitJob();
         startBatchSplitPolling();
-        setMessage("失败文档已独立重新进入处理队列，不会中断其他正在执行的任务；已成功结果保留，全部成功后自动生成项目材料。", "success");
+        setMessage("失败文档已独立重新进入处理队列，不会中断其他任务；已成功结果保留，全部成功后请人工生成项目材料。", "success");
       } catch (error) {
         showDialog("重试失败", error.message || "请稍后再试。");
       }
@@ -2878,6 +2994,8 @@
 
     async function retryBatchProjectMaterials() {
       if (!currentBatchSplitJob) return;
+      if (!window.confirm("确认现在生成项目整合送审材料（附件 1–5）？\n\n"
+        + "系统只会在本次人工确认后开始生成；已有单需求材料会优先复用，不重复调用 AI。")) return;
       const button = $("batchMaterialRetryBtn");
       button.disabled = true;
       try {
@@ -2886,7 +3004,7 @@
         currentBatchSplitJob = response.data || currentBatchSplitJob;
         renderBatchSplitJob();
         startBatchSplitPolling();
-        setMessage("项目级送审材料已重新进入生成队列。", "success");
+        setMessage("已人工启动项目级送审材料生成。", "success");
       } catch (error) {
         showDialog("重试材料生成失败", error.message || "请稍后再试。");
       } finally {
@@ -3075,7 +3193,7 @@
         closeProjectGroupAddDialog();
         renderBatchSplitJob();
         startBatchSplitPolling();
-        setMessage("已添加 " + projectIds.length + " 个已拆分需求，正在生成下一版项目级材料。", "success");
+        setMessage("已添加 " + projectIds.length + " 个已拆分需求；现成附件将优先复用，请人工点击生成下一版项目材料。", "success");
       } catch (error) {
         showDialog("添加已有需求失败", error.message || "请稍后重试。");
       } finally {
@@ -3408,10 +3526,9 @@
             ? "Excel 已导入，正在自动执行复用度 AI 调整和规则初审..."
             : "Excel 已导入，正在保留人工复用度并执行规则初审...");
           await executeSmartSplitWorkflow("EXCEL", "", adjustReuseDegree);
-          if (!adjustReuseDegree) {
-            setMessage("人工复用度已保留，正在直接生成 Word、汇总表、功能点表和送审压缩包...");
-            await exportReviewMaterials();
-          }
+          setMessage(adjustReuseDegree
+            ? "复用度 AI 调整和规则初审已完成；请人工检查后点击“导出送审材料”。"
+            : "人工复用度已保留并完成规则初审；请人工检查后点击“导出送审材料”。", "success");
         });
       } catch (error) {
         markActive("ai");
@@ -3680,6 +3797,11 @@
 
     function functionProcessKey(row) {
       const value = normalizeRow(row || {});
+      if (textOr(value.functionProcessId, "").trim()) {
+        return ["ID:" + value.functionProcessId, value.functionProcess]
+          .map(function (item) { return textOr(item, "").trim(); })
+          .join("\u001f");
+      }
       return [value.level1Module, value.level2Module, value.level3Module,
         value.functionalUser, value.triggerEvent, value.functionProcess]
         .map(function (item) { return textOr(item, "").trim(); })
@@ -4446,7 +4568,7 @@
     function buildSplitExcelImportError(error) {
       const message = error && error.message ? error.message : "导入失败，请检查 Excel 模板和数据内容。";
       if (message.indexOf("404") >= 0 || message.indexOf("Not Found") >= 0) {
-        return "导入接口不可用，请确认后端服务已更新并重启。\n\n接口：/api/files/upload-split-excel";
+        return "Excel 校验/导入接口不可用，请确认后端服务已更新并重启。\n\n接口：/api/files/validate-split-excel、/api/files/upload-split-excel";
       }
       if (message.indexOf("功能点拆分表") >= 0 || message.indexOf("工作表") >= 0 || message.indexOf("sheet") >= 0) {
         return message + "\n\n处理建议：请确认上传的是附件3功能点拆分表，并且工作簿中存在“2、功能点拆分表”页；如果 sheet 名不同，请保留表头中的客户需求、一级模块、功能过程、数据移动、复用度等字段。";
@@ -5099,6 +5221,7 @@
     function blankReviewRow(baseRow) {
       const base = baseRow || {};
       return normalizeRow({
+        functionProcessId: base.functionProcessId || "",
         projectName: base.projectName || $("projectName").value || "",
         level1Module: base.level1Module || "",
         level2Module: base.level2Module || "",
@@ -5120,6 +5243,7 @@
     function emptyInsertedReviewRow(referenceRow) {
       const reference = referenceRow || {};
       return markInsertedBlankRow(normalizeInsertedBlankRow({
+        functionProcessId: reference.functionProcessId || "",
         projectName: reference.projectName || $("projectName").value || "",
         level1Module: "",
         level2Module: "",
@@ -5322,9 +5446,9 @@
     function normalizeRow(row) {
       const next = Object.assign({}, row || {});
       next.level1Module = textOr(next.level1Module, "未命名模块");
-      next.level2Module = textOr(next.level2Module, next.level1Module);
-      next.level3Module = textOr(next.level3Module, next.level2Module);
-      next.functionProcess = textOr(next.functionProcess, next.level3Module);
+      next.level2Module = textOr(next.level2Module, "");
+      next.functionProcess = textOr(next.functionProcess, next.level3Module, next.level2Module, next.level1Module);
+      next.level3Module = textOr(next.level3Module, next.functionProcess);
       next.subProcessDescription = textOr(next.subProcessDescription, next.functionProcess);
       next.movementType = movementOptions.indexOf(next.movementType) >= 0 ? next.movementType : "E";
       next.dataGroup = textOr(next.dataGroup, next.functionProcess);
@@ -5619,15 +5743,17 @@
         return;
       }
       let exportStructureRiskCount = 0;
+      let exportErrorCount = 0;
       try {
         const validationResponse = await runRuleValidationRequest();
         const validation = validationResponse.data || {};
         renderRuleValidation(validation);
         exportStructureRiskCount = Number(validation.structureRiskCount || 0);
-        if ((validation.errorCount || 0) > 0) {
-          showDialog("无法导出送审材料",
-            "当前拆分结果仍有 " + (validation.errorCount || 0)
-              + " 条确定性错误。请按初审结果修正后再导出；结构风险不阻断导出。");
+        exportErrorCount = Number(validation.errorCount || 0);
+        if (exportErrorCount > 0 && !window.confirm(
+          "当前拆分结果仍有 " + exportErrorCount + " 条红色确定性错误。\n\n"
+          + "系统将允许继续导出，并在功能点拆分表中保留红色标记和问题原因，方便您导出后人工修改。"
+          + "\n\n确认仍要生成送审材料？")) {
           return;
         }
       } catch (error) {
@@ -5635,9 +5761,9 @@
         return;
       }
       openExportDialog();
-      if (exportStructureRiskCount > 0) {
-        setExportProgressHint("当前仍有 " + exportStructureRiskCount
-          + " 条结构风险：允许导出，相关行及风险原因将在功能点拆分表中着色，供人工审核。");
+      if (exportErrorCount > 0 || exportStructureRiskCount > 0) {
+        setExportProgressHint("当前包含 " + exportErrorCount + " 条红色确定性错误、"
+          + exportStructureRiskCount + " 条结构风险：均允许导出，相关行及原因将在功能点拆分表中着色，供人工修改。");
       }
       $("export-dialog-close").disabled = true;
       await withBusy(async function () {

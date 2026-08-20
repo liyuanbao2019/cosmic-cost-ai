@@ -430,7 +430,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void deterministicErrorsStillBlockExport() {
+    void deterministicErrorsRemainVisibleButDoNotBlockExport() {
         RuleValidationService service = new RuleValidationService();
         FunctionSplitRow entry = row("处理订单", "E", "", "订单编号", "新增");
         FunctionSplitRow write = row("处理订单", "W", "订单表", "订单状态", "新增");
@@ -438,8 +438,7 @@ class RuleValidationServiceTest {
         RuleValidationResponse response = service.validate(Arrays.asList(entry, write));
 
         assertTrue(response.getErrorCount() > 0, describe(response));
-        assertThrows(com.li.jc.cosmiccostai.common.BusinessException.class,
-                () -> service.ensureReadyForExport(response, "导出"));
+        assertDoesNotThrow(() -> service.ensureReadyForExport(response, "导出"));
     }
 
     @Test

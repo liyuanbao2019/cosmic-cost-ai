@@ -5,6 +5,7 @@ import java.util.ArrayList;
 
 public class CosmicResult {
 
+    private String functionProcessId;
     private String module;
     private String level1Module;
     private String level2Module;
@@ -23,6 +24,14 @@ public class CosmicResult {
     private int write;
     private int exit;
     private double cfp;
+
+    public String getFunctionProcessId() {
+        return functionProcessId;
+    }
+
+    public void setFunctionProcessId(String functionProcessId) {
+        this.functionProcessId = functionProcessId;
+    }
 
     public String getModule() {
         return module;

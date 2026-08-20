@@ -158,6 +158,7 @@ public class DeepSplitSuggestionApplyService {
         for (FunctionSplitRow row : source == null
                 ? Collections.<FunctionSplitRow>emptyList() : source) {
             FunctionSplitRow copy = new FunctionSplitRow();
+            copy.setFunctionProcessId(row.getFunctionProcessId());
             copy.setProjectName(row.getProjectName());
             copy.setLevel1Module(row.getLevel1Module());
             copy.setLevel2Module(row.getLevel2Module());

@@ -42,4 +42,11 @@ public class FileController {
                                                         @RequestParam(value = "polishFunctionDescription", defaultValue = "false") boolean polishFunctionDescription) {
         return ApiResponse.ok(excelReviewImportService.importSplitExcel(file, projectName, splitLevel, polishFunctionDescription));
     }
+
+    @Operation(summary = "Validate reviewed split Excel", description = "Validate one pre-split Excel without creating a project or starting any processing.")
+    @PostMapping("/validate-split-excel")
+    public ApiResponse<Integer> validateSplitExcel(@RequestParam("file") MultipartFile file,
+                                                   @RequestParam(value = "projectName", required = false) String projectName) {
+        return ApiResponse.ok(excelReviewImportService.validateSplitExcel(file, projectName));
+    }
 }

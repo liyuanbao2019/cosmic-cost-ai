@@ -1353,6 +1353,20 @@ button.flow-rule-config-btn:hover {
   margin-bottom: 0;
 }
 
+.batch-input-empty.excel-import-failure-detail {
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 280px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #991b1b;
+  background: #fff7f7;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
 .excel-upload-head {
   min-height: 24px;
 }

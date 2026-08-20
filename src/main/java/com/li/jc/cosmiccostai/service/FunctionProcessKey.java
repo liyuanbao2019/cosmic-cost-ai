@@ -17,6 +17,10 @@ final class FunctionProcessKey {
         if (row == null) {
             return "";
         }
+        if (!safe(row.getFunctionProcessId()).isEmpty()) {
+            return "ID:" + safe(row.getFunctionProcessId()) + SEPARATOR
+                    + safe(row.getFunctionProcess());
+        }
         return safe(row.getLevel1Module()) + SEPARATOR
                 + safe(row.getLevel2Module()) + SEPARATOR
                 + safe(row.getLevel3Module()) + SEPARATOR

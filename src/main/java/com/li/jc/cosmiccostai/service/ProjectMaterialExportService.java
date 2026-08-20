@@ -100,12 +100,6 @@ public class ProjectMaterialExportService {
             row.setProjectName(projectName);
         }
 
-        // Keep the existing per-requirement deliverables available in project mode.
-        for (ProjectMetadata project : projects) {
-            excelExportService.export(project.getId());
-            wordExportService.export(project.getId());
-        }
-
         Path outputDir = outputBaseDir.resolve("project-materials").resolve(batchId);
         ExcelExportService.ProjectExcelExportResult excel = excelExportService.exportProjectMaterial(
                 batchId, projectName, aggregateRows, outputDir);
@@ -174,7 +168,7 @@ public class ProjectMaterialExportService {
                 if (metadata == null) {
                     throw new BusinessException("需求项目不存在");
                 }
-                if (refreshRequirementExports) {
+                if (refreshRequirementExports && !hasCompleteRequirementExports(metadata)) {
                     excelExportService.export(projectId);
                     wordExportService.export(projectId);
                 }
@@ -218,6 +212,16 @@ public class ProjectMaterialExportService {
             throw new BusinessException(label + "文件不存在：" + file.getFileName());
         }
         return file;
+    }
+
+    private boolean hasCompleteRequirementExports(ProjectMetadata metadata) {
+        return isRegularExport(metadata == null ? null : metadata.getExcelOutputPath())
+                && isRegularExport(metadata == null ? null : metadata.getBusinessRequirementOutputPath())
+                && isRegularExport(metadata == null ? null : metadata.getWordOutputPath());
+    }
+
+    private boolean isRegularExport(String path) {
+        return StringUtils.hasText(path) && Files.isRegularFile(Paths.get(path).toAbsolutePath().normalize());
     }
 
     private String requirementArchiveBaseName(ProjectMetadata metadata) {
@@ -364,6 +368,7 @@ public class ProjectMaterialExportService {
 
     private FunctionSplitRow copyRow(FunctionSplitRow source) {
         FunctionSplitRow target = new FunctionSplitRow();
+        target.setFunctionProcessId(source.getFunctionProcessId());
         target.setProjectName(source.getProjectName());
         target.setLevel1Module(source.getLevel1Module());
         target.setLevel2Module(source.getLevel2Module());

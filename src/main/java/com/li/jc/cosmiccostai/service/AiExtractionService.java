@@ -221,6 +221,7 @@ public class AiExtractionService {
         attachRequirementEvidence(functions, requirementDetail);
         requirementHierarchyService.enrichFunctions(projectId, requirementDetail, functions);
         RequirementSourceOrder.sortFunctions(functions);
+        FunctionProcessIdentity.ensureFunctions(functions);
 
         Path requirementDetailPath = projectDir.resolve("requirement-detail.txt");
         Path extractedPath = projectDir.resolve("extracted-functions.json");

@@ -78,6 +78,7 @@ public class RequirementHierarchyService {
 
     /** Repairs stored rows from older projects without another model request. */
     public void enrichRows(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
+        FunctionProcessIdentity.assignRows(rows, readExtractedFunctions(metadata));
         if (metadata == null || !StringUtils.hasText(metadata.getId())
                 || !StringUtils.hasText(metadata.getRequirementDetailPath())) {
             return;
@@ -93,19 +94,54 @@ public class RequirementHierarchyService {
             throw new BusinessException("读取需求正文失败：" + requirementPath, ex);
         }
         Map<String, HeadingPath> references = resolveReferencePaths(metadata.getId(), requirementDetail);
+        Map<String, List<FunctionSplitRow>> groups = new LinkedHashMap<String, List<FunctionSplitRow>>();
         for (FunctionSplitRow row : rows == null ? Collections.<FunctionSplitRow>emptyList() : rows) {
-            if (row == null) {
-                continue;
+            if (row != null) {
+                String key = FunctionProcessKey.of(row);
+                List<FunctionSplitRow> group = groups.get(key);
+                if (group == null) {
+                    group = new ArrayList<FunctionSplitRow>();
+                    groups.put(key, group);
+                }
+                group.add(row);
             }
-            List<HeadingPath> resolved = paths(row.getSourceReferences(), references);
-            HeadingPath primary = firstNonEmpty(resolved);
-            if (primary == null) {
-                continue;
+        }
+        for (List<FunctionSplitRow> group : groups.values()) {
+            List<HeadingPath> processPaths = new ArrayList<HeadingPath>();
+            for (FunctionSplitRow row : group) {
+                processPaths.addAll(paths(row.getSourceReferences(), references));
             }
-            row.setLevel1Module(primary.level1);
-            row.setLevel2Module(primary.level2);
-            row.setLevel3Module(primary.level3);
-            row.setSourceHeadingPaths(labels(resolved));
+            HeadingPath primary = mostSpecific(processPaths);
+            for (FunctionSplitRow row : group) {
+                List<HeadingPath> movementPaths = paths(row.getSourceReferences(), references);
+                if (primary != null) {
+                    row.setLevel1Module(primary.level1);
+                    row.setLevel2Module(primary.level2);
+                    row.setLevel3Module(StringUtils.hasText(primary.level3)
+                            ? primary.level3 : safe(row.getFunctionProcess()));
+                } else if (!StringUtils.hasText(row.getLevel3Module())) {
+                    row.setLevel3Module(safe(row.getFunctionProcess()));
+                }
+                if (!movementPaths.isEmpty()) {
+                    row.setSourceHeadingPaths(labels(movementPaths));
+                }
+            }
+        }
+    }
+
+    private List<ExtractedFunction> readExtractedFunctions(ProjectMetadata metadata) {
+        if (metadata == null || !StringUtils.hasText(metadata.getExtractedFunctionsPath())) {
+            return Collections.emptyList();
+        }
+        Path path = Paths.get(metadata.getExtractedFunctionsPath());
+        if (!Files.exists(path)) {
+            return Collections.emptyList();
+        }
+        try {
+            return objectMapper.readValue(path.toFile(),
+                    objectMapper.getTypeFactory().constructCollectionType(List.class, ExtractedFunction.class));
+        } catch (IOException ex) {
+            throw new BusinessException("读取功能过程身份失败：" + path, ex);
         }
     }
 
@@ -227,7 +263,7 @@ public class RequirementHierarchyService {
     }
 
     private void apply(ExtractedFunction function, List<HeadingPath> paths) {
-        HeadingPath primary = firstNonEmpty(paths);
+        HeadingPath primary = mostSpecific(paths);
         if (primary == null) {
             return;
         }
@@ -271,6 +307,32 @@ public class RequirementHierarchyService {
             }
         }
         return null;
+    }
+
+    private HeadingPath mostSpecific(List<HeadingPath> paths) {
+        HeadingPath selected = firstNonEmpty(paths);
+        if (selected == null) {
+            return null;
+        }
+        int selectedDepth = depth(selected);
+        String primaryLevel1 = selected.level1;
+        Set<String> seen = new LinkedHashSet<String>();
+        for (HeadingPath path : paths == null ? Collections.<HeadingPath>emptyList() : paths) {
+            if (path == null || !primaryLevel1.equals(path.level1) || !seen.add(path.key())) {
+                continue;
+            }
+            int depth = depth(path);
+            if (depth > selectedDepth) {
+                selected = path;
+                selectedDepth = depth;
+            }
+        }
+        return selected;
+    }
+
+    private int depth(HeadingPath path) {
+        return StringUtils.hasText(path.level3) ? 3
+                : StringUtils.hasText(path.level2) ? 2 : 1;
     }
 
     private List<String> labels(List<HeadingPath> paths) {

@@ -66,6 +66,7 @@ public class AiGeneratedSplitQualityService {
 
     private FunctionSplitRow toRow(ExtractedFunction function, CosmicMovement movement) {
         FunctionSplitRow row = new FunctionSplitRow();
+        row.setFunctionProcessId(function == null ? "" : text(function.getFunctionProcessId()));
         row.setProjectName("AI 生成结果结构校验");
         row.setLevel1Module(function == null ? "" : firstText(function.getLevel1Module(), function.getModule()));
         row.setLevel2Module(function == null ? "" : text(function.getLevel2Module()));

@@ -204,6 +204,9 @@ final class RequirementSourceOrder {
         if (row == null) {
             return "<null>" + originalIndex;
         }
+        if (StringUtils.hasText(row.getFunctionProcessId())) {
+            return "ID:" + normalized(row.getFunctionProcessId());
+        }
         return normalized(row.getLevel1Module()) + '\u001f'
                 + normalized(row.getLevel2Module()) + '\u001f'
                 + normalized(row.getLevel3Module()) + '\u001f'

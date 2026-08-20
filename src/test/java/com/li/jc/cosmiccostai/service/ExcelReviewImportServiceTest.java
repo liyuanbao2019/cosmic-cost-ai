@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.web.MockMultipartFile;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ExcelReviewImportServiceTest {
@@ -92,6 +94,25 @@ class ExcelReviewImportServiceTest {
 
         assertEquals("EXCEL_IMPORTED", response.getStatus());
         assertEquals(2, response.getSplitRows().size());
+    }
+
+    @Test
+    void prevalidationDoesNotCreateAProjectOrPersistTheWorkbook() throws Exception {
+        FileStorageService fileStorageService = new FileStorageService(tempDir.toString());
+        ReviewService reviewService = new ReviewService(fileStorageService);
+        ExcelReviewImportService importService = new ExcelReviewImportService(fileStorageService, reviewService);
+        MockMultipartFile file = new MockMultipartFile("file", "split.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", workbookBytes());
+
+        int rowCount = importService.validateSplitExcel(file, "review-import-project");
+
+        assertEquals(2, rowCount);
+        Path projects = tempDir.resolve("projects");
+        if (Files.exists(projects)) {
+            try (DirectoryStream<Path> entries = Files.newDirectoryStream(projects)) {
+                assertFalse(entries.iterator().hasNext());
+            }
+        }
     }
 
     private byte[] workbookBytes() throws Exception {

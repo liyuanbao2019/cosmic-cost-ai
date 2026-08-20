@@ -183,16 +183,9 @@ public class RuleValidationService {
             throw new com.li.jc.cosmiccostai.common.BusinessException(
                     safe(action) + "未取得统一 COSMIC 规则校验结果，无法导出送审材料。");
         }
-        // Structure risks are review reminders, not export blockers. They are
-        // written back to the review columns and highlighted in the exported
-        // workbook so that a reviewer can make the final judgement. Only a
-        // deterministic rule error makes the material invalid for export.
-        if (response.getErrorCount() <= 0) {
-            return;
-        }
-        throw new com.li.jc.cosmiccostai.common.BusinessException(
-                safe(action) + "未通过统一 COSMIC 送审门禁："
-                        + summarize(response.getIssues(), "ERROR", 5));
+        // Both deterministic errors and structure risks remain visible in the
+        // exported workbook for manual correction. Export is intentionally a
+        // review aid rather than a hard approval gate.
     }
 
     public String getRuleVersion() {

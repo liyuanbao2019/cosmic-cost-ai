@@ -22,12 +22,13 @@ class ReviewGateUiRegressionTest {
     }
 
     @Test
-    void exportBlocksErrorsButCarriesStructureRisksIntoColoredWorkbook() throws Exception {
+    void exportConfirmsErrorsAndCarriesAllRisksIntoColoredWorkbook() throws Exception {
         String function = functionSource("async function exportReviewMaterials", "function markRunningExportFailed");
 
-        assertTrue(function.contains("if ((validation.errorCount || 0) > 0)"));
-        assertFalse(function.contains("(validation.structureRiskCount || 0) > 0"));
-        assertTrue(function.contains("相关行及风险原因将在功能点拆分表中着色"));
+        assertTrue(function.contains("exportErrorCount > 0 && !window.confirm"));
+        assertTrue(function.contains("仍要生成送审材料"));
+        assertTrue(function.contains("均允许导出"));
+        assertFalse(function.contains("无法导出送审材料"));
     }
 
     private String functionSource(String startMarker, String endMarker) throws Exception {

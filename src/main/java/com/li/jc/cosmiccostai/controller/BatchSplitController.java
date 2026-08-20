@@ -148,7 +148,7 @@ public class BatchSplitController {
         return ApiResponse.ok(batchSplitService.retryFailed(batchId));
     }
 
-    @Operation(summary = "Retry project materials", description = "Regenerate project-level attachments 1-5 after a material export failure.")
+    @Operation(summary = "Generate project materials", description = "Manually generate or regenerate project-level attachments 1-5 after every requirement completes successfully.")
     @PostMapping("/{batchId}/materials/retry")
     public ApiResponse<BatchSplitJobResponse> retryMaterials(@PathVariable String batchId) {
         return ApiResponse.ok(batchSplitService.retryProjectMaterials(batchId));

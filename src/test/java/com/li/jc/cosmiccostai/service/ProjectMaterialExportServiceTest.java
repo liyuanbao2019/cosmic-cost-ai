@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -164,10 +165,10 @@ class ProjectMaterialExportServiceTest {
         assertEquals("备案项目", bundle.getProjectName());
         assertEquals(2, bundle.getRequirementCount());
         assertEquals(5D, bundle.getTotalCfp());
-        verify(excel).export("P1");
-        verify(word).export("P1");
-        verify(excel).export("P2");
-        verify(word).export("P2");
+        verify(excel, never()).export("P1");
+        verify(word, never()).export("P1");
+        verify(excel, never()).export("P2");
+        verify(word, never()).export("P2");
         ArgumentCaptor<java.util.List<FunctionSplitRow>> aggregateRows = ArgumentCaptor.forClass(java.util.List.class);
         verify(excel).exportProjectMaterial(eq("BS1"), eq("备案项目"), aggregateRows.capture(),
                 org.mockito.ArgumentMatchers.any(Path.class));

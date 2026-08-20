@@ -131,6 +131,10 @@ public class FileStorageService {
         }
     }
 
+    public void validateSplitExcelFile(MultipartFile file) {
+        validateSplitExcel(file);
+    }
+
     public ProjectMetadata loadMetadata(String projectId) {
         Path metadataPath = resolveProjectDir(projectId).resolve("metadata.json");
         if (!Files.exists(metadataPath)) {

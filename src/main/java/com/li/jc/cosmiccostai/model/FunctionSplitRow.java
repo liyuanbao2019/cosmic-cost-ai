@@ -5,6 +5,8 @@ import java.util.List;
 
 public class FunctionSplitRow {
 
+    /** Stable identity shared by every E/R/W/X row in one functional process. */
+    private String functionProcessId;
     private String projectName;
     private String level1Module;
     private String level2Module;
@@ -28,6 +30,14 @@ public class FunctionSplitRow {
     private List<String> sourceReferences = new ArrayList<String>();
     /** Original Word heading paths supporting this movement. */
     private List<String> sourceHeadingPaths = new ArrayList<String>();
+
+    public String getFunctionProcessId() {
+        return functionProcessId;
+    }
+
+    public void setFunctionProcessId(String functionProcessId) {
+        this.functionProcessId = functionProcessId;
+    }
 
     public String getProjectName() {
         return projectName;

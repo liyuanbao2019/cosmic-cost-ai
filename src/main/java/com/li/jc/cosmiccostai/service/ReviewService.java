@@ -114,14 +114,11 @@ public class ReviewService {
         long startedAt = System.currentTimeMillis();
         log.info("Saving review rows. projectId={}, status={}, rows={}, polishFunctionDescription={}",
                 projectId, status, rows.size(), polishFunctionDescription);
+        List<ExtractedFunction> extractedFunctions = readExtractedFunctions(metadata);
+        FunctionProcessIdentity.assignRows(rows, extractedFunctions);
         requirementHierarchyService.enrichRows(metadata, rows);
         normalizeRows(metadata, rows, polishFunctionDescription);
-        RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
-        if (!"EXCEL_IMPORTED".equals(status) && !"REUSE_ADJUSTED".equals(status)
-                && !"SMART_SPLIT_ADJUSTED".equals(status)
-                && "DOCUMENT".equals(sourceType(metadata))) {
-            ruleValidationService.ensureNoErrors(rows, "保存审核结果");
-        }
+        RequirementSourceOrder.sortRows(rows, extractedFunctions);
         List<CosmicResult> results = toCosmicResults(rows);
 
         Path projectDir = fileStorageService.resolveProjectDir(projectId);
@@ -143,7 +140,9 @@ public class ReviewService {
     private void updateListSummary(ProjectMetadata metadata, List<FunctionSplitRow> rows) {
         Set<String> processes = new LinkedHashSet<String>();
         for (FunctionSplitRow row : rows) {
-            if (StringUtils.hasText(row.getFunctionProcess())) {
+            if (StringUtils.hasText(row.getFunctionProcessId())) {
+                processes.add("ID:" + row.getFunctionProcessId().trim());
+            } else if (StringUtils.hasText(row.getFunctionProcess())) {
                 processes.add(row.getFunctionProcess().trim());
             }
         }
@@ -161,6 +160,7 @@ public class ReviewService {
                 List<FunctionSplitRow> rows = objectMapper.readValue(Paths.get(metadata.getFunctionSplitRowsPath()).toFile(),
                         new TypeReference<List<FunctionSplitRow>>() {
                         });
+                FunctionProcessIdentity.assignRows(rows, readExtractedFunctions(metadata));
                 requirementHierarchyService.enrichRows(metadata, rows);
                 normalizeRows(metadata, rows, false);
                 RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
@@ -175,6 +175,7 @@ public class ReviewService {
         for (CosmicResult result : results) {
             rows.addAll(toSplitRows(metadata, result));
         }
+        FunctionProcessIdentity.assignRows(rows, readExtractedFunctions(metadata));
         requirementHierarchyService.enrichRows(metadata, rows);
         normalizeRows(metadata, rows, false);
         RequirementSourceOrder.sortRows(rows, readExtractedFunctions(metadata));
@@ -466,6 +467,7 @@ public class ReviewService {
             CosmicResult result = map.get(key);
             if (result == null) {
                 result = new CosmicResult();
+                result.setFunctionProcessId(row.getFunctionProcessId());
                 result.setModule(StringUtils.hasText(row.getLevel3Module()) ? row.getLevel3Module()
                         : StringUtils.hasText(row.getLevel2Module()) ? row.getLevel2Module() : row.getLevel1Module());
                 result.setLevel1Module(row.getLevel1Module());

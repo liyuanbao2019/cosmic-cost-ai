@@ -908,6 +908,7 @@ public class DeepSplitAiService {
                 return Collections.emptyList();
             }
             FunctionSplitRow row = new FunctionSplitRow();
+            row.setFunctionProcessId(base.getFunctionProcessId());
             row.setProjectName(firstText(source.getProjectName(), base.getProjectName()));
             // Requirement hierarchy comes from Word evidence and is immutable.
             row.setLevel1Module(text(base.getLevel1Module()));

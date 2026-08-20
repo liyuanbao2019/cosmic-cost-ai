@@ -151,9 +151,7 @@ public class BatchSplitService {
                             }
                             stateChanged = true;
                         }
-                        if ("GENERATING".equals(state.getProjectMaterialStatus())
-                                || ("PENDING".equals(state.getProjectMaterialStatus())
-                                && allItemsCompleted(state))) {
+                        if ("GENERATING".equals(state.getProjectMaterialStatus())) {
                             state.setProjectMaterialStatus("FAILED");
                             state.setProjectMaterialMessage("服务重启已停止项目级送审材料生成，未自动恢复；请手动点击重试。");
                             stateChanged = true;
@@ -273,9 +271,6 @@ public class BatchSplitService {
 
         for (String projectId : preparationIds) {
             submitPreparation(batchId, projectId);
-        }
-        if (preparationIds.isEmpty() && "PROJECT".equals(state.getSplitLevel())) {
-            submitProjectMaterialGeneration(batchId);
         }
         return get(batchId);
     }
@@ -803,7 +798,7 @@ public class BatchSplitService {
                         preparationIds.add(projectId);
                     }
                 }
-                invalidateProjectMaterials(state, "项目成员已变化，旧材料已转为历史版本；全部需求完成后将生成新版本。");
+                invalidateProjectMaterials(state, "项目成员已变化，旧材料已转为历史版本；请人工确认后生成新版本。");
                 associateProjects(state);
                 recomputeState(state);
                 saveStateUnlocked(state);
@@ -816,9 +811,6 @@ public class BatchSplitService {
         }
         for (String projectId : preparationIds) {
             submitPreparation(batchId, projectId);
-        }
-        if (preparationIds.isEmpty()) {
-            submitProjectMaterialGeneration(batchId);
         }
         return get(batchId);
     }
@@ -974,7 +966,7 @@ public class BatchSplitService {
             if ("PROJECT".equals(state.getSplitLevel())
                     && "BLOCKED".equals(state.getProjectMaterialStatus())) {
                 state.setProjectMaterialStatus("PENDING");
-                state.setProjectMaterialMessage("失败需求正在重试；全部需求拆分成功后将自动生成项目级送审材料。");
+                state.setProjectMaterialMessage("失败需求正在重试；全部需求拆分成功后请人工生成项目级送审材料。");
             }
             state.setFinishedAt(null);
             recomputeState(state);
@@ -995,11 +987,17 @@ public class BatchSplitService {
             if (!"PROJECT".equals(state.getSplitLevel())) {
                 throw new BusinessException("需求级批次不生成项目级送审材料。");
             }
-            if (!"FAILED".equals(state.getProjectMaterialStatus())) {
-                throw new BusinessException("当前项目级送审材料不需要重试。");
+            if ("GENERATING".equals(state.getProjectMaterialStatus())) {
+                throw new BusinessException("项目级送审材料正在生成，请等待完成。");
+            }
+            for (BatchSplitItemState item : state.getItems()) {
+                if (!"COMPLETED".equals(item.getStatus())) {
+                    throw new BusinessException("仍有需求未成功完成，暂不能生成项目级送审材料："
+                            + item.getSourceFileName() + "（" + statusText(item.getStatus()) + "）");
+                }
             }
             state.setProjectMaterialStatus("PENDING");
-            state.setProjectMaterialMessage(null);
+            state.setProjectMaterialMessage("已人工确认，等待生成项目级附件 1–5。");
             state.setFinishedAt(null);
             recomputeState(state);
             saveStateUnlocked(state);
@@ -1024,12 +1022,20 @@ public class BatchSplitService {
                 throw new BusinessException("单需求送审材料总包正在生成，请等待完成。");
             }
             int completed = 0;
+            List<String> failedItems = new ArrayList<String>();
             for (BatchSplitItemState item : state.getItems()) {
                 if ("COMPLETED".equals(item.getStatus())) completed++;
+                if ("FAILED".equals(item.getStatus())) {
+                    failedItems.add(item.getSourceFileName());
+                }
                 if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
                         || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
                     throw new BusinessException("批量拆分仍在执行，请完成后再生成送审材料整合包。");
                 }
+            }
+            if (!failedItems.isEmpty()) {
+                throw new BusinessException("存在处理失败的需求，已停止生成全部送审材料。请先修复并重试："
+                        + join(failedItems));
             }
             if (completed == 0) {
                 throw new BusinessException("当前批次没有已完成的需求，无法生成送审材料整合包。");
@@ -1135,19 +1141,6 @@ public class BatchSplitService {
             throw new BusinessException("单需求送审材料总包文件不存在：" + file.getFileName());
         }
         return file;
-    }
-
-    private void submitProjectMaterialGeneration(final String batchId) {
-        try {
-            batchSplitExecutor.execute(new Runnable() {
-                @Override
-                public void run() {
-                    maybeGenerateProjectMaterials(batchId);
-                }
-            });
-        } catch (RuntimeException ex) {
-            failProjectMaterials(batchId, "项目级送审材料队列已满，请稍后重试：" + message(ex));
-        }
     }
 
     public Path projectMaterialFile(String batchId, String type) {
@@ -1452,7 +1445,6 @@ public class BatchSplitService {
                 }
             });
             assignedProjects.remove(projectId, batchId);
-            maybeGenerateProjectMaterials(batchId);
         } catch (RuntimeException ex) {
             boolean cancelled = ex instanceof AiRequestCancelledException;
             if (cancelledExecutions.remove(currentExecutionKey)) {
@@ -1512,7 +1504,6 @@ public class BatchSplitService {
         List<String> projectIds = new ArrayList<String>();
         String materialId;
         int nextVersion;
-        boolean generateRequirementArchive = false;
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
             if (!"PROJECT".equals(state.getSplitLevel())
@@ -1532,22 +1523,10 @@ public class BatchSplitService {
             state.setProjectMaterialStatus("GENERATING");
             state.setProjectMaterialMessage("正在生成产物 1：项目级送审材料 V" + nextVersion + "（附件 1–5）。");
             state.setProjectMaterialCompletedAt(null);
-            if (!"COMPLETED".equals(state.getRequirementMaterialStatus())
-                    && !"PARTIAL_COMPLETED".equals(state.getRequirementMaterialStatus())
-                    && !"GENERATING".equals(state.getRequirementMaterialStatus())) {
-                state.setRequirementMaterialStatus("GENERATING");
-                state.setRequirementMaterialMessage("正在生成产物 2：项目内 " + projectIds.size()
-                        + " 个需求的单需求送审材料总包。");
-                state.setRequirementMaterialArchivePath(null);
-                state.setRequirementMaterialSuccessCount(0);
-                state.setRequirementMaterialFailedCount(0);
-                generateRequirementArchive = true;
-            }
             recomputeState(state);
             saveStateUnlocked(state);
         }
 
-        boolean projectMaterialGenerated = false;
         try {
             ProjectMaterialExportService.ProjectMaterialBundle bundle =
                     projectMaterialExportService.export(materialId, projectIds);
@@ -1568,12 +1547,8 @@ public class BatchSplitService {
                 recomputeState(state);
                 saveStateUnlocked(state);
             }
-            projectMaterialGenerated = true;
         } catch (RuntimeException ex) {
             failProjectMaterials(batchId, message(ex));
-        }
-        if (generateRequirementArchive) {
-            submitRequirementMaterialGeneration(batchId, projectMaterialGenerated);
         }
     }
 
@@ -1584,21 +1559,6 @@ public class BatchSplitService {
             state.setProjectMaterialMessage(errorMessage);
             recomputeState(state);
             saveStateUnlocked(state);
-        }
-    }
-
-    private void submitRequirementMaterialGeneration(final String batchId,
-                                                     final boolean reuseExistingExports) {
-        try {
-            batchSplitExecutor.execute(new Runnable() {
-                @Override
-                public void run() {
-                    generateRequirementMaterials(batchId, reuseExistingExports);
-                }
-            });
-        } catch (RuntimeException ex) {
-            failRequirementMaterials(batchId,
-                    "单需求送审材料总包生成队列已满，请稍后重试：" + message(ex));
         }
     }
 
@@ -1634,7 +1594,7 @@ public class BatchSplitService {
                     ? "服务重启已停止 " + interruptedCount
                     + " 个未完成需求，项目级送审材料保持暂停；手动恢复并全部成功后才会生成。"
                     : "有 " + failedCount
-                    + " 个需求拆分失败，项目级送审材料已暂停；重试失败项并全部成功后将自动生成。");
+                    + " 个需求拆分失败，项目级送审材料已暂停；请先重试失败项，全部成功后再人工生成。");
             state.setProjectMaterialCompletedAt(null);
         }
         if (allCompleted) {
@@ -1654,7 +1614,7 @@ public class BatchSplitService {
                     state.setFinishedAt(now());
                 } else {
                     state.setStatus("MATERIAL_PENDING");
-                    state.setFinishedAt(null);
+                    state.setFinishedAt(now());
                 }
             } else {
                 state.setStatus("COMPLETED");
@@ -1862,7 +1822,7 @@ public class BatchSplitService {
         state.setProjectMaterialTotalCfp(0D);
         state.setProjectMaterialRequirementCount(0);
         state.setRequirementMaterialStatus("NOT_STARTED");
-        state.setRequirementMaterialMessage("项目成员或拆分结果已变化，旧的全量单需求送审材料总包已失效。全部需求完成后自动生成。");
+        state.setRequirementMaterialMessage("项目成员或拆分结果已变化，旧的全量单需求送审材料总包已失效；请人工确认后重新生成。");
         state.setRequirementMaterialArchivePath(null);
         state.setRequirementMaterialSuccessCount(0);
         state.setRequirementMaterialFailedCount(0);

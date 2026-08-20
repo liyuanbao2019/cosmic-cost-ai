@@ -183,7 +183,7 @@ class BatchSplitServiceTest {
     }
 
     @Test
-    void manualExcelProjectBatchStillGeneratesProjectAndRequirementArchives() {
+    void manualExcelProjectBatchWaitsForSeparateManualMaterialActions() {
         metadata.setSourceFileName("人工复核完成.xlsx");
         metadata.setFileType("xlsx");
         metadata.setStatus("EXCEL_IMPORTED");
@@ -195,13 +195,20 @@ class BatchSplitServiceTest {
         BatchSplitJobResponse created = service.create(request);
         BatchSplitJobResponse completed = service.start(created.getBatchId());
 
-        assertEquals("COMPLETED", completed.getStatus());
-        assertEquals("COMPLETED", completed.getProjectMaterialStatus());
-        assertEquals("COMPLETED", completed.getRequirementMaterialStatus());
-        assertTrue(completed.getRequirementMaterialArchive() != null);
+        assertEquals("MATERIAL_PENDING", completed.getStatus());
+        assertEquals("PENDING", completed.getProjectMaterialStatus());
+        assertEquals("NOT_STARTED", completed.getRequirementMaterialStatus());
+        verify(projectMaterialExportService, never()).export(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
+
+        BatchSplitJobResponse projectMaterials = service.retryProjectMaterials(created.getBatchId());
+        assertEquals("COMPLETED", projectMaterials.getProjectMaterialStatus());
+        BatchSplitJobResponse requirementMaterials = service.exportRequirementMaterials(created.getBatchId());
+        assertEquals("COMPLETED", requirementMaterials.getRequirementMaterialStatus());
+        assertTrue(requirementMaterials.getRequirementMaterialArchive() != null);
         verify(projectMaterialExportService).export(
                 org.mockito.ArgumentMatchers.anyString(), eq(Arrays.asList(metadata.getId())));
-        verify(projectMaterialExportService).exportExistingRequirementArchives(
+        verify(projectMaterialExportService).exportRequirementArchives(
                 org.mockito.ArgumentMatchers.anyString(), eq(Arrays.asList(metadata.getId())),
                 any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
     }
@@ -489,7 +496,7 @@ class BatchSplitServiceTest {
     }
 
     @Test
-    void projectLevelGeneratesMaterialsAfterAllDocumentsComplete() {
+    void projectLevelWaitsForManualMaterialGenerationAfterAllDocumentsComplete() {
         ProjectMaterialExportService.ProjectMaterialBundle bundle =
                 mock(ProjectMaterialExportService.ProjectMaterialBundle.class);
         when(bundle.getFiles()).thenReturn(Collections.emptyMap());
@@ -509,10 +516,16 @@ class BatchSplitServiceTest {
         service.confirm(created.getBatchId(), metadata.getId(), confirmation);
         BatchSplitJobResponse completed = service.start(created.getBatchId());
 
-        assertEquals("COMPLETED", completed.getStatus());
-        assertEquals("COMPLETED", completed.getProjectMaterialStatus());
-        assertEquals(3, completed.getProjectMaterialRequirementCount());
-        assertEquals(12D, completed.getProjectMaterialTotalCfp());
+        assertEquals("MATERIAL_PENDING", completed.getStatus());
+        assertEquals("PENDING", completed.getProjectMaterialStatus());
+        verify(projectMaterialExportService, never()).export(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
+
+        BatchSplitJobResponse generated = service.retryProjectMaterials(created.getBatchId());
+        assertEquals("COMPLETED", generated.getStatus());
+        assertEquals("COMPLETED", generated.getProjectMaterialStatus());
+        assertEquals(3, generated.getProjectMaterialRequirementCount());
+        assertEquals(12D, generated.getProjectMaterialTotalCfp());
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
     }
@@ -541,11 +554,14 @@ class BatchSplitServiceTest {
         service.confirm(created.getBatchId(), metadata.getId(), confirmation);
 
         BatchSplitJobResponse completed = service.start(created.getBatchId());
+        assertEquals("MATERIAL_PENDING", completed.getStatus());
 
-        assertEquals("MATERIAL_FAILED", completed.getStatus());
-        assertEquals("FAILED", completed.getProjectMaterialStatus());
-        assertEquals("COMPLETED", completed.getRequirementMaterialStatus());
-        assertEquals(1, completed.getRequirementMaterialSuccessCount());
+        BatchSplitJobResponse failedAggregate = service.retryProjectMaterials(created.getBatchId());
+        assertEquals("MATERIAL_FAILED", failedAggregate.getStatus());
+        assertEquals("FAILED", failedAggregate.getProjectMaterialStatus());
+        BatchSplitJobResponse requirementMaterials = service.exportRequirementMaterials(created.getBatchId());
+        assertEquals("COMPLETED", requirementMaterials.getRequirementMaterialStatus());
+        assertEquals(1, requirementMaterials.getRequirementMaterialSuccessCount());
         verify(projectMaterialExportService).exportRequirementArchives(eq(created.getBatchId()),
                 eq(Arrays.asList(metadata.getId())),
                 any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
@@ -604,10 +620,15 @@ class BatchSplitServiceTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
 
         BatchSplitJobResponse completed = service.retryFailed(created.getBatchId());
-        assertEquals("COMPLETED", completed.getStatus());
+        assertEquals("MATERIAL_PENDING", completed.getStatus());
         assertEquals(2, completed.getCompleted());
         assertEquals(0, completed.getFailed());
-        assertEquals("COMPLETED", completed.getProjectMaterialStatus());
+        assertEquals("PENDING", completed.getProjectMaterialStatus());
+        verify(projectMaterialExportService, never()).export(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
+
+        BatchSplitJobResponse generated = service.retryProjectMaterials(created.getBatchId());
+        assertEquals("COMPLETED", generated.getProjectMaterialStatus());
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId(), second.getId())));
     }
@@ -623,18 +644,22 @@ class BatchSplitServiceTest {
 
         assertTrue(group.getProjectGroupId().startsWith("PJ"));
         assertEquals("测试项目级项目", group.getProjectGroupName());
-        assertEquals("COMPLETED", group.getStatus());
+        assertEquals("MATERIAL_PENDING", group.getStatus());
         assertEquals(1, group.getCompleted());
-        assertEquals(1, group.getProjectMaterialVersion());
-        assertEquals("COMPLETED", group.getRequirementMaterialStatus());
-        assertEquals(1, group.getRequirementMaterialSuccessCount());
-        assertTrue(group.getRequirementMaterialArchive() != null);
+        assertEquals(0, group.getProjectMaterialVersion());
+        assertEquals("NOT_STARTED", group.getRequirementMaterialStatus());
         assertEquals("REUSED_COMPLETED", group.getItems().get(0).getStage());
         verify(smartSplitPipelineService, never()).runDocument(eq(metadata.getId()), eq(""),
                 any(SmartSplitPipelineService.StageListener.class));
+        BatchSplitJobResponse generated = service.retryProjectMaterials(group.getBatchId());
+        assertEquals(1, generated.getProjectMaterialVersion());
+        BatchSplitJobResponse requirementMaterials = service.exportRequirementMaterials(group.getBatchId());
+        assertEquals("COMPLETED", requirementMaterials.getRequirementMaterialStatus());
+        assertEquals(1, requirementMaterials.getRequirementMaterialSuccessCount());
+        assertTrue(requirementMaterials.getRequirementMaterialArchive() != null);
         verify(projectMaterialExportService).export(eq(group.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
-        verify(projectMaterialExportService).exportExistingRequirementArchives(eq(group.getBatchId()),
+        verify(projectMaterialExportService).exportRequirementArchives(eq(group.getBatchId()),
                 eq(Arrays.asList(metadata.getId())),
                 any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
     }
@@ -682,6 +707,8 @@ class BatchSplitServiceTest {
         stubMaterialBundle(2, 16D);
 
         BatchSplitJobResponse created = service.createProjectGroup(createRequest());
+        BatchSplitJobResponse firstMaterial = service.retryProjectMaterials(created.getBatchId());
+        assertEquals(1, firstMaterial.getProjectMaterialVersion());
         BatchSplitItemsRequest addRequest = new BatchSplitItemsRequest();
         addRequest.setProjectIds(Arrays.asList(second.getId()));
         BatchSplitJobResponse updated = service.addItems(created.getBatchId(), addRequest);
@@ -689,7 +716,11 @@ class BatchSplitServiceTest {
         assertEquals(created.getProjectGroupId(), updated.getProjectGroupId());
         assertEquals(2, updated.getTotal());
         assertEquals(2, updated.getCompleted());
-        assertEquals(2, updated.getProjectMaterialVersion());
+        assertEquals("MATERIAL_PENDING", updated.getStatus());
+        assertEquals("PENDING", updated.getProjectMaterialStatus());
+        assertEquals(1, updated.getProjectMaterialVersion());
+        BatchSplitJobResponse secondMaterial = service.retryProjectMaterials(created.getBatchId());
+        assertEquals(2, secondMaterial.getProjectMaterialVersion());
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V2"),
@@ -707,12 +738,16 @@ class BatchSplitServiceTest {
         stubMaterialBundle(1, 8D);
 
         BatchSplitJobResponse created = service.createProjectGroup(createRequest());
+        BatchSplitJobResponse firstMaterial = service.retryProjectMaterials(created.getBatchId());
+        assertEquals(1, firstMaterial.getProjectMaterialVersion());
         BatchSplitJobResponse rerun = service.rerunItem(created.getBatchId(), metadata.getId());
 
-        assertEquals("COMPLETED", rerun.getStatus());
+        assertEquals("MATERIAL_PENDING", rerun.getStatus());
         assertEquals(1, rerun.getTotal());
         assertEquals(1, rerun.getCompleted());
-        assertEquals(2, rerun.getProjectMaterialVersion());
+        assertEquals(1, rerun.getProjectMaterialVersion());
+        BatchSplitJobResponse regenerated = service.retryProjectMaterials(created.getBatchId());
+        assertEquals(2, regenerated.getProjectMaterialVersion());
         verify(smartSplitPipelineService, times(1)).runDocument(eq(metadata.getId()), eq(""),
                 any(SmartSplitPipelineService.StageListener.class));
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V2"),
