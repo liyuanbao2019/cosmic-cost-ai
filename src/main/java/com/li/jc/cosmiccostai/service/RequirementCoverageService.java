@@ -25,6 +25,8 @@ import java.util.regex.Pattern;
 @Service
 public class RequirementCoverageService {
 
+    private static final int MIN_BODY_EVIDENCE_LENGTH = 20;
+
     private static final Pattern BUSINESS_SECTION = Pattern.compile(
             "^(\\d+)[.．]?\\s*(业务功能(?:需求)?|业务需求|功能需求|需求描述|需求细则)\\s*$");
     // Require the title to start with a non-digit so the complete number is consumed,
@@ -82,24 +84,9 @@ public class RequirementCoverageService {
         return buildResponse(modules, supplemented.toString(), documentText.length());
     }
 
-    public void ensureReadyForExtraction(String projectId) {
-        RequirementCoverageResponse coverage = getCoverage(projectId);
-        if (coverage.getSourceModuleCount() > 0 && coverage.getMissingModuleCount() > 0) {
-            List<String> missing = new ArrayList<String>();
-            for (RequirementCoverageModule module : coverage.getModules()) {
-                if (!module.isIncluded()) {
-                    missing.add(module.getNumber() + " " + module.getTitle());
-                }
-            }
-            throw new BusinessException("解析完整性校验未通过：原文识别到 " + coverage.getSourceModuleCount()
-                    + " 个功能模块，其中 " + coverage.getMissingModuleCount()
-                    + " 个尚未进入 AI 输入。缺失模块：" + join(missing)
-                    + "。请重新选择包含这些模块的章节，或在最终正文中补入相应原文。");
-        }
-    }
-
     private RequirementCoverageResponse buildResponse(List<ModuleBlock> sourceModules, String aiInput, int sourceLength) {
         String input = aiInput == null ? "" : aiInput;
+        String normalizedInput = normalizeModuleContent(input);
         RequirementCoverageResponse response = new RequirementCoverageResponse();
         response.setSourceModuleCount(sourceModules.size());
         response.setSourceLength(sourceLength);
@@ -107,7 +94,7 @@ public class RequirementCoverageService {
         List<RequirementCoverageModule> moduleResponses = new ArrayList<>();
         int included = 0;
         for (ModuleBlock source : sourceModules) {
-            boolean present = containsModule(input, source);
+            boolean present = containsModule(input, normalizedInput, source);
             RequirementCoverageModule module = new RequirementCoverageModule();
             module.setNumber(source.number);
             module.setTitle(source.title);
@@ -302,8 +289,15 @@ public class RequirementCoverageService {
     }
 
     private boolean containsModule(String input, ModuleBlock module) {
+        return containsModule(input, normalizeModuleContent(input), module);
+    }
+
+    private boolean containsModule(String input, String normalizedInput, ModuleBlock module) {
         if (module.number.startsWith("OUTLINE")) {
-            return input.contains(module.title);
+            if (input.contains(module.title)) {
+                return true;
+            }
+            return containsModuleBody(normalizedInput, module);
         }
         String expectedNumber = normalizeHeadingNumber(module.number);
         String expectedTitle = compactHeadingTitle(module.title);
@@ -315,7 +309,44 @@ public class RequirementCoverageService {
                 return true;
             }
         }
-        return false;
+        return containsModuleBody(normalizedInput, module);
+    }
+
+    /**
+     * Word outline extraction and body extraction do not always retain headings in the same way.
+     * When the exact module heading is absent, accept the module only if its complete normalized
+     * body is present in the AI input. Requiring the whole body (and a minimum evidence length)
+     * avoids treating a shared short phrase as coverage.
+     */
+    private boolean containsModuleBody(String normalizedInput, ModuleBlock module) {
+        String body = moduleBodyWithoutHeading(module);
+        String normalizedBody = normalizeModuleContent(body);
+        return normalizedBody.length() >= MIN_BODY_EVIDENCE_LENGTH
+                && normalizedInput.contains(normalizedBody);
+    }
+
+    private String moduleBodyWithoutHeading(ModuleBlock module) {
+        String[] lines = module.text.toString().split("\\r?\\n");
+        StringBuilder body = new StringBuilder();
+        boolean headingSkipped = false;
+        for (String rawLine : lines) {
+            String line = rawLine == null ? "" : rawLine.trim();
+            if (!headingSkipped && StringUtils.hasText(line)) {
+                headingSkipped = true;
+                continue;
+            }
+            if (StringUtils.hasText(line)) {
+                if (body.length() > 0) {
+                    body.append(System.lineSeparator());
+                }
+                body.append(line);
+            }
+        }
+        return body.toString();
+    }
+
+    private String normalizeModuleContent(String text) {
+        return text == null ? "" : text.replaceAll("\\s+", "").trim();
     }
 
     private String normalizeHeadingNumber(String number) {
@@ -324,15 +355,6 @@ public class RequirementCoverageService {
 
     private String compactHeadingTitle(String title) {
         return title == null ? "" : title.replaceAll("\\s+", "").trim();
-    }
-
-    private String join(List<String> values) {
-        StringBuilder result = new StringBuilder();
-        for (String value : values) {
-            if (result.length() > 0) result.append("、");
-            result.append(value);
-        }
-        return result.toString();
     }
 
     private int headingDepth(String number) {

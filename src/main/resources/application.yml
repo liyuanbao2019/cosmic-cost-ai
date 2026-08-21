@@ -73,12 +73,16 @@ cosmic:
     # 单个模型允许的全局在途请求数，所有 AI 场景共用这道并发保护
     max-concurrency: ${OPENAI_MAX_CONCURRENCY:1000}
     extraction:
-      # COSMIC 初拆专用单次等待上限；所有请求仍使用 DeepSeek V4 Pro max 思考强度
+      # COSMIC 初拆连接阶段超时；模型开始处理后持续等待返回，可由用户手动取消
       timeout-seconds: ${COSMIC_AI_EXTRACTION_TIMEOUT_SECONDS:360}
-      # 初拆网络失败后最多重试 1 次，即页面展示第 1/2、2/2 次请求
-      max-retries: ${COSMIC_AI_EXTRACTION_MAX_RETRIES:1}
+      # COSMIC 初拆固定只发送一次，避免大提示词自动重发造成双倍 token 消耗
+      max-retries: 0
+      # 初拆与复用度调整共用的分段并发数；每段仍只发送一次
+      partition-parallelism: ${COSMIC_AI_PARTITION_PARALLELISM:4}
+      # 优先按大章节拆；单个大章节仍过大时，按下级标题或完整原文段落继续拆
+      partition-chars: ${COSMIC_AI_PARTITION_CHARS:18000}
     batch-split:
-      # 批量拆分按项目并发；单项目内部统一调用 smart-split 流水线并严格串行
+      # 批量拆分按项目并发；单项目的初拆与复用度阶段还会在章节边界内受控并发
       worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:1000}
       # 后台执行器队列容量；单批需求数量不设业务上限，实际执行由并发调度控制
       queue-capacity: ${COSMIC_BATCH_SPLIT_QUEUE_CAPACITY:2000}

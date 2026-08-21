@@ -4,6 +4,7 @@ import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.DeepSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.DeepSplitRequest;
 import com.li.jc.cosmiccostai.dto.ExtractResponse;
+import com.li.jc.cosmiccostai.dto.AiPartitionProgressItem;
 import com.li.jc.cosmiccostai.dto.RequirementChapterCoverage;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
@@ -25,7 +26,6 @@ import java.util.List;
 @Service
 public class SmartSplitPipelineService {
 
-    private final RequirementCoverageService requirementCoverageService;
     private final AiExtractionService aiExtractionService;
     private final CosmicAnalysisService cosmicAnalysisService;
     private final ReviewService reviewService;
@@ -37,8 +37,7 @@ public class SmartSplitPipelineService {
     private final long deepReviewWaitMillis;
     private final int deepReviewRetryRounds;
 
-    public SmartSplitPipelineService(RequirementCoverageService requirementCoverageService,
-                                     AiExtractionService aiExtractionService,
+    public SmartSplitPipelineService(AiExtractionService aiExtractionService,
                                      CosmicAnalysisService cosmicAnalysisService,
                                      ReviewService reviewService,
                                      DeepSplitAiService deepSplitAiService,
@@ -48,7 +47,6 @@ public class SmartSplitPipelineService {
                                      @Value("${cosmic.ai.smart-split.deep-review-enabled:false}") boolean deepReviewEnabled,
                                      @Value("${cosmic.ai.smart-split.deep-review-wait-seconds:1800}") long deepReviewWaitSeconds,
                                      @Value("${cosmic.ai.smart-split.deep-review-retry-rounds:2}") int deepReviewRetryRounds) {
-        this.requirementCoverageService = requirementCoverageService;
         this.aiExtractionService = aiExtractionService;
         this.cosmicAnalysisService = cosmicAnalysisService;
         this.reviewService = reviewService;
@@ -62,13 +60,16 @@ public class SmartSplitPipelineService {
     }
 
     public PipelineResult runDocument(String projectId, String editedPrompt, StageListener listener) {
-        notify(listener, "INPUT_COVERAGE_CHECK", 5, "正在校验已确认正文是否覆盖原文功能章节");
-        requirementCoverageService.ensureReadyForExtraction(projectId);
-        notify(listener, "AI_EXTRACTING", 8, "正文完整性校验通过，正在识别需求功能并生成结构化功能清单");
+        notify(listener, "AI_EXTRACTING", 8, "已采用人工确认正文，正在识别需求功能并生成结构化功能清单");
         AiRequestAttemptListener attemptListener = listener == null ? null : new AiRequestAttemptListener() {
             @Override
             public void onAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
                 listener.onAiAttempt(attempt, maxAttempts, timeoutSeconds);
+            }
+
+            @Override
+            public void onPartitionProgress(List<AiPartitionProgressItem> partitions) {
+                listener.onAiPartitionProgress(partitions);
             }
         };
         ExtractResponse extraction = StringUtils.hasText(editedPrompt)
@@ -156,7 +157,20 @@ public class SmartSplitPipelineService {
         if (aiCalibrationEnabled) {
             notify(listener, "REUSE_ADJUSTING", deepReviewEnabled ? 80 : 62,
                     "正在按完整拆分表统一调整新增、复用和利旧");
-            ReuseDegreeAdjustmentResponse reuse = reuseDegreeAiAdjustmentService.adjust(projectId, rows);
+            AiRequestAttemptListener reuseProgressListener = listener == null ? null
+                    : new AiRequestAttemptListener() {
+                        @Override
+                        public void onAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
+                            // Reuse adjustment has partition progress but no automatic retries.
+                        }
+
+                        @Override
+                        public void onPartitionProgress(List<AiPartitionProgressItem> partitions) {
+                            listener.onAiPartitionProgress(partitions);
+                        }
+                    };
+            ReuseDegreeAdjustmentResponse reuse = reuseDegreeAiAdjustmentService.adjust(
+                    projectId, rows, reuseProgressListener);
             rows = reuse.getRows();
         } else {
             result.warnings.add("已按用户选择跳过复用度 AI 调整，保留 Excel 中人工确认的新增、复用、利旧和 CFP。");
@@ -264,6 +278,10 @@ public class SmartSplitPipelineService {
 
         default void onAiAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
             // Existing single-document listeners do not need to persist transport-level progress.
+        }
+
+        default void onAiPartitionProgress(List<AiPartitionProgressItem> partitions) {
+            // Existing single-document listeners do not need partition-level progress.
         }
     }
 

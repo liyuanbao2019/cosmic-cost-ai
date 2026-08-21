@@ -1,6 +1,5 @@
 package com.li.jc.cosmiccostai.service;
 
-import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.RequirementCoverageResponse;
 import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import org.junit.jupiter.api.Test;
@@ -12,10 +11,64 @@ import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RequirementCoverageServiceTest {
+
+    @Test
+    void acceptsCompleteModuleBodyWhenWordHeadingIsMissingFromAiInput() throws Exception {
+        FileStorageService storage = new FileStorageService("target/test-heading-loss-coverage-storage");
+        String projectId = "heading-loss-coverage-project";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path documentText = projectDir.resolve("document-text.txt");
+        Path aiInput = projectDir.resolve("requirement-detail.txt");
+        String moduleBody = "权限控制：按地市进行数据权限隔离，用户仅可查看所属地市范围内的投诉数据。\n"
+                + "FP-001 GIS底图与投诉问题点打点呈现\n"
+                + "基于GIS地图引擎，将投诉工单按经纬度信息在底图上进行打点呈现。\n";
+        Files.write(documentText, ("1. 功能需求\n1.1 需求描述\n" + moduleBody
+                + "2. 非功能需求\n性能要求。\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(aiInput, moduleBody.getBytes(StandardCharsets.UTF_8));
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setDocumentTextPath(documentText.toString());
+        metadata.setRequirementDetailPath(aiInput.toString());
+        storage.saveMetadata(metadata);
+
+        RequirementCoverageResponse response = new RequirementCoverageService(storage).getCoverage(projectId);
+
+        assertEquals(1, response.getSourceModuleCount());
+        assertEquals(1, response.getIncludedModuleCount());
+        assertEquals(0, response.getMissingModuleCount());
+        assertTrue(response.isReadyForExtraction());
+    }
+
+    @Test
+    void doesNotAcceptPartialBodyTextWhenHeadingIsMissing() throws Exception {
+        FileStorageService storage = new FileStorageService("target/test-partial-body-coverage-storage");
+        String projectId = "partial-body-coverage-project";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        Path documentText = projectDir.resolve("document-text.txt");
+        Path aiInput = projectDir.resolve("requirement-detail.txt");
+        Files.write(documentText, ("1. 功能需求\n1.1 需求描述\n"
+                + "权限控制：按地市进行数据权限隔离，用户仅可查看所属地市范围内的投诉数据。\n"
+                + "GIS底图展示全部投诉问题点并支持按时间范围聚合。\n"
+                + "2. 非功能需求\n性能要求。\n").getBytes(StandardCharsets.UTF_8));
+        Files.write(aiInput, "权限控制：按地市进行数据权限隔离。\n".getBytes(StandardCharsets.UTF_8));
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setDocumentTextPath(documentText.toString());
+        metadata.setRequirementDetailPath(aiInput.toString());
+        storage.saveMetadata(metadata);
+
+        RequirementCoverageResponse response = new RequirementCoverageService(storage).getCoverage(projectId);
+
+        assertEquals(1, response.getSourceModuleCount());
+        assertEquals(0, response.getIncludedModuleCount());
+        assertEquals(1, response.getMissingModuleCount());
+        assertFalse(response.isReadyForExtraction());
+    }
 
     @Test
     void recognizesRequirementDescriptionAndNoSpaceHeadingNumbers() throws Exception {
@@ -82,7 +135,7 @@ class RequirementCoverageServiceTest {
     }
 
     @Test
-    void reportsMissingModulesAndCanSupplementThemBeforeAiExtraction() throws Exception {
+    void reportsMissingModulesAsAdvisoryAndCanSupplementThem() throws Exception {
         FileStorageService storage = new FileStorageService("target/test-coverage-storage");
         String projectId = "coverage-project";
         Path projectDir = storage.resolveProjectDir(projectId);
@@ -109,10 +162,8 @@ class RequirementCoverageServiceTest {
         assertEquals(1, before.getIncludedModuleCount());
         assertEquals(2, before.getMissingModuleCount());
         assertFalse(before.isReadyForExtraction());
-        BusinessException error = assertThrows(BusinessException.class,
-                () -> service.ensureReadyForExtraction(projectId));
-        assertTrue(error.getMessage().contains("2.1.2 智能报告详情管理（新增）"));
-        assertTrue(error.getMessage().contains("2.1.3 终端盘点管理（新增）"));
+        assertEquals("2.1.2", before.getModules().get(1).getNumber());
+        assertEquals("2.1.3", before.getModules().get(2).getNumber());
 
         RequirementCoverageResponse after = service.includeModules(projectId, Arrays.asList("2.1.2", "2.1.3"));
         assertEquals(3, after.getIncludedModuleCount());

@@ -11,6 +11,7 @@ import com.li.jc.cosmiccostai.dto.BatchSplitItemsRequest;
 import com.li.jc.cosmiccostai.dto.BatchSplitJobResponse;
 import com.li.jc.cosmiccostai.dto.BatchSplitSummaryItemResponse;
 import com.li.jc.cosmiccostai.dto.BatchSplitSummaryResponse;
+import com.li.jc.cosmiccostai.dto.AiPartitionProgressItem;
 import com.li.jc.cosmiccostai.dto.DocumentChapterItem;
 import com.li.jc.cosmiccostai.dto.DocumentChapterSelectionResponse;
 import com.li.jc.cosmiccostai.dto.ParseResponse;
@@ -1361,6 +1362,7 @@ public class BatchSplitService {
                 item.setAiMaxAttempts(0);
                 item.setAiAttemptStartedAt(null);
                 item.setAiAttemptDeadlineAt(null);
+                item.setAiPartitions(new ArrayList<AiPartitionProgressItem>());
             }
         });
         try {
@@ -1394,6 +1396,12 @@ public class BatchSplitService {
                                     || "CANCEL_REQUESTED".equals(item.getStage())) {
                                 return;
                             }
+                            // Partition progress is authoritative for concurrent extraction.
+                            // Do not let one worker's transport callback replace the aggregate
+                            // status with the old serial "current part" presentation.
+                            if (item.getAiPartitions() != null && !item.getAiPartitions().isEmpty()) {
+                                return;
+                            }
                             LocalDateTime started = LocalDateTime.now();
                             item.setStatus("RUNNING");
                             item.setStage("AI_EXTRACTING");
@@ -1401,9 +1409,50 @@ public class BatchSplitService {
                             item.setAiAttempt(attempt);
                             item.setAiMaxAttempts(maxAttempts);
                             item.setAiAttemptStartedAt(started.format(DATE_TIME_FORMATTER));
-                            item.setAiAttemptDeadlineAt(started.plusSeconds(timeoutSeconds).format(DATE_TIME_FORMATTER));
-                            item.setStageMessage("AI 识别第 " + attempt + "/" + maxAttempts
-                                    + " 次请求，DeepSeek V4 Pro max，单次最长 " + timeoutSeconds + " 秒");
+                            item.setAiAttemptDeadlineAt(null);
+                            item.setStageMessage(maxAttempts > 1
+                                    ? "AI 识别第 " + attempt + "/" + maxAttempts
+                                        + " 段，DeepSeek V4 Pro max；当前分段只发送一次，不自动重试"
+                                    : "AI 识别单次请求，DeepSeek V4 Pro max；持续等待模型返回，不自动重试");
+                        }
+                    });
+                }
+
+                @Override
+                public void onAiPartitionProgress(final List<AiPartitionProgressItem> partitions) {
+                    updateItem(batchId, projectId, new ItemMutation() {
+                        @Override
+                        public void apply(BatchSplitItemState item) {
+                            if (cancelledExecutions.contains(currentExecutionKey)
+                                    || "CANCEL_REQUESTED".equals(item.getStage())) return;
+                            List<AiPartitionProgressItem> snapshot = copyPartitionProgress(partitions);
+                            int completed = 0;
+                            int cached = 0;
+                            int running = 0;
+                            int failed = 0;
+                            for (AiPartitionProgressItem part : snapshot) {
+                                if ("COMPLETED".equals(part.getStatus())) completed++;
+                                else if ("CACHED".equals(part.getStatus())) cached++;
+                                else if ("RUNNING".equals(part.getStatus())) running++;
+                                else if ("FAILED".equals(part.getStatus())) failed++;
+                            }
+                            int done = completed + cached;
+                            int queued = Math.max(0, snapshot.size() - done - running - failed);
+                            String phase = snapshot.isEmpty() ? "EXTRACTION" : snapshot.get(0).getPhase();
+                            boolean reusePhase = "REUSE_ADJUSTMENT".equals(phase);
+                            item.setStatus("RUNNING");
+                            item.setStage(reusePhase ? "REUSE_ADJUSTING" : "AI_EXTRACTING");
+                            item.setProgressPercent(Math.max(reusePhase ? 62 : 8, item.getProgressPercent()));
+                            item.setAiAttempt(done);
+                            item.setAiMaxAttempts(snapshot.size());
+                            item.setAiPartitions(snapshot);
+                            item.setStageMessage(done == snapshot.size() && failed == 0
+                                    ? (reusePhase ? "复用度 AI" : "AI 初拆")
+                                        + "全部分段已返回，正在本地合并结果"
+                                    : (reusePhase ? "复用度 AI" : "AI 初拆")
+                                        + "并发分段：完成 " + done + "/" + snapshot.size()
+                                        + "（缓存 " + cached + "），运行 " + running
+                                        + "，排队 " + queued + "，失败 " + failed);
                         }
                     });
                 }
@@ -1839,6 +1888,7 @@ public class BatchSplitService {
         item.setAiMaxAttempts(0);
         item.setAiAttemptStartedAt(null);
         item.setAiAttemptDeadlineAt(null);
+        item.setAiPartitions(new ArrayList<AiPartitionProgressItem>());
         item.setIssueCount(0);
         item.setErrorCount(0);
         item.setRiskCount(0);
@@ -1917,6 +1967,15 @@ public class BatchSplitService {
         }
     }
 
+    private List<AiPartitionProgressItem> copyPartitionProgress(List<AiPartitionProgressItem> source) {
+        List<AiPartitionProgressItem> result = new ArrayList<AiPartitionProgressItem>();
+        for (AiPartitionProgressItem item : source == null
+                ? Collections.<AiPartitionProgressItem>emptyList() : source) {
+            if (item != null) result.add(new AiPartitionProgressItem(item));
+        }
+        return result;
+    }
+
     private BatchSplitJobResponse toResponse(BatchSplitState state) {
         BatchSplitJobResponse response = new BatchSplitJobResponse();
         response.setBatchId(state.getBatchId());
@@ -1988,6 +2047,7 @@ public class BatchSplitService {
             target.setAiMaxAttempts(item.getAiMaxAttempts());
             target.setAiAttemptStartedAt(item.getAiAttemptStartedAt());
             target.setAiAttemptDeadlineAt(item.getAiAttemptDeadlineAt());
+            target.setAiPartitions(copyPartitionProgress(item.getAiPartitions()));
             target.setIssueCount(item.getIssueCount());
             target.setErrorCount(item.getErrorCount());
             target.setRiskCount(item.getRiskCount());
@@ -2246,6 +2306,7 @@ public class BatchSplitService {
         private int aiMaxAttempts;
         private String aiAttemptStartedAt;
         private String aiAttemptDeadlineAt;
+        private List<AiPartitionProgressItem> aiPartitions = new ArrayList<AiPartitionProgressItem>();
         private int issueCount;
         private int errorCount;
         private int riskCount;
@@ -2298,6 +2359,11 @@ public class BatchSplitService {
         public void setAiAttemptStartedAt(String aiAttemptStartedAt) { this.aiAttemptStartedAt = aiAttemptStartedAt; }
         public String getAiAttemptDeadlineAt() { return aiAttemptDeadlineAt; }
         public void setAiAttemptDeadlineAt(String aiAttemptDeadlineAt) { this.aiAttemptDeadlineAt = aiAttemptDeadlineAt; }
+        public List<AiPartitionProgressItem> getAiPartitions() { return aiPartitions; }
+        public void setAiPartitions(List<AiPartitionProgressItem> aiPartitions) {
+            this.aiPartitions = aiPartitions == null
+                    ? new ArrayList<AiPartitionProgressItem>() : aiPartitions;
+        }
         public int getIssueCount() { return issueCount; }
         public void setIssueCount(int issueCount) { this.issueCount = issueCount; }
         public int getErrorCount() { return errorCount; }

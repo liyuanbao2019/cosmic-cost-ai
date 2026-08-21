@@ -1,6 +1,8 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.li.jc.cosmiccostai.config.AiModelProperties;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
+import com.li.jc.cosmiccostai.dto.AiPartitionProgressItem;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentDecision;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentResponse;
 import com.li.jc.cosmiccostai.dto.ReviewResponse;
@@ -11,6 +13,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,6 +30,85 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ReuseDegreeAiAdjustmentServiceTest {
+
+    @Test
+    void reusesExtractionReferencePartitionsAndRunsThemConcurrently() throws Exception {
+        Path storagePath = Files.createTempDirectory("reuse-partitions-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("p-parallel");
+        Files.createDirectories(projectDir);
+        Files.write(projectDir.resolve("ai-partition-count.txt"), "2".getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("ai-prompt-part-1.txt"),
+                "【需求细则】\n[REQ-L0001] 第一章".getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("ai-prompt-part-2.txt"),
+                "【需求细则】\n[REQ-L0002] 第二章".getBytes(StandardCharsets.UTF_8));
+
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        ReviewService review = mock(ReviewService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-parallel");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        AiModelProfile profile = new AiModelProfile();
+        profile.setModel("deepseek-reasoner");
+        when(ai.getActiveProfile()).thenReturn(profile);
+        final CountDownLatch bothStarted = new CountDownLatch(2);
+        final AtomicInteger active = new AtomicInteger();
+        final AtomicInteger maxActive = new AtomicInteger();
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
+                .thenAnswer(invocation -> {
+                    int current = active.incrementAndGet();
+                    maxActive.accumulateAndGet(current, Math::max);
+                    bothStarted.countDown();
+                    bothStarted.await(2, TimeUnit.SECONDS);
+                    active.decrementAndGet();
+                    return "{\"decisions\":[]}";
+                });
+        when(review.saveReuseAdjustedReview(eq("p-parallel"), any())).thenAnswer(invocation -> {
+            ReviewResponse saved = new ReviewResponse();
+            saved.setSplitRows(invocation.getArgument(1));
+            return saved;
+        });
+
+        FunctionSplitRow first = row("功能A", "接收A", "E", "A", "编号", "新增");
+        first.setLevel1Module("第一章");
+        first.getSourceReferences().add("REQ-L0001");
+        FunctionSplitRow second = row("功能B", "接收B", "E", "B", "编号", "新增");
+        second.setLevel1Module("第二章");
+        second.getSourceReferences().add("REQ-L0002");
+        List<FunctionSplitRow> rows = Arrays.asList(first, second);
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setPartitionParallelism(2);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, review, storage, properties);
+        final List<List<AiPartitionProgressItem>> progress =
+                Collections.synchronizedList(new ArrayList<List<AiPartitionProgressItem>>());
+        AiRequestAttemptListener progressListener = new AiRequestAttemptListener() {
+            @Override
+            public void onAttempt(int attempt, int maxAttempts, long timeoutSeconds) {
+            }
+
+            @Override
+            public void onPartitionProgress(List<AiPartitionProgressItem> partitions) {
+                List<AiPartitionProgressItem> snapshot = new ArrayList<AiPartitionProgressItem>();
+                for (AiPartitionProgressItem item : partitions) {
+                    snapshot.add(new AiPartitionProgressItem(item));
+                }
+                progress.add(snapshot);
+            }
+        };
+
+        List<List<Integer>> partitions = service.partitionRowIndexes("p-parallel", rows);
+        service.adjust("p-parallel", rows, progressListener);
+
+        assertEquals(Arrays.asList(Collections.singletonList(1), Collections.singletonList(2)), partitions);
+        assertEquals(2, maxActive.get());
+        assertTrue(progress.stream().anyMatch(snapshot -> snapshot.stream()
+                .filter(item -> "RUNNING".equals(item.getStatus())).count() == 2));
+        assertTrue(progress.get(progress.size() - 1).stream().allMatch(
+                item -> "REUSE_ADJUSTMENT".equals(item.getPhase())
+                        && "COMPLETED".equals(item.getStatus())));
+    }
 
     @Test
     void appliesOnlyEvidenceBackedMovementReuse() {
@@ -93,7 +180,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("FULL-RULE-V2");
         when(rules.getRuleVersion()).thenReturn("R-test");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
                 .thenReturn("{\"decisions\":[]}");
         AiModelProfile profile = new AiModelProfile();
         profile.setModel("deepseek-reasoner");
@@ -111,7 +198,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals(2D, response.getCfpBefore(), 0.0001D);
         assertEquals(2D, response.getCfpAfter(), 0.0001D);
         assertEquals("deepseek-reasoner", response.getModel());
-        verify(ai).generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false));
+        verify(ai).generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0));
         verify(review).saveReuseAdjustedReview(eq("p-1"), any());
     }
 
@@ -123,7 +210,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("UNIFIED-XINJIANG-RULES");
         when(rules.getRuleVersion()).thenReturn("R-xj-unified");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
                 .thenReturn("{\"decisions\":[{\"rowIndex\":1,"
                         + "\"decisionType\":\"RULE_POLICY\","
                         + "\"ruleId\":\"XJ-TIMER-E\","
@@ -246,7 +333,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("FULL-RULE-V2");
         when(rules.getRuleVersion()).thenReturn("R-crud");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
                 .thenReturn("{\"decisions\":[]}");
         AiModelProfile profile = new AiModelProfile();
         profile.setModel("deepseek-reasoner");

@@ -98,9 +98,19 @@ class BatchSplitUiRegressionTest {
                 && html.contains("function cancelCurrentBatchItem()")
                 && html.contains("/cancel"));
         assertTrue(html.contains("id=\"batchAiAttemptInfo\"")
-                && html.contains("第 \" + item.aiAttempt + \"/\" + item.aiMaxAttempts")
+                && html.contains("持续等待当前请求返回（不自动重试，可手动取消）")
                 && html.contains("推理强度始终为 max（无 high 降级）"));
         assertTrue(css.contains(".batch-ai-attempt-info"));
+        assertTrue(html.contains("Array.isArray(item.aiPartitions)")
+                && html.contains("batch-ai-progress-summary")
+                && html.contains("缓存复用")
+                && html.contains("处理中")
+                && html.contains("排队中")
+                && html.contains("最多 4 路并发，不自动重试"));
+        assertTrue(css.contains(".batch-ai-parts")
+                && css.contains(".batch-ai-part-running")
+                && css.contains(".batch-ai-part-completed")
+                && css.contains(".batch-ai-part-failed"));
         assertTrue(css.contains(".batch-input-empty.excel-import-failure-detail"));
         assertTrue(html.contains("id=\"batchSelectedItemError\"")
                 && html.contains("copyBatchSelectedItemError"));

@@ -26,6 +26,7 @@ public class BatchSplitItemResponse {
     private int aiMaxAttempts;
     private String aiAttemptStartedAt;
     private String aiAttemptDeadlineAt;
+    private List<AiPartitionProgressItem> aiPartitions = new ArrayList<AiPartitionProgressItem>();
     private int issueCount;
     private int errorCount;
     private int riskCount;
@@ -76,6 +77,8 @@ public class BatchSplitItemResponse {
     public void setAiAttemptStartedAt(String aiAttemptStartedAt) { this.aiAttemptStartedAt = aiAttemptStartedAt; }
     public String getAiAttemptDeadlineAt() { return aiAttemptDeadlineAt; }
     public void setAiAttemptDeadlineAt(String aiAttemptDeadlineAt) { this.aiAttemptDeadlineAt = aiAttemptDeadlineAt; }
+    public List<AiPartitionProgressItem> getAiPartitions() { return aiPartitions; }
+    public void setAiPartitions(List<AiPartitionProgressItem> aiPartitions) { this.aiPartitions = aiPartitions; }
     public int getIssueCount() { return issueCount; }
     public void setIssueCount(int issueCount) { this.issueCount = issueCount; }
     public int getErrorCount() { return errorCount; }

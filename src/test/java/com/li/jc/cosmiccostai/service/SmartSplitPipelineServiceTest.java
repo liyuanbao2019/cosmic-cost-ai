@@ -58,13 +58,13 @@ class SmartSplitPipelineServiceTest {
         when(review.saveSmartSplitAdjustedReview(eq("P1"), any())).thenReturn(reviewResponse);
         ReuseDegreeAdjustmentResponse reuseResponse = new ReuseDegreeAdjustmentResponse();
         reuseResponse.setRows(Collections.singletonList(row));
-        when(reuse.adjust(eq("P1"), any())).thenReturn(reuseResponse);
+        when(reuse.adjust(eq("P1"), any(), any(AiRequestAttemptListener.class))).thenReturn(reuseResponse);
         RuleValidationResponse validationResponse = new RuleValidationResponse();
         validationResponse.setRuleVersion("R-test");
         when(validation.validate(any())).thenReturn(validationResponse);
 
         SmartSplitPipelineService service = new SmartSplitPipelineService(
-                coverage, extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
+                extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
         final List<String> stages = new ArrayList<String>();
         SmartSplitPipelineService.PipelineResult result = service.runDocument(
                 "P1", "edited prompt", new SmartSplitPipelineService.StageListener() {
@@ -74,26 +74,27 @@ class SmartSplitPipelineServiceTest {
                     }
                 });
 
-        InOrder order = inOrder(coverage, extraction, cosmic, review, deep, reuse, validation);
-        order.verify(coverage).ensureReadyForExtraction("P1");
+        InOrder order = inOrder(extraction, cosmic, review, deep, reuse, validation);
         order.verify(extraction).extractWithPrompt(eq("P1"), eq("edited prompt"),
                 any(AiRequestAttemptListener.class));
         order.verify(cosmic).analyze("P1");
         order.verify(review).getReview("P1");
         order.verify(deep).start(eq("P1"), any(DeepSplitRequest.class));
         order.verify(review).saveSmartSplitAdjustedReview(eq("P1"), any());
-        order.verify(reuse).adjust(eq("P1"), any());
+        order.verify(reuse).adjust(eq("P1"), any(), any(AiRequestAttemptListener.class));
         order.verify(validation).validate(any());
         assertEquals("D1", result.getDeepSplitJobId());
         assertEquals(1, result.getAppliedSuggestionCount());
         assertEquals("R-test", result.getRuleVersion());
         assertFalse(result.isPartial());
-        assertTrue(stages.indexOf("INPUT_COVERAGE_CHECK") < stages.indexOf("AI_EXTRACTING"));
+        assertFalse(stages.contains("INPUT_COVERAGE_CHECK"));
+        assertEquals("AI_EXTRACTING", stages.get(0));
         assertTrue(stages.indexOf("DEEP_REVIEWING") < stages.indexOf("REUSE_ADJUSTING"));
         assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
         assertEquals("COMPLETED", stages.get(stages.size() - 1));
         verify(extraction).extractWithPrompt(eq("P1"), eq("edited prompt"),
                 any(AiRequestAttemptListener.class));
+        verifyNoInteractions(coverage);
     }
 
     @Test
@@ -119,13 +120,13 @@ class SmartSplitPipelineServiceTest {
         when(extraction.extract(eq("P1"), any(AiRequestAttemptListener.class))).thenReturn(extractResponse);
         ReuseDegreeAdjustmentResponse reuseResponse = new ReuseDegreeAdjustmentResponse();
         reuseResponse.setRows(Collections.singletonList(row));
-        when(reuse.adjust(eq("P1"), any())).thenReturn(reuseResponse);
+        when(reuse.adjust(eq("P1"), any(), any(AiRequestAttemptListener.class))).thenReturn(reuseResponse);
         RuleValidationResponse validationResponse = new RuleValidationResponse();
         validationResponse.setRuleVersion("R-without-deep-review");
         when(validation.validate(any())).thenReturn(validationResponse);
 
         SmartSplitPipelineService service = new SmartSplitPipelineService(
-                coverage, extraction, cosmic, review, deep, apply, reuse, validation, false, 60, 2);
+                extraction, cosmic, review, deep, apply, reuse, validation, false, 60, 2);
         final List<String> stages = new ArrayList<String>();
         SmartSplitPipelineService.PipelineResult result = service.runDocument(
                 "P1", "", new SmartSplitPipelineService.StageListener() {
@@ -137,7 +138,7 @@ class SmartSplitPipelineServiceTest {
 
         verifyNoInteractions(deep);
         verify(review, never()).saveSmartSplitAdjustedReview(eq("P1"), any());
-        verify(reuse).adjust(eq("P1"), any());
+        verify(reuse).adjust(eq("P1"), any(), any(AiRequestAttemptListener.class));
         assertFalse(stages.contains("DEEP_REVIEWING"));
         assertFalse(stages.contains("APPLYING_DEEP_REVIEW"));
         assertTrue(stages.indexOf("REUSE_ADJUSTING") < stages.indexOf("RULE_VALIDATING"));
@@ -167,7 +168,7 @@ class SmartSplitPipelineServiceTest {
         when(validation.validate(any())).thenReturn(validationResponse);
 
         SmartSplitPipelineService service = new SmartSplitPipelineService(
-                coverage, extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
+                extraction, cosmic, review, deep, apply, reuse, validation, true, 60, 2);
         final List<String> stages = new ArrayList<String>();
         SmartSplitPipelineService.PipelineResult result = service.runExistingRows(
                 "P1", false, (stage, progressPercent, message) -> stages.add(stage));

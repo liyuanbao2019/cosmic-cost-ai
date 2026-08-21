@@ -50,12 +50,18 @@ public class AiModelProperties {
 
     public static class Extraction {
         private long timeoutSeconds = 360;
-        private int maxRetries = 1;
+        private int maxRetries = 0;
+        private int partitionParallelism = 4;
+        private int partitionChars = 18000;
 
         public long getTimeoutSeconds() { return timeoutSeconds; }
         public void setTimeoutSeconds(long timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
         public int getMaxRetries() { return maxRetries; }
         public void setMaxRetries(int maxRetries) { this.maxRetries = maxRetries; }
+        public int getPartitionParallelism() { return partitionParallelism; }
+        public void setPartitionParallelism(int partitionParallelism) { this.partitionParallelism = partitionParallelism; }
+        public int getPartitionChars() { return partitionChars; }
+        public void setPartitionChars(int partitionChars) { this.partitionChars = partitionChars; }
     }
 
     public static class DeepSplit {

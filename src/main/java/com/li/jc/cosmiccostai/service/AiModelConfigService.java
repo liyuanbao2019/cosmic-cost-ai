@@ -36,7 +36,6 @@ public class AiModelConfigService {
     private final DeepSeekChatClient deepSeekChatClient = new DeepSeekChatClient(objectMapper);
     private final Path configPath;
     private final long extractionTimeoutSeconds;
-    private final int extractionMaxRetries;
     private final Map<String, Semaphore> limiters = new ConcurrentHashMap<String, Semaphore>();
     private volatile AiModelSettings settings;
 
@@ -45,7 +44,6 @@ public class AiModelConfigService {
         AiModelProperties.Extraction extraction = properties.getExtraction() == null
                 ? new AiModelProperties.Extraction() : properties.getExtraction();
         this.extractionTimeoutSeconds = Math.max(5L, extraction.getTimeoutSeconds());
-        this.extractionMaxRetries = Math.max(0, extraction.getMaxRetries());
         this.settings = load(properties);
     }
 
@@ -98,7 +96,7 @@ public class AiModelConfigService {
                                   boolean deepSplit,
                                   String requestId,
                                   AiRequestAttemptListener listener) {
-        int retries = task == AiPromptTask.EXTRACTION ? extractionMaxRetries : (deepSplit ? 0 : -1);
+        int retries = task == AiPromptTask.EXTRACTION ? 0 : (deepSplit ? 0 : -1);
         return generateForTask(prompt, task, deepSplit, retries, requestId, listener);
     }
 

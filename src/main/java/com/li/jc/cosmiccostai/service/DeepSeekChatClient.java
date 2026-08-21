@@ -24,8 +24,8 @@ import java.util.concurrent.ConcurrentMap;
 final class DeepSeekChatClient {
 
     private final ObjectMapper objectMapper;
-    private final ConcurrentMap<String, HttpURLConnection> activeConnections =
-            new ConcurrentHashMap<String, HttpURLConnection>();
+    private final ConcurrentMap<String, Set<HttpURLConnection>> activeConnections =
+            new ConcurrentHashMap<String, Set<HttpURLConnection>>();
     private final Set<String> cancelledRequests = ConcurrentHashMap.newKeySet();
 
     DeepSeekChatClient(ObjectMapper objectMapper) {
@@ -69,11 +69,13 @@ final class DeepSeekChatClient {
     boolean cancel(String requestId) {
         if (!hasRequestId(requestId)) return false;
         cancelledRequests.add(requestId);
-        HttpURLConnection connection = activeConnections.get(requestId);
-        if (connection != null) {
-            connection.disconnect();
+        Set<HttpURLConnection> connections = activeConnections.get(requestId);
+        if (connections != null) {
+            for (HttpURLConnection connection : connections) {
+                connection.disconnect();
+            }
         }
-        return connection != null;
+        return connections != null && !connections.isEmpty();
     }
 
     private String generateWithinAttemptBudget(AiModelProfile profile,
@@ -85,10 +87,11 @@ final class DeepSeekChatClient {
                                                String requestId,
                                                AiRequestAttemptListener listener) {
         RuntimeException last = null;
-        int retryBudget = Math.max(0, maxRetries);
-        // A truncated structured response may use one enlarged-output retry, but it
-        // shares the same overall request budget instead of starting another retry cycle.
-        int attempts = Math.max(2, retryBudget + 1);
+        // Extraction prompts can be very large. Never submit the same extraction twice:
+        // a slow first response may still complete successfully and a retry would double
+        // input-token usage. Other, smaller task types keep their configured retry budget.
+        int retryBudget = task == AiPromptTask.EXTRACTION ? 0 : Math.max(0, maxRetries);
+        int attempts = retryBudget + 1;
         int maxTokens = outputTokenLimit(task);
         boolean outputExpanded = false;
         for (int attempt = 1; attempt <= attempts; attempt++) {
@@ -133,7 +136,7 @@ final class DeepSeekChatClient {
             connection = (HttpURLConnection) new URL(chatCompletionsUrl(profile.getBaseUrl())).openConnection();
             throwIfCancelled(requestId);
             if (hasRequestId(requestId)) {
-                activeConnections.put(requestId, connection);
+                connections(requestId).add(connection);
                 if (cancelledRequests.contains(requestId)) {
                     connection.disconnect();
                     throwIfCancelled(requestId);
@@ -141,7 +144,10 @@ final class DeepSeekChatClient {
             }
             int timeoutMillis = timeoutMillis(timeoutSeconds);
             connection.setConnectTimeout(timeoutMillis);
-            connection.setReadTimeout(timeoutMillis);
+            // DeepSeek max-reasoning extraction can legitimately take longer than the
+            // configured connection timeout. Keep waiting for that one response until it
+            // completes or the user cancels it; do not turn slow inference into a retry.
+            connection.setReadTimeout(task == AiPromptTask.EXTRACTION ? 0 : timeoutMillis);
             connection.setRequestMethod("POST");
             connection.setDoOutput(true);
             connection.setRequestProperty("Authorization", "Bearer " + apiKey);
@@ -163,7 +169,7 @@ final class DeepSeekChatClient {
             JsonNode root = objectMapper.readTree(responseText);
             String finishReason = root.path("choices").path(0).path("finish_reason").asText("");
             if ("length".equalsIgnoreCase(finishReason)) {
-                throw new OutputTruncatedException("DeepSeek 结构化输出达到长度上限，系统将扩大输出额度后自动重试。");
+                throw new OutputTruncatedException("DeepSeek 当前分段的结构化输出达到长度上限；为避免重复消耗 token，系统未自动重试或重发。其它成功分段会保留，请手动重试失败项。");
             }
             if ("content_filter".equalsIgnoreCase(finishReason)) {
                 throw new BusinessException("DeepSeek 因内容过滤未能返回完整结构化结果，请检查输入内容后重试。");
@@ -178,12 +184,28 @@ final class DeepSeekChatClient {
             throw new BusinessException("DeepSeek API 调用或结果解析失败：" + ex.getMessage(), ex);
         } finally {
             if (hasRequestId(requestId) && connection != null) {
-                activeConnections.remove(requestId, connection);
+                Set<HttpURLConnection> connections = activeConnections.get(requestId);
+                if (connections != null) {
+                    connections.remove(connection);
+                    if (connections.isEmpty()) {
+                        activeConnections.remove(requestId, connections);
+                    }
+                }
             }
             if (connection != null) {
                 connection.disconnect();
             }
         }
+    }
+
+    private Set<HttpURLConnection> connections(String requestId) {
+        Set<HttpURLConnection> current = activeConnections.get(requestId);
+        if (current != null) {
+            return current;
+        }
+        Set<HttpURLConnection> created = ConcurrentHashMap.newKeySet();
+        Set<HttpURLConnection> raced = activeConnections.putIfAbsent(requestId, created);
+        return raced == null ? created : raced;
     }
 
     private boolean hasRequestId(String requestId) {

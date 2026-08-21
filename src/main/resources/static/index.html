@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260813-flow-time-3">
+  <link rel="stylesheet" href="/app.css?v=20260820-table-merge-expanded">
 </head>
 
 <body>
@@ -271,7 +271,7 @@
             <option value="2026年家客终端管理智能体研发项目">2026年家客终端管理智能体研发项目</option>
             <option value="2026年家客终端扩容">2026年家客终端扩容</option>
             <option value="2026年运维管理扩容">2026年运维管理扩容</option>
-            <option value="中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目">中国移动新疆公司2025年无线运维工作台网优工作台模块研发项目</option>
+            <option value="2026年网优扩容">2026年网优扩容</option>
             <option value="2026年共享采集扩容">2026年共享采集扩容</option>
             <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
             <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
@@ -611,6 +611,7 @@
           <button type="button" class="ghost" onclick="applyBatchChange()">应用到选中</button>
         </div>
         <div class="review-view-tools">
+          <button id="mergeCellsBtn" type="button" class="ghost active" title="点击在【合并视图】与【平铺视图】之间切换" onclick="toggleMergeCells()">平铺视图</button>
           <button id="densityBtn" type="button" class="ghost" onclick="toggleReviewDensity()">紧凑视图</button>
           <button id="materialViewBtn" type="button" class="secondary material-view-btn hidden" onclick="showExportedMaterials()">查看送审材料</button>
           <button id="materialExportBtn" type="button" class="export material-export-btn" onclick="exportReviewMaterials()">导出送审材料</button>
@@ -636,11 +637,11 @@
           <option value="">全部复用度</option>
         </select>
         <select id="filterValidation" onchange="onReviewFilterChange()">
-          <option value="">&#x5168;&#x90e8;&#x521d;&#x5ba1;&#x7ed3;&#x679c;</option>
-          <option value="ERROR">&#x53ea;&#x770b;&#x9519;&#x8bef;</option>
-          <option value="RISK">&#x53ea;&#x770b;&#x5168;&#x90e8;&#x98ce;&#x9669;</option>
-          <option value="STRUCTURE_RISK">&#x53ea;&#x770b;&#x7ed3;&#x6784;&#x98ce;&#x9669;</option>
-          <option value="OK">&#x53ea;&#x770b;&#x65e0;&#x95ee;&#x9898;</option>
+          <option value="">全部初审结果</option>
+          <option value="ERROR">只看错误</option>
+          <option value="RISK">只看全部风险</option>
+          <option value="STRUCTURE_RISK">只看结构风险</option>
+          <option value="OK">只看无问题</option>
         </select>
         <button type="button" class="ghost" onclick="resetReviewFilters()">清空筛选</button>
         <span class="filter-count">当前显示：<b id="filteredCount">0</b></span>
@@ -659,7 +660,7 @@
               <th class="w-process">功能过程</th>
               <th class="w-desc">功能描述</th>
               <th class="w-desc">子过程描述</th>
-              <th class="w-data">时序图</th>
+              <th class="w-seq">时序图</th>
               <th class="w-type">类型</th>
               <th class="w-data">数据组</th>
               <th class="w-attr">数据属性</th>
@@ -729,6 +730,19 @@
       functionDescription: "功能描述",
       subProcessDescription: "子过程描述",
       dataAttributes: "数据属性"
+    };
+    const allFieldLabels = {
+      level1Module: "一级模块",
+      level2Module: "二级模块",
+      level3Module: "三级模块",
+      functionProcess: "功能过程",
+      functionDescription: "功能描述",
+      subProcessDescription: "子过程描述",
+      sequenceDiagram: "时序图",
+      movementType: "类型",
+      dataGroup: "数据组",
+      dataAttributes: "数据属性",
+      reuseDegree: "复用度"
     };
     const SPLIT_EXCEL_IMPORT_TIMEOUT_MS = 180000;
 
@@ -3076,19 +3090,67 @@
 
     function renderBatchAiAttemptInfo(item) {
       const panel = $("batchAiAttemptInfo");
-      if (!item || !item.aiAttempt || !item.aiMaxAttempts
+      const partitions = item && Array.isArray(item.aiPartitions) ? item.aiPartitions : [];
+      if (partitions.length && (item.stage === "AI_EXTRACTING" || item.stage === "REUSE_ADJUSTING"
+          || item.stage === "CANCEL_REQUESTED"
+          || item.status === "FAILED" || item.status === "RUNNING")) {
+        const counts = { QUEUED: 0, RUNNING: 0, CACHED: 0, COMPLETED: 0, FAILED: 0 };
+        partitions.forEach(function (part) {
+          const status = String(part.status || "QUEUED").toUpperCase();
+          counts[status] = Number(counts[status] || 0) + 1;
+        });
+        const done = counts.CACHED + counts.COMPLETED;
+        const statusText = {
+          QUEUED: "排队中",
+          RUNNING: item.stage === "CANCEL_REQUESTED" ? "取消中" : "处理中",
+          CACHED: "缓存复用",
+          COMPLETED: "已完成",
+          FAILED: "失败"
+        };
+        const cards = partitions.map(function (part) {
+          const status = String(part.status || "QUEUED").toUpperCase();
+          const started = parseBatchDateTime(part.startedAt);
+          const finished = parseBatchDateTime(part.finishedAt);
+          let duration = "";
+          if (started) {
+            const endTime = finished ? finished.getTime() : Date.now();
+            duration = " · " + formatBatchDuration((endTime - started.getTime()) / 1000);
+          }
+          const title = "第 " + Number(part.partNumber || 0) + " 段 · "
+            + escapeHtml(part.label || "未命名分段");
+          const detail = escapeHtml(statusText[status] || status) + duration;
+          const errorTitle = part.errorMessage ? ' title="' + escapeHtml(part.errorMessage) + '"' : "";
+          return '<div class="batch-ai-part batch-ai-part-' + status.toLowerCase() + '"' + errorTitle + '>'
+            + '<span class="batch-ai-part-title">' + title + '</span>'
+            + '<span class="batch-ai-part-status">' + detail + '</span></div>';
+        }).join("");
+        const phaseTitle = String((partitions[0] || {}).phase || "EXTRACTION") === "REUSE_ADJUSTMENT"
+          ? "复用度 AI 并发分段 " : "AI 初拆并发分段 ";
+        panel.innerHTML = '<div class="batch-ai-progress-summary">' + phaseTitle + done + '/' + partitions.length
+          + ' 已完成（缓存 ' + counts.CACHED + '） · ' + counts.RUNNING + ' 处理中 · '
+          + counts.QUEUED + ' 排队 · ' + counts.FAILED + ' 失败'
+          + (done === partitions.length && !counts.FAILED
+            ? ' · 全部响应已返回，正在本地合并'
+            : (item.stage === "CANCEL_REQUESTED" ? ' · 正在取消全部请求' : ' · 最多 4 路并发，不自动重试'))
+          + ' · 推理强度 max</div><div class="batch-ai-parts">' + cards + '</div>';
+        panel.classList.remove("hidden");
+        return;
+      }
+      if (!item || item.status !== "RUNNING" || !item.aiAttempt || !item.aiMaxAttempts
           || (item.stage !== "AI_EXTRACTING" && item.stage !== "CANCEL_REQUESTED")) {
         panel.classList.add("hidden");
         return;
       }
       const nowTime = Date.now();
       const started = parseBatchDateTime(item.aiAttemptStartedAt);
-      const deadline = parseBatchDateTime(item.aiAttemptDeadlineAt);
       const elapsed = started ? formatBatchDuration((nowTime - started.getTime()) / 1000) : "--:--";
-      const remaining = deadline ? formatBatchDuration((deadline.getTime() - nowTime) / 1000) : "--:--";
-      panel.textContent = "第 " + item.aiAttempt + "/" + item.aiMaxAttempts + " 次请求"
+      panel.textContent = (Number(item.aiMaxAttempts) > 1
+          ? "自动分段 " + item.aiAttempt + "/" + item.aiMaxAttempts
+          : "单次请求")
         + " · 已等待 " + elapsed
-        + (item.stage === "CANCEL_REQUESTED" ? " · 正在取消请求" : " · 本次超时剩余约 " + remaining)
+        + (item.stage === "CANCEL_REQUESTED"
+          ? " · 正在取消请求"
+          : " · 持续等待当前请求返回（不自动重试，可手动取消）")
         + " · 推理强度始终为 max（无 high 降级）";
       panel.classList.remove("hidden");
     }
@@ -4665,21 +4727,86 @@
       setMaterialActionExported(false);
     }
 
+    let mergeCellsEnabled = true;
+
+    function toggleMergeCells() {
+      mergeCellsEnabled = !mergeCellsEnabled;
+      const btn = $("mergeCellsBtn");
+      if (btn) {
+        btn.textContent = mergeCellsEnabled ? "平铺视图" : "合并视图";
+        btn.classList.toggle("active", mergeCellsEnabled);
+      }
+      renderTable();
+    }
+
+    const mergeableFieldDefs = [
+      {
+        field: "level1Module",
+        parentKey: function (r) { return ""; }
+      },
+      {
+        field: "level2Module",
+        parentKey: function (r) { return r.level1Module || ""; }
+      },
+      {
+        field: "level3Module",
+        parentKey: function (r) { return (r.level1Module || "") + "||" + (r.level2Module || ""); }
+      },
+      {
+        field: "functionProcess",
+        parentKey: function (r) { return (r.level1Module || "") + "||" + (r.level2Module || "") + "||" + (r.level3Module || ""); }
+      },
+      {
+        field: "functionDescription",
+        parentKey: function (r) { return (r.level1Module || "") + "||" + (r.level2Module || "") + "||" + (r.level3Module || "") + "||" + (r.functionProcess || ""); }
+      }
+    ];
+
+    function buildMergeSpanMap(visibleRows) {
+      const spanMap = {};
+      if (!visibleRows || !visibleRows.length) {
+        return spanMap;
+      }
+      for (let i = 0; i < visibleRows.length; i++) {
+        spanMap[i] = {};
+      }
+
+      mergeableFieldDefs.forEach(function (def) {
+        const field = def.field;
+        let startIndex = 0;
+        while (startIndex < visibleRows.length) {
+          const startRow = visibleRows[startIndex].row;
+          const startVal = (startRow[field] || "").trim();
+          const startParent = def.parentKey(startRow);
+          let endIndex = startIndex + 1;
+          while (endIndex < visibleRows.length) {
+            const nextRow = visibleRows[endIndex].row;
+            const nextVal = (nextRow[field] || "").trim();
+            const nextParent = def.parentKey(nextRow);
+            if (nextVal === startVal && nextParent === startParent) {
+              endIndex++;
+            } else {
+              break;
+            }
+          }
+          const span = endIndex - startIndex;
+          const coveredRowIndexes = [];
+          for (let k = startIndex; k < endIndex; k++) {
+            coveredRowIndexes.push(visibleRows[k].index);
+          }
+          spanMap[startIndex][field] = { span: span, rowIndexes: coveredRowIndexes };
+          for (let k = startIndex + 1; k < endIndex; k++) {
+            spanMap[k][field] = { span: 0, rowIndexes: coveredRowIndexes };
+          }
+          startIndex = endIndex;
+        }
+      });
+      return spanMap;
+    }
+
     function renderTable() {
       const body = $("reviewBody");
       body.innerHTML = "";
-      updateReviewEditControls();
-      syncSelectedRows();
-      updateReviewFilterOptions();
-      const visibleRows = filteredRowEntries();
-      const visibleSelectedCount = visibleRows.filter(function (entry) {
-        return !!selectedRows[entry.index];
-      }).length;
-      const selectAll = $("selectAllRows");
-      if (selectAll) {
-        selectAll.checked = visibleRows.length > 0 && visibleSelectedCount === visibleRows.length;
-        selectAll.indeterminate = visibleSelectedCount > 0 && visibleSelectedCount < visibleRows.length;
-      }
       if (!splitRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
@@ -4691,6 +4818,7 @@
         updateFilteredCount(0);
         return;
       }
+      const visibleRows = filteredRowEntries();
       if (!visibleRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
@@ -4703,7 +4831,9 @@
         return;
       }
 
-      visibleRows.forEach(function (entry) {
+      const spanMap = mergeCellsEnabled ? buildMergeSpanMap(visibleRows) : null;
+
+      visibleRows.forEach(function (entry, vIndex) {
         const row = entry.row;
         const index = entry.index;
         const tr = document.createElement("tr");
@@ -4712,11 +4842,11 @@
         applyValidationRowState(tr, index);
         addRowSelectCell(tr, index);
         addRowNumberCell(tr, index);
-        addTextCell(tr, row, index, "level1Module");
-        addTextCell(tr, row, index, "level2Module");
-        addTextCell(tr, row, index, "level3Module");
-        addTextCell(tr, row, index, "functionProcess");
-        addTextCell(tr, row, index, "functionDescription");
+        addTextCell(tr, row, index, "level1Module", spanMap ? spanMap[vIndex]["level1Module"] : null);
+        addTextCell(tr, row, index, "level2Module", spanMap ? spanMap[vIndex]["level2Module"] : null);
+        addTextCell(tr, row, index, "level3Module", spanMap ? spanMap[vIndex]["level3Module"] : null);
+        addTextCell(tr, row, index, "functionProcess", spanMap ? spanMap[vIndex]["functionProcess"] : null);
+        addTextCell(tr, row, index, "functionDescription", spanMap ? spanMap[vIndex]["functionDescription"] : null);
         addTextCell(tr, row, index, "subProcessDescription");
         addSelectCell(tr, row, index, "sequenceDiagram", sequenceDiagramOptions);
         addSelectCell(tr, row, index, "movementType", movementOptions);
@@ -4734,6 +4864,9 @@
         body.appendChild(tr);
       });
       updateFilteredCount(visibleRows.length);
+      window.requestAnimationFrame(function () {
+        document.querySelectorAll("#reviewTable .table-cell-input").forEach(autoResizeCellInput);
+      });
     }
 
     function applyValidationRowState(tr, index) {
@@ -4748,35 +4881,12 @@
       tr.classList.add("validation-row");
       tr.classList.add("validation-" + severity.toLowerCase());
       tr.title = issues.map(function (issue) {
-        return "\u3010" + issueDisplayType(issue) + "\u3011" + formatValidationIssue(issue, false);
+        return "【" + issueDisplayType(issue) + "】" + formatValidationIssue(issue, false);
       }).join("\n");
     }
 
     function paintValidationRow(tr, index) {
-      const issues = validationIssuesByRow[index] || [];
-      if (!issues.length) {
-        return;
-      }
-      const severity = highestValidationSeverity(issues);
-      if (!severity) {
-        return;
-      }
-      const palette = {
-        ERROR: { row: "#ffe4e6", control: "#fff1f2", border: "#ef4444" },
-        RISK: { row: "#fef3c7", control: "#fffbeb", border: "#f59e0b" }
-      }[severity] || { row: "#f8fafc", control: "#ffffff", border: "#94a3b8" };
-
-      Array.from(tr.children).forEach(function (td, tdIndex) {
-        td.style.setProperty("background-color", palette.row, "important");
-        td.style.setProperty("border-bottom-color", palette.border, "important");
-        if (tdIndex === 0) {
-          td.style.setProperty("box-shadow", "inset 5px 0 0 " + palette.border, "important");
-        }
-      });
-      tr.querySelectorAll("textarea, select, .cell-preview").forEach(function (el) {
-        el.style.setProperty("background-color", palette.control, "important");
-        el.style.setProperty("border-color", palette.border, "important");
-      });
+      // 告警与风险行样式由 CSS 类 .validation-error / .validation-risk / .validation-suggestion 统一定义
     }
 
     function addRowSelectCell(tr, index) {
@@ -4798,43 +4908,80 @@
       tr.appendChild(td);
     }
 
-    function addTextCell(tr, row, index, field) {
+    function autoResizeCellInput(el) {
+      if (!el) return;
+      el.style.height = "auto";
+      const scrollH = el.scrollHeight;
+      if (scrollH > 28) {
+        el.style.height = Math.min(scrollH + 2, 60) + "px";
+      } else {
+        el.style.height = "28px";
+      }
+    }
+
+    function addTextCell(tr, row, index, field, spanInfo) {
+      if (spanInfo && spanInfo.span === 0) {
+        return;
+      }
       const td = document.createElement("td");
       td.className = "field-" + field;
+      if (spanInfo && spanInfo.span > 1) {
+        td.rowSpan = spanInfo.span;
+        td.classList.add("merged-cell");
+      }
       const locked = isReviewTableLocked();
+      const rowIndexes = (spanInfo && spanInfo.rowIndexes) ? spanInfo.rowIndexes : [index];
+
       if (compactTextFields[field]) {
-        const preview = document.createElement("div");
-        preview.className = "cell-preview";
-        preview.textContent = row[field] || "";
-        preview.title = row[field] || "";
-        const editButton = document.createElement("button");
-        editButton.type = "button";
-        editButton.className = "ghost mini edit-cell-btn";
-        editButton.textContent = "编辑";
-        editButton.disabled = locked;
-        editButton.onclick = function () {
-          openCellEditor(index, field);
+        const card = document.createElement("div");
+        card.className = "cell-preview-card";
+        card.title = (row[field] || "") ? "点击或双击编辑完整内容\n" + row[field] : "点击输入内容";
+        const textSpan = document.createElement("div");
+        textSpan.className = "cell-preview-text" + (row[field] ? "" : " empty-preview");
+        textSpan.textContent = row[field] || "（点击添加内容）";
+        const editIcon = document.createElement("span");
+        editIcon.className = "cell-preview-edit-icon";
+        editIcon.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+        card.appendChild(textSpan);
+        card.appendChild(editIcon);
+        card.onclick = function () {
+          openCellEditor(index, field, rowIndexes);
         };
-        td.appendChild(preview);
-        td.appendChild(editButton);
+        td.appendChild(card);
         tr.appendChild(td);
         return;
       }
       const input = document.createElement("textarea");
+      input.className = "table-cell-input";
+      input.rows = 1;
       input.value = row[field] || "";
       input.dataset.index = index;
       input.dataset.field = field;
+      input.dataset.rowIndexes = rowIndexes.join(",");
       input.disabled = locked;
-      input.addEventListener("input", onCellChange);
+      input.title = "双击可打开弹窗编辑\n" + (row[field] || "");
+      input.addEventListener("input", function (e) {
+        autoResizeCellInput(this);
+        onCellChange(e);
+      });
+      input.addEventListener("dblclick", function () {
+        openCellEditor(index, field, rowIndexes);
+      });
       td.appendChild(input);
       tr.appendChild(td);
+      window.requestAnimationFrame(function () {
+        autoResizeCellInput(input);
+      });
     }
 
     function addRowNumberCell(tr, index) {
       const td = document.createElement("td");
       td.className = "row-number-cell";
-      td.textContent = String(index + 1);
-      td.title = "原表第 " + (index + 1) + " 行";
+      const badge = document.createElement("span");
+      badge.className = "row-number-badge";
+      badge.textContent = String(index + 1);
+      badge.title = "原表第 " + (index + 1) + " 行";
+      td.appendChild(badge);
       tr.appendChild(td);
     }
 
@@ -4843,16 +4990,30 @@
       td.className = "validation-reason-cell";
       const issues = validationIssuesByRow[index] || [];
       if (!issues.length) {
-        td.textContent = "-";
-        td.classList.add("muted-cell");
+        td.innerHTML = '<span class="validation-ok-badge" title="规则初审通过">✓ 正常</span>';
         tr.appendChild(td);
         return;
       }
-      const text = issues.map(function (issue) {
-        return "\u3010" + issueDisplayType(issue) + "\u3011" + textOr(issue.message, "");
+      const container = document.createElement("div");
+      container.className = "validation-issues-box";
+      issues.forEach(function (issue) {
+        const item = document.createElement("div");
+        item.className = "validation-issue-row severity-" + (issue.severity || "RISK").toLowerCase();
+        const tag = document.createElement("span");
+        tag.className = "validation-issue-tag";
+        tag.textContent = issueDisplayType(issue);
+        const msg = document.createElement("span");
+        msg.className = "validation-issue-text";
+        msg.textContent = textOr(issue.message, "");
+        item.appendChild(tag);
+        item.appendChild(msg);
+        container.appendChild(item);
+      });
+      const fullText = issues.map(function (issue) {
+        return "【" + issueDisplayType(issue) + "】" + textOr(issue.message, "");
       }).join("\n");
-      td.textContent = text;
-      td.title = text;
+      container.title = fullText;
+      td.appendChild(container);
       tr.appendChild(td);
     }
 
@@ -4861,16 +5022,30 @@
       td.className = "validation-suggestion-cell";
       const issues = validationIssuesByRow[index] || [];
       if (!issues.length) {
-        td.textContent = "-";
-        td.classList.add("muted-cell");
+        td.innerHTML = '<span class="muted-text">-</span>';
         tr.appendChild(td);
         return;
       }
-      const text = issues.map(function (issue) {
-        return "\u3010" + issueDisplayType(issue) + "\u3011" + (textOr(issue.suggestion, "") || "请结合该行字段补充为明确、可计量的数据移动表达。");
+      const container = document.createElement("div");
+      container.className = "validation-issues-box";
+      issues.forEach(function (issue) {
+        const item = document.createElement("div");
+        item.className = "validation-issue-row";
+        const tag = document.createElement("span");
+        tag.className = "validation-issue-tag suggestion-tag";
+        tag.textContent = issueDisplayType(issue);
+        const sug = document.createElement("span");
+        sug.className = "validation-issue-text suggestion-text";
+        sug.textContent = textOr(issue.suggestion, "") || "请结合该行字段补充为明确、可计量的数据移动表达。";
+        item.appendChild(tag);
+        item.appendChild(sug);
+        container.appendChild(item);
+      });
+      const fullText = issues.map(function (issue) {
+        return "【" + issueDisplayType(issue) + "】" + (textOr(issue.suggestion, "") || "请结合该行字段补充为明确、可计量的数据移动表达。");
       }).join("\n");
-      td.textContent = text;
-      td.title = text;
+      container.title = fullText;
+      td.appendChild(container);
       tr.appendChild(td);
     }
 
@@ -4879,17 +5054,31 @@
       td.className = "field-" + field;
       const locked = isReviewTableLocked();
       const select = document.createElement("select");
+      select.className = "table-select table-select-" + field;
       options.forEach(function (item) {
         const option = document.createElement("option");
         option.value = item;
         option.textContent = item;
         select.appendChild(option);
       });
-      select.value = row[field] || options[0];
+      const currentVal = row[field] || options[0];
+      select.value = currentVal;
       select.dataset.index = index;
       select.dataset.field = field;
+      if (field === "movementType") {
+        select.dataset.type = currentVal;
+      } else if (field === "reuseDegree") {
+        select.dataset.reuse = currentVal;
+      }
       select.disabled = locked;
-      select.addEventListener("change", onCellChange);
+      select.addEventListener("change", function (event) {
+        if (field === "movementType") {
+          select.dataset.type = select.value;
+        } else if (field === "reuseDegree") {
+          select.dataset.reuse = select.value;
+        }
+        onCellChange(event);
+      });
       td.appendChild(select);
       tr.appendChild(td);
     }
@@ -5085,15 +5274,32 @@
       $("densityBtn").textContent = reviewDensity === "compact" ? "宽松视图" : "紧凑视图";
     }
 
-    function openCellEditor(index, field) {
+    function openCellEditor(index, field, rowIndexes) {
       if (blockReviewTableEditIfLocked()) {
         return;
       }
-      cellEditorState = { index: index, field: field };
-      $("cell-editor-title").textContent = compactTextFields[field] || "编辑内容";
-      $("cell-editor-text").value = splitRows[index][field] || "";
+      cellEditorState = { index: index, field: field, rowIndexes: rowIndexes || [index] };
+      const fieldName = allFieldLabels[field] || compactTextFields[field] || "编辑内容";
+      $("cell-editor-title").textContent = "编辑" + fieldName;
+      if ($("cell-editor-subtitle")) {
+        const rowsText = (cellEditorState.rowIndexes && cellEditorState.rowIndexes.length > 1)
+          ? "第 " + (cellEditorState.rowIndexes[0] + 1) + "~" + (cellEditorState.rowIndexes[cellEditorState.rowIndexes.length - 1] + 1) + " 行（共 " + cellEditorState.rowIndexes.length + " 行合并）"
+          : "第 " + (index + 1) + " 行";
+        $("cell-editor-subtitle").textContent = "行号：" + rowsText + " | 字段：" + fieldName;
+      }
+      const textVal = splitRows[index][field] || "";
+      const textarea = $("cell-editor-text");
+      textarea.value = textVal;
+      updateCellEditorCount(textVal);
       $("cell-editor-overlay").classList.remove("hidden");
-      $("cell-editor-text").focus();
+      textarea.focus();
+    }
+
+    function updateCellEditorCount(text) {
+      const countEl = $("cell-editor-count");
+      if (countEl) {
+        countEl.textContent = (text || "").length + " 字";
+      }
     }
 
     function closeCellEditor() {
@@ -5107,6 +5313,31 @@
       }
     }
 
+    function syncAllInputsToSplitRows() {
+      document.querySelectorAll("#reviewTable .table-cell-input").forEach(function (el) {
+        const idx = Number(el.dataset.index);
+        const field = el.dataset.field;
+        if (!isNaN(idx) && field && splitRows[idx]) {
+          const rowIndexes = el.dataset.rowIndexes ? el.dataset.rowIndexes.split(",").map(Number) : [idx];
+          rowIndexes.forEach(function (rIdx) {
+            if (splitRows[rIdx]) {
+              splitRows[rIdx][field] = el.value;
+              if (field === "level1Module" || field === "level2Module" || field === "level3Module") {
+                splitRows[rIdx].sourceReferences = [];
+              }
+            }
+          });
+        }
+      });
+      document.querySelectorAll("#reviewTable .table-select").forEach(function (el) {
+        const idx = Number(el.dataset.index);
+        const field = el.dataset.field;
+        if (!isNaN(idx) && field && splitRows[idx]) {
+          splitRows[idx][field] = el.value;
+        }
+      });
+    }
+
     function saveCellEditor() {
       if (blockReviewTableEditIfLocked()) {
         return;
@@ -5114,38 +5345,52 @@
       if (!cellEditorState) {
         return;
       }
-      const index = cellEditorState.index;
       const field = cellEditorState.field;
-      splitRows[index][field] = $("cell-editor-text").value;
-      splitRows[index] = normalizeEditedRow(splitRows[index]);
-      markValidationStale(index);
+      const rowIndexes = cellEditorState.rowIndexes || [cellEditorState.index];
+      const val = $("cell-editor-text").value;
+      rowIndexes.forEach(function (rIdx) {
+        if (splitRows[rIdx]) {
+          splitRows[rIdx][field] = val;
+          if (field === "level1Module" || field === "level2Module" || field === "level3Module") {
+            splitRows[rIdx].sourceReferences = [];
+          }
+          splitRows[rIdx] = normalizeEditedRow(splitRows[rIdx]);
+          markValidationStale(rIdx);
+        }
+      });
       closeCellEditor();
       renderTable();
       updateStats();
+      setMessage("已更新内容，点击上方【保存】可持久化到项目。", "info");
     }
 
     function addActionCell(tr, index) {
       const td = document.createElement("td");
       td.className = "row-actions";
       const locked = isReviewTableLocked();
+      const wrap = document.createElement("div");
+      wrap.className = "row-actions-wrap";
       const copyButton = document.createElement("button");
       copyButton.type = "button";
-      copyButton.className = "ghost mini";
+      copyButton.className = "ghost mini action-copy-btn";
       copyButton.textContent = "复制";
+      copyButton.title = "复制当前行并在下方插入";
       copyButton.disabled = locked;
       copyButton.onclick = function () {
         copyRow(index);
       };
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.className = "ghost mini danger";
+      deleteButton.className = "ghost mini danger action-delete-btn";
       deleteButton.textContent = "删除";
+      deleteButton.title = "删除当前行";
       deleteButton.disabled = locked;
       deleteButton.onclick = function () {
         deleteRow(index);
       };
-      td.appendChild(copyButton);
-      td.appendChild(deleteButton);
+      wrap.appendChild(copyButton);
+      wrap.appendChild(deleteButton);
+      td.appendChild(wrap);
       tr.appendChild(td);
     }
 
@@ -5162,7 +5407,7 @@
         }
       });
       document.querySelectorAll("#reviewPanel .review-actions button, #reviewPanel .batch-tools button").forEach(function (button) {
-        if (button.id === "deepSplitBtn" || button.id === "densityBtn") {
+        if (button.id === "deepSplitBtn" || button.id === "densityBtn" || button.id === "mergeCellsBtn") {
           return;
         }
         button.disabled = locked;
@@ -6009,7 +6254,25 @@
         closeBatchSummaryDialog();
       }
     });
-  </script>
+  
+    document.addEventListener("keydown", function (e) {
+      const overlay = $("cell-editor-overlay");
+      if (!overlay || overlay.classList.contains("hidden")) {
+        return;
+      }
+      if (e.key === "Escape") {
+        closeCellEditor();
+      } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        saveCellEditor();
+      }
+    });
+    if ($("cell-editor-text")) {
+      $("cell-editor-text").addEventListener("input", function () {
+        updateCellEditorCount(this.value);
+      });
+    }
+</script>
 </body>
 
 </html>

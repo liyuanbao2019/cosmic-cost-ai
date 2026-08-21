@@ -3,11 +3,121 @@ package com.li.jc.cosmiccostai.service;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Arrays;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AiExtractionServiceSectionTest {
+
+    @Test
+    void preservesExistingCompletePartitionPlanForCacheReuse() throws Exception {
+        Path storagePath = Files.createTempDirectory("extract-plan-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("P-CACHE");
+        Files.createDirectories(projectDir);
+        Files.write(projectDir.resolve("ai-partition-count.txt"), "2".getBytes(StandardCharsets.UTF_8));
+        String first = "[REQ-L0001][原文路径：功能需求 > 第一章] 第一章";
+        String second = "[REQ-L0002][原文路径：功能需求 > 第二章] 第二章";
+        Files.write(projectDir.resolve("ai-prompt-part-1.txt"),
+                ("提示\n【需求细则】\n" + first + "\n\n【DeepSeek 最终输出提醒】\n提醒")
+                        .getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("ai-prompt-part-2.txt"),
+                ("提示\n【需求细则】\n" + second + "\n\n【DeepSeek 最终输出提醒】\n提醒")
+                        .getBytes(StandardCharsets.UTF_8));
+        AiExtractionService service = new AiExtractionService(storage,
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod(
+                "reusablePartitionPlan", Path.class, String.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        List<String> parts = (List<String>) method.invoke(service, projectDir, first + "\n" + second);
+
+        assertEquals(Arrays.asList(first, second), parts);
+    }
+
+    @Test
+    void autoPartitionUsesMajorChaptersThenCompleteSourceLines() {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        String largeChapter = repeat("甲", 80000);
+        String mediumChapter = repeat("乙", 20000);
+        String annotated = "[REQ-L0001][原文路径：功能需求] 功能需求\n"
+                + "[REQ-L0002][原文路径：功能需求 > 3.1智能分析] 3.1智能分析\n"
+                + "[REQ-L0003][原文路径：功能需求 > 3.1智能分析 > 功能说明] 功能说明\n"
+                + "[REQ-L0004][原文路径：功能需求 > 3.1智能分析 > 功能说明 > 问题识别] " + largeChapter + "\n"
+                + "[REQ-L0005][原文路径：功能需求 > 3.2智能问数查询] 3.2智能问数查询\n"
+                + "[REQ-L0006][原文路径：功能需求 > 3.2智能问数查询 > 功能说明] " + mediumChapter + "\n"
+                + "[REQ-L0007][原文路径：功能需求 > 3.3知识库搭建] 3.3知识库搭建\n"
+                + "[REQ-L0008][原文路径：功能需求 > 3.3知识库搭建 > 功能说明] " + mediumChapter + "\n";
+
+        List<String> parts = service.splitAnnotatedRequirement(annotated);
+
+        assertEquals(6, parts.size());
+        assertTrue(parts.get(0).contains("3.1智能分析"));
+        assertTrue(parts.get(1).contains("问题识别"));
+        assertFalse(parts.get(1).contains("3.2智能问数查询"));
+        assertTrue(parts.get(2).startsWith("[REQ-L0005]"));
+        assertTrue(parts.get(2).contains("3.2智能问数查询"));
+        assertTrue(parts.get(3).contains(mediumChapter));
+    }
+
+    @Test
+    void autoPartitionCreatesAdditionalPartsWithoutBreakingLargeChapters() {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        String annotated = "[REQ-L0001][原文路径：功能需求 > 3.1智能分析] " + repeat("甲", 80000) + "\n"
+                + "[REQ-L0002][原文路径：功能需求 > 3.2智能问数查询] " + repeat("乙", 40000) + "\n"
+                + "[REQ-L0003][原文路径：功能需求 > 3.3知识库搭建] " + repeat("丙", 65000) + "\n";
+
+        List<String> parts = service.splitAnnotatedRequirement(annotated);
+
+        assertEquals(3, parts.size());
+        assertTrue(parts.get(0).contains("3.1智能分析"));
+        assertTrue(parts.get(1).contains("3.2智能问数查询"));
+        assertTrue(parts.get(2).contains("3.3知识库搭建"));
+    }
+
+    @Test
+    void oversizedMajorChapterPacksOnlyAtRealNestedHeadingBoundaries() {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        String annotated = "[REQ-L0001][原文路径：功能需求 > 3.9网优能力封装] 3.9网优能力封装\n"
+                + "[REQ-L0002][原文路径：功能需求 > 3.9网优能力封装 > 功能说明 > 指标查询能力] "
+                + repeat("甲", 8000) + "\n"
+                + "[REQ-L0003][原文路径：功能需求 > 3.9网优能力封装 > 功能说明 > 质差分析能力] "
+                + repeat("乙", 8000) + "\n"
+                + "[REQ-L0004][原文路径：功能需求 > 3.9网优能力封装 > 功能说明 > 告警分析能力] "
+                + repeat("丙", 8000) + "\n";
+
+        List<String> parts = service.splitAnnotatedRequirement(annotated);
+
+        assertEquals(2, parts.size());
+        assertTrue(parts.get(0).contains("指标查询能力"));
+        assertTrue(parts.get(0).contains("质差分析能力"));
+        assertFalse(parts.get(0).contains("告警分析能力"));
+        assertTrue(parts.get(1).contains("告警分析能力"));
+    }
+
+    @Test
+    void autoPartitionKeepsSingleRequestWhenNoMajorChapterBoundaryExists() {
+        AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        String annotated = "[REQ-L0001][原文路径：功能需求 > 3.1智能分析] 3.1智能分析\n"
+                + "[REQ-L0002][原文路径：功能需求 > 3.1智能分析 > 功能说明] 功能说明\n"
+                + "[REQ-L0003][原文路径：功能需求 > 3.1智能分析 > 功能说明 > 问题识别] 正文\n";
+
+        List<String> parts = service.splitAnnotatedRequirement(annotated);
+
+        assertEquals(1, parts.size());
+        assertEquals(annotated.trim(), parts.get(0));
+    }
 
     @Test
     void extractsNonStandardRequirementRuleSection() throws Exception {
@@ -114,5 +224,13 @@ class AiExtractionServiceSectionTest {
         assertTrue(extracted.contains("支持创建新赔付工单"));
         assertFalse(extracted.contains("背景说明"));
         assertFalse(extracted.contains("性能要求"));
+    }
+
+    private String repeat(String value, int count) {
+        StringBuilder result = new StringBuilder(count);
+        for (int index = 0; index < count; index++) {
+            result.append(value);
+        }
+        return result.toString();
     }
 }

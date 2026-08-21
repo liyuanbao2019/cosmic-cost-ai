@@ -2,6 +2,7 @@ package com.li.jc.cosmiccostai.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DeepSeekChatClientTest {
@@ -107,34 +109,46 @@ class DeepSeekChatClientTest {
     }
 
     @Test
-    void lengthTruncationAutomaticallyRetriesOnceWithLargerOutputBudget() {
+    void extractionTruncationDoesNotAutomaticallyRetry() {
         truncateFirstResponse.set(true);
 
-        String content = client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
-                "output json", 10, 0);
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
+                        "output json", 10, 1));
 
-        assertEquals("{\"functions\":[]}", content);
-        assertEquals(2, requestCount.get());
-        assertEquals(131072, requestBody.get().path("max_tokens").asInt());
+        assertTrue(error.getMessage().contains("未自动重试"));
+        assertEquals(1, requestCount.get());
+        assertEquals(65536, requestBody.get().path("max_tokens").asInt());
     }
 
     @Test
-    void reportsTwoRealAttemptsWithoutLoweringExtractionReasoningEffort() {
+    void extractionFailureReportsOneAttemptAndDoesNotRetry() {
         failFirstResponse.set(true);
         List<Integer> attempts = new ArrayList<Integer>();
 
-        String content = client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
-                "output json", 360, 1, "project-1",
-                (attempt, maxAttempts, timeoutSeconds) -> {
-                    attempts.add(attempt);
-                    assertEquals(2, maxAttempts);
-                    assertEquals(360, timeoutSeconds);
-                });
+        assertThrows(BusinessException.class,
+                () -> client().generate(profile(), "test-key", AiPromptTask.EXTRACTION,
+                        "output json", 360, 1, "project-1",
+                        (attempt, maxAttempts, timeoutSeconds) -> {
+                            attempts.add(attempt);
+                            assertEquals(1, maxAttempts);
+                            assertEquals(360, timeoutSeconds);
+                        }));
+
+        assertEquals(Arrays.asList(1), attempts);
+        assertEquals(1, requestCount.get());
+        assertEquals("max", requestBody.get().path("reasoning_effort").asText());
+    }
+
+    @Test
+    void nonExtractionTaskKeepsConfiguredRetryBudget() {
+        failFirstResponse.set(true);
+
+        String content = client().generate(profile(), "test-key", AiPromptTask.FUNCTION_DESCRIPTION,
+                "output json", 10, 1);
 
         assertEquals("{\"functions\":[]}", content);
-        assertEquals(Arrays.asList(1, 2), attempts);
         assertEquals(2, requestCount.get());
-        assertEquals("max", requestBody.get().path("reasoning_effort").asText());
     }
 
     private DeepSeekChatClient client() {

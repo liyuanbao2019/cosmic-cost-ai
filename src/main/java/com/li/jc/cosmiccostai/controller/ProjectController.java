@@ -208,7 +208,6 @@ public class ProjectController {
     @Operation(summary = "AI 结构化提取", description = "只将 document-text.txt 中的“需求细则”章节发送给 AI，输出 module/function/description。")
     @PostMapping("/{projectId}/extract")
     public ApiResponse<ExtractResponse> extract(@PathVariable String projectId) {
-        requirementCoverageService.ensureReadyForExtraction(projectId);
         return ApiResponse.ok(aiExtractionService.extract(projectId));
     }
 
@@ -221,7 +220,6 @@ public class ProjectController {
     @Operation(summary = "Re-run AI extraction with edited prompt", description = "Use the user edited prompt to call AI again and overwrite extracted functions.")
     @PostMapping("/{projectId}/ai-prompt/extract")
     public ApiResponse<ExtractResponse> extractWithPrompt(@PathVariable String projectId, @RequestBody AiPromptRequest request) {
-        requirementCoverageService.ensureReadyForExtraction(projectId);
         return ApiResponse.ok(aiExtractionService.extractWithPrompt(projectId, request == null ? "" : request.getPrompt()));
     }
 

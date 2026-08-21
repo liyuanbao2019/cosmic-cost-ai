@@ -2,6 +2,7 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.AiPromptResponse;
+import com.li.jc.cosmiccostai.dto.AiPartitionProgressItem;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.li.jc.cosmiccostai.dto.ExtractResponse;
 import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
@@ -36,7 +37,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Collections;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -46,6 +54,10 @@ public class AiExtractionService {
     private static final Logger log = LoggerFactory.getLogger(AiExtractionService.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String USER_EDITED_PROMPT_FLAG = "ai-prompt-user-edited.flag";
+    private static final int AUTO_PARTITION_THRESHOLD_CHARS = 60000;
+    private static final int DEFAULT_PARTITION_CHARS = 18000;
+    private static final int DEFAULT_PARTITION_PARALLELISM = 4;
+    private static final Pattern ANNOTATED_PATH = Pattern.compile("\\[原文路径：([^\\]]+)]");
     private final FileStorageService fileStorageService;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
@@ -53,6 +65,8 @@ public class AiExtractionService {
     private final String model;
     private final long timeoutSeconds;
     private final int maxRetries;
+    private final int partitionChars;
+    private final int partitionParallelism;
     private final SplitRuleConfigService splitRuleConfigService;
     private final RequirementInputService requirementInputService;
     private final AiModelConfigService aiModelConfigService;
@@ -68,6 +82,8 @@ public class AiExtractionService {
                                @Value("${cosmic.ai.model:gpt-4o-mini}") String model,
                                @Value("${cosmic.ai.timeout-seconds:360}") long timeoutSeconds,
                                @Value("${cosmic.ai.max-retries:2}") int maxRetries,
+                               @Value("${cosmic.ai.extraction.partition-chars:18000}") int partitionChars,
+                               @Value("${cosmic.ai.extraction.partition-parallelism:4}") int partitionParallelism,
                                SplitRuleConfigService splitRuleConfigService,
                                RequirementInputService requirementInputService,
                                AiModelConfigService aiModelConfigService,
@@ -79,6 +95,8 @@ public class AiExtractionService {
         this.model = model;
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
+        this.partitionChars = Math.max(4000, partitionChars);
+        this.partitionParallelism = Math.max(1, partitionParallelism);
         this.splitRuleConfigService = splitRuleConfigService;
         this.requirementInputService = requirementInputService;
         this.aiModelConfigService = aiModelConfigService;
@@ -101,6 +119,8 @@ public class AiExtractionService {
         this.model = model;
         this.timeoutSeconds = timeoutSeconds;
         this.maxRetries = maxRetries;
+        this.partitionChars = DEFAULT_PARTITION_CHARS;
+        this.partitionParallelism = DEFAULT_PARTITION_PARALLELISM;
         this.splitRuleConfigService = new SplitRuleConfigService("target/test-config/split-check-rules.md");
         this.requirementInputService = new RequirementInputService(fileStorageService);
         this.aiModelConfigService = null;
@@ -126,7 +146,7 @@ public class AiExtractionService {
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
         clearUserEditedPromptFlag(projectDir);
-        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener, true);
     }
 
     public ExtractResponse extractWithPrompt(String projectId, String prompt) {
@@ -147,15 +167,16 @@ public class AiExtractionService {
         Path promptPath = projectDir.resolve("ai-prompt.txt");
         writeText(promptPath, prompt);
         writeText(projectDir.resolve(USER_EDITED_PROMPT_FLAG), "true");
-        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener);
+        return executeExtraction(projectId, metadata, projectDir, requirementDetail, prompt, listener, false);
     }
 
     private ExtractResponse executeExtraction(String projectId,
                                               ProjectMetadata metadata,
-                                              Path projectDir,
-                                              String requirementDetail,
-                                              String prompt,
-                                              AiRequestAttemptListener listener) {
+                                               Path projectDir,
+                                               String requirementDetail,
+                                               String prompt,
+                                               AiRequestAttemptListener listener,
+                                               boolean allowAutoPartition) {
         if (!runningProjects.add(projectId)) {
             throw new BusinessException("AI 拆分正在进行，请等待当前任务完成。");
         }
@@ -165,7 +186,8 @@ public class AiExtractionService {
         }
         try {
             updateProcessingStatus(metadata, "AI_SPLITTING");
-            return executeExtractionInternal(projectId, metadata, projectDir, requirementDetail, prompt, listener);
+            return executeExtractionInternal(projectId, metadata, projectDir, requirementDetail, prompt,
+                    listener, allowAutoPartition);
         } catch (RuntimeException ex) {
             updateProcessingStatus(metadata, "AI_FAILED");
             throw ex;
@@ -180,30 +202,36 @@ public class AiExtractionService {
 
     private ExtractResponse executeExtractionInternal(String projectId,
                                                       ProjectMetadata metadata,
-                                                      Path projectDir,
-                                                      String requirementDetail,
-                                                      String prompt,
-                                                      AiRequestAttemptListener listener) {
+                                                       Path projectDir,
+                                                       String requirementDetail,
+                                                       String prompt,
+                                                       AiRequestAttemptListener listener,
+                                                       boolean allowAutoPartition) {
         log.info("Calling AI extraction, projectId={}, model={}, baseUrl={}, requirementDetailLength={}, promptLength={}, timeoutSeconds={}",
                 projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
-        String aiResult = callAi(prompt, projectId, listener);
-        log.info("AI extraction completed, projectId={}, responseLength={}", projectId, aiResult == null ? 0 : aiResult.length());
-        List<ExtractedFunction> functions;
-        try {
-            functions = parseFunctions(aiResult);
-        } catch (BusinessException firstParseFailure) {
-            log.warn("AI extraction returned malformed structured output; retrying once with compact-output constraints. "
-                            + "projectId={}, responseLength={}, error={}",
-                    projectId, aiResult == null ? 0 : aiResult.length(), firstParseFailure.getMessage());
-            String recoveryPrompt = prompt + System.lineSeparator()
-                    + System.lineSeparator()
-                    + "【结构化输出恢复要求】上一次响应未形成完整 JSON。本次请适当压缩 description、evidence、attributes，"
-                    + "但不得遗漏功能；只输出一个完整闭合的 {\"functions\":[...]} JSON 对象，禁止在 JSON 后追加解释。";
-            aiResult = callAi(recoveryPrompt, projectId, listener);
-            log.info("AI extraction recovery completed, projectId={}, responseLength={}",
-                    projectId, aiResult == null ? 0 : aiResult.length());
-            functions = parseFunctions(aiResult);
+        List<String> prompts = extractionPrompts(projectId, projectDir, requirementDetail, prompt, allowAutoPartition);
+        List<PartitionResult> partitionResults = executePartitionsConcurrently(
+                projectId, projectDir, prompts, listener);
+        List<ExtractedFunction> functions = new ArrayList<ExtractedFunction>();
+        List<String> failures = new ArrayList<String>();
+        for (PartitionResult result : partitionResults) {
+            if (result.failure != null) {
+                failures.add("第 " + result.partNumber + "/" + prompts.size() + " 段："
+                        + result.failure.getMessage());
+                continue;
+            }
+            try {
+                functions.addAll(parseFunctions(result.response));
+            } catch (BusinessException parseFailure) {
+                failures.add("第 " + result.partNumber + "/" + prompts.size()
+                        + " 段返回的结构化 JSON 不完整：" + parseFailure.getMessage());
+            }
         }
+        if (!failures.isEmpty()) {
+            throw new BusinessException("AI 并发分段有 " + failures.size()
+                    + " 段失败；其余成功结果已缓存，系统未自动重发。" + String.join("；", failures));
+        }
+        functions = mergePartitionFunctions(functions);
         if (functions.isEmpty()) {
             log.warn("AI returned no functions, projectId={}, using local fallback extraction", projectId);
             functions = fallbackFunctions(requirementDetail);
@@ -376,8 +404,12 @@ public class AiExtractionService {
     }
 
     private String buildPrompt(String projectId, String requirementDetail) {
-        String splitRulesPrompt = buildSplitRulesPrompt();
         String numberedRequirement = requirementHierarchyService.annotateRequirement(projectId, requirementDetail);
+        return buildPromptFromAnnotatedRequirement(numberedRequirement, "");
+    }
+
+    private String buildPromptFromAnnotatedRequirement(String numberedRequirement, String partitionInstruction) {
+        String splitRulesPrompt = buildSplitRulesPrompt();
         boolean deepSeekPrompt = usesDeepSeekPrompt();
         String outputRequirement = deepSeekPrompt
                 ? "输出必须是严格JSON对象，顶层只能包含 functions 数组；不要Markdown代码块，不要解释，不要输出格式之外的额外字段。functions数组元素格式固定为："
@@ -470,15 +502,417 @@ public class AiExtractionService {
                 + "4. 如果确实无法识别任何功能，输出 " + emptyOutput + "。"
                 + System.lineSeparator()
                 + System.lineSeparator()
-                + splitRulesPrompt
-                + System.lineSeparator()
-                + System.lineSeparator()
-                + "【需求细则】"
+                 + splitRulesPrompt
+                 + System.lineSeparator()
+                 + System.lineSeparator()
+                 + (StringUtils.hasText(partitionInstruction)
+                    ? partitionInstruction + System.lineSeparator() + System.lineSeparator() : "")
+                 + "【需求细则】"
                 + System.lineSeparator()
                 + numberedRequirement;
         return deepSeekPrompt
                 ? DeepSeekPromptProfile.specialize(AiPromptTask.EXTRACTION, prompt, splitRuleConfigService.getRuleVersion())
-                : prompt;
+                 : prompt;
+    }
+
+    private List<String> extractionPrompts(String projectId,
+                                           Path projectDir,
+                                           String requirementDetail,
+                                           String originalPrompt,
+                                           boolean allowAutoPartition) {
+        List<String> prompts = new ArrayList<String>();
+        if (!allowAutoPartition || requirementDetail.length() < AUTO_PARTITION_THRESHOLD_CHARS) {
+            prompts.add(originalPrompt);
+            return prompts;
+        }
+        String annotated = requirementHierarchyService.annotateRequirement(projectId, requirementDetail);
+        List<String> parts = reusablePartitionPlan(projectDir, annotated);
+        if (parts.isEmpty()) {
+            for (String chapter : topLevelAnnotatedChapters(annotated)) {
+                String candidatePrompt = buildPromptFromAnnotatedRequirement(chapter, "");
+                // Preserve an already successful large chapter as one cached unit. New or
+                // failed large chapters are subdivided before any network request starts.
+                if (StringUtils.hasText(cachedPartitionResponse(projectDir, candidatePrompt))) {
+                    parts.add(chapter);
+                } else {
+                    parts.addAll(splitOversizedChapter(chapter));
+                }
+            }
+        }
+        if (parts.size() < 2) {
+            prompts.add(originalPrompt);
+            return prompts;
+        }
+        for (int index = 0; index < parts.size(); index++) {
+            String instruction = "【自动分段说明】这是完整需求的第 " + (index + 1) + "/" + parts.size()
+                    + " 段。只抽取本段明确出现的功能，不推测其他分段内容。REQ-L 为完整原文的全局编号，必须原样保留。"
+                    + "各分段结果将由后端本地合并、按全局原文顺序排序并统一送审，不要输出跨段总结。";
+            prompts.add(buildPromptFromAnnotatedRequirement(parts.get(index), instruction));
+        }
+        return prompts;
+    }
+
+    private List<String> reusablePartitionPlan(Path projectDir, String annotatedRequirement) {
+        Path countPath = projectDir.resolve("ai-partition-count.txt");
+        if (!Files.isRegularFile(countPath)) return new ArrayList<String>();
+        int count;
+        try {
+            count = Integer.parseInt(readText(countPath).trim());
+        } catch (RuntimeException ex) {
+            return new ArrayList<String>();
+        }
+        if (count < 2 || count > 100) return new ArrayList<String>();
+        List<String> parts = new ArrayList<String>();
+        StringBuilder combined = new StringBuilder();
+        for (int part = 1; part <= count; part++) {
+            Path promptPath = projectDir.resolve("ai-prompt-part-" + part + ".txt");
+            if (!Files.isRegularFile(promptPath)) return new ArrayList<String>();
+            String payload = promptAnnotatedRequirement(readText(promptPath));
+            if (!StringUtils.hasText(payload)) return new ArrayList<String>();
+            parts.add(payload);
+            if (combined.length() > 0) combined.append(System.lineSeparator());
+            combined.append(payload);
+        }
+        return normalizedLines(annotatedRequirement).equals(normalizedLines(combined.toString()))
+                ? parts : new ArrayList<String>();
+    }
+
+    private String normalizedLines(String value) {
+        return text(value).replaceAll("\\R", "\n");
+    }
+
+    private String promptAnnotatedRequirement(String prompt) {
+        String payload = promptRequirementPayload(prompt);
+        String reminder = "【DeepSeek 最终输出提醒】";
+        int reminderIndex = payload.indexOf(reminder);
+        return text(reminderIndex >= 0 ? payload.substring(0, reminderIndex) : payload);
+    }
+
+    List<String> splitAnnotatedRequirement(String annotatedRequirement) {
+        List<String> result = new ArrayList<String>();
+        for (String chapter : topLevelAnnotatedChapters(annotatedRequirement)) {
+            result.addAll(splitOversizedChapter(chapter));
+        }
+        return result;
+    }
+
+    private List<String> topLevelAnnotatedChapters(String annotatedRequirement) {
+        String[] lines = text(annotatedRequirement).split("\\R");
+        List<String> result = new ArrayList<String>();
+        if (lines.length < 2) {
+            result.add(text(annotatedRequirement));
+            return result;
+        }
+        List<Integer> majorChapterStarts = new ArrayList<Integer>();
+        String previousMajorChapter = "";
+        for (int index = 0; index < lines.length; index++) {
+            String currentMajorChapter = majorChapter(annotatedPath(lines[index]));
+            if (StringUtils.hasText(currentMajorChapter)
+                    && !currentMajorChapter.equals(previousMajorChapter)) {
+                majorChapterStarts.add(index);
+            }
+            if (StringUtils.hasText(currentMajorChapter)) {
+                previousMajorChapter = currentMajorChapter;
+            }
+        }
+        if (majorChapterStarts.size() < 2) {
+            result.add(text(annotatedRequirement));
+            return result;
+        }
+
+        List<String> majorChapterBlocks = new ArrayList<String>();
+        int blockStart = 0;
+        for (int index = 1; index < majorChapterStarts.size(); index++) {
+            int blockEnd = majorChapterStarts.get(index);
+            majorChapterBlocks.add(joinLines(lines, blockStart, blockEnd));
+            blockStart = blockEnd;
+        }
+        majorChapterBlocks.add(joinLines(lines, blockStart, lines.length));
+        result.addAll(majorChapterBlocks);
+        return result;
+    }
+
+    private List<String> splitOversizedChapter(String chapter) {
+        if (chapter.length() <= partitionChars) {
+            return Collections.singletonList(chapter);
+        }
+        String[] lines = text(chapter).split("\\R");
+        for (int depth = 2; depth <= 6; depth++) {
+            List<String> bySubchapter = splitAtPathDepth(lines, depth);
+            if (bySubchapter.size() > 1) {
+                return packCompleteSubchapters(bySubchapter);
+            }
+        }
+        return splitByCompleteLines(chapter);
+    }
+
+    private List<String> packCompleteSubchapters(List<String> subchapters) {
+        List<String> result = new ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        for (String subchapter : subchapters) {
+            if (subchapter.length() > partitionChars) {
+                if (current.length() > 0) {
+                    result.add(current.toString());
+                    current.setLength(0);
+                }
+                result.addAll(splitByCompleteLines(subchapter));
+                continue;
+            }
+            int combined = current.length() + (current.length() > 0 ? 1 : 0) + subchapter.length();
+            if (current.length() > 0 && combined > partitionChars) {
+                result.add(current.toString());
+                current.setLength(0);
+            }
+            if (current.length() > 0) current.append(System.lineSeparator());
+            current.append(subchapter);
+        }
+        if (current.length() > 0) result.add(current.toString());
+        return result;
+    }
+
+    private List<String> splitAtPathDepth(String[] lines, int depth) {
+        List<Integer> starts = new ArrayList<Integer>();
+        String previous = "";
+        for (int index = 0; index < lines.length; index++) {
+            String[] levels = annotatedPath(lines[index]).split("\\s*>\\s*");
+            String current = levels.length > depth ? levels[depth].trim() : "";
+            if (StringUtils.hasText(current) && !current.equals(previous)) {
+                starts.add(index);
+            }
+            if (StringUtils.hasText(current)) {
+                previous = current;
+            }
+        }
+        if (starts.size() < 2) {
+            return Collections.singletonList(joinLines(lines, 0, lines.length));
+        }
+        List<String> result = new ArrayList<String>();
+        int start = 0;
+        for (int index = 1; index < starts.size(); index++) {
+            result.add(joinLines(lines, start, starts.get(index)));
+            start = starts.get(index);
+        }
+        result.add(joinLines(lines, start, lines.length));
+        return result;
+    }
+
+    private List<String> splitByCompleteLines(String block) {
+        if (block.length() <= partitionChars) {
+            return Collections.singletonList(block);
+        }
+        String[] lines = text(block).split("\\R");
+        List<String> result = new ArrayList<String>();
+        StringBuilder current = new StringBuilder();
+        for (String line : lines) {
+            if (current.length() > 0 && current.length() + 1 + line.length() > partitionChars) {
+                result.add(current.toString());
+                current.setLength(0);
+            }
+            if (current.length() > 0) {
+                current.append(System.lineSeparator());
+            }
+            current.append(line);
+        }
+        if (current.length() > 0) {
+            result.add(current.toString());
+        }
+        return result;
+    }
+
+    private List<PartitionResult> executePartitionsConcurrently(final String projectId,
+                                                                 final Path projectDir,
+                                                                 final List<String> prompts,
+                                                                 final AiRequestAttemptListener listener) {
+        final PartitionProgressTracker progressTracker = new PartitionProgressTracker(listener, prompts);
+        final List<PartitionResult> prepared = new ArrayList<PartitionResult>();
+        for (int index = 0; index < prompts.size(); index++) {
+            int partNumber = index + 1;
+            String partPrompt = prompts.get(index);
+            // Resolve every old cache before overwriting any numbered prompt file.
+            String cached = cachedPartitionResponse(projectDir, partPrompt);
+            prepared.add(new PartitionResult(partNumber, partPrompt, cached, null));
+        }
+        for (PartitionResult result : prepared) {
+            if (prompts.size() > 1) {
+                writeText(projectDir.resolve("ai-prompt-part-" + result.partNumber + ".txt"), result.prompt);
+            }
+            Path responsePath = projectDir.resolve("ai-response-part-" + result.partNumber + ".txt");
+            if (StringUtils.hasText(result.response)) {
+                writeText(responsePath, result.response);
+                progressTracker.cached(result.partNumber);
+                log.info("Reusing completed AI extraction part, projectId={}, part={}/{}",
+                        projectId, result.partNumber, prompts.size());
+            } else {
+                try {
+                    Files.deleteIfExists(responsePath);
+                } catch (IOException ex) {
+                    throw new BusinessException("清理失效的 AI 分段缓存失败：" + responsePath, ex);
+                }
+            }
+        }
+        writeText(projectDir.resolve("ai-partition-count.txt"), String.valueOf(prompts.size()));
+        progressTracker.publish();
+
+        List<PartitionResult> results = new ArrayList<PartitionResult>(
+                Collections.nCopies(prompts.size(), (PartitionResult) null));
+        List<PartitionResult> pending = new ArrayList<PartitionResult>();
+        for (PartitionResult result : prepared) {
+            if (StringUtils.hasText(result.response)) {
+                results.set(result.partNumber - 1, result);
+            } else {
+                pending.add(result);
+            }
+        }
+        if (pending.isEmpty()) {
+            return results;
+        }
+
+        final AtomicInteger threadNumber = new AtomicInteger();
+        ExecutorService executor = Executors.newFixedThreadPool(
+                Math.min(partitionParallelism, pending.size()), new ThreadFactory() {
+                    @Override
+                    public Thread newThread(Runnable runnable) {
+                        Thread thread = new Thread(runnable,
+                                "ai-extract-part-" + threadNumber.incrementAndGet());
+                        thread.setDaemon(true);
+                        return thread;
+                    }
+                });
+        List<Future<PartitionResult>> futures = new ArrayList<Future<PartitionResult>>();
+        for (final PartitionResult task : pending) {
+            futures.add(executor.submit(new Callable<PartitionResult>() {
+                @Override
+                public PartitionResult call() {
+                    progressTracker.running(task.partNumber);
+                    try {
+                        String response = callAi(task.prompt, projectId,
+                                partitionListener(listener, task.partNumber, prompts.size()));
+                        writeText(projectDir.resolve("ai-response-part-" + task.partNumber + ".txt"), response);
+                        log.info("AI extraction part completed, projectId={}, part={}/{}, responseLength={}",
+                                projectId, task.partNumber, prompts.size(), response == null ? 0 : response.length());
+                        progressTracker.completed(task.partNumber);
+                        return new PartitionResult(task.partNumber, task.prompt, response, null);
+                    } catch (RuntimeException failure) {
+                        progressTracker.failed(task.partNumber, failure.getMessage());
+                        log.warn("AI extraction part failed, projectId={}, part={}/{}",
+                                projectId, task.partNumber, prompts.size(), failure);
+                        return new PartitionResult(task.partNumber, task.prompt, "", failure);
+                    }
+                }
+            }));
+        }
+        try {
+            for (Future<PartitionResult> future : futures) {
+                PartitionResult result = future.get();
+                results.set(result.partNumber - 1, result);
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            for (Future<PartitionResult> future : futures) {
+                future.cancel(true);
+            }
+            throw new BusinessException("AI 并发分段等待已取消。", ex);
+        } catch (Exception ex) {
+            throw new BusinessException("AI 并发分段执行失败：" + ex.getMessage(), ex);
+        } finally {
+            executor.shutdownNow();
+        }
+        return results;
+    }
+
+    private String cachedPartitionResponse(Path projectDir, String currentPrompt) {
+        String currentRequirement = promptRequirementPayload(currentPrompt);
+        if (!StringUtils.hasText(currentRequirement)) {
+            return "";
+        }
+        for (int partNumber = 1; partNumber <= 100; partNumber++) {
+            Path cachedPromptPath = projectDir.resolve("ai-prompt-part-" + partNumber + ".txt");
+            Path cachedResponsePath = projectDir.resolve("ai-response-part-" + partNumber + ".txt");
+            if (!Files.exists(cachedPromptPath) || !Files.exists(cachedResponsePath)) {
+                continue;
+            }
+            String cachedPrompt = readText(cachedPromptPath);
+            if (!currentRequirement.equals(promptRequirementPayload(cachedPrompt))) {
+                continue;
+            }
+            String cachedResponse = readText(cachedResponsePath);
+            try {
+                parseFunctions(cachedResponse);
+                return cachedResponse;
+            } catch (BusinessException ignored) {
+                // Invalid or incomplete cached output must never suppress a fresh request.
+            }
+        }
+        return "";
+    }
+
+    private String promptRequirementPayload(String prompt) {
+        String marker = "【需求细则】";
+        int index = text(prompt).lastIndexOf(marker);
+        return index < 0 ? "" : text(prompt).substring(index + marker.length()).trim();
+    }
+
+    private String annotatedPath(String line) {
+        Matcher matcher = ANNOTATED_PATH.matcher(text(line));
+        return matcher.find() ? matcher.group(1).trim() : "";
+    }
+
+    private String majorChapter(String path) {
+        String[] levels = text(path).split("\\s*>\\s*");
+        return levels.length >= 2 ? levels[1].trim() : "";
+    }
+
+    private String joinLines(String[] lines, int start, int end) {
+        StringBuilder value = new StringBuilder();
+        for (int index = start; index < end; index++) {
+            if (value.length() > 0) {
+                value.append(System.lineSeparator());
+            }
+            value.append(lines[index]);
+        }
+        return value.toString().trim();
+    }
+
+    private AiRequestAttemptListener partitionListener(final AiRequestAttemptListener listener,
+                                                       final int partNumber,
+                                                       final int totalParts) {
+        if (listener == null) {
+            return null;
+        }
+        return new AiRequestAttemptListener() {
+            @Override
+            public void onAttempt(int ignoredAttempt, int ignoredMaxAttempts, long timeoutSeconds) {
+                listener.onAttempt(partNumber, totalParts, timeoutSeconds);
+            }
+        };
+    }
+
+    private List<ExtractedFunction> mergePartitionFunctions(List<ExtractedFunction> functions) {
+        Map<String, ExtractedFunction> merged = new LinkedHashMap<String, ExtractedFunction>();
+        int unknownSequence = 0;
+        for (ExtractedFunction function : functions == null
+                ? new ArrayList<ExtractedFunction>() : functions) {
+            if (function == null) {
+                continue;
+            }
+            String references = function.getSourceReferences() == null
+                    ? "" : String.join(",", function.getSourceReferences());
+            String key = compactIdentity(function.getModule()) + '\u001f'
+                    + compactIdentity(function.getFunction()) + '\u001f'
+                    + compactIdentity(function.getTriggerEvent()) + '\u001f'
+                    + compactIdentity(references);
+            if (!StringUtils.hasText(key.replace("\u001f", ""))) {
+                key = "UNKNOWN-" + (++unknownSequence);
+            }
+            if (!merged.containsKey(key)) {
+                merged.put(key, function);
+            }
+        }
+        return new ArrayList<ExtractedFunction>(merged.values());
+    }
+
+    private String compactIdentity(String value) {
+        return text(value).replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     private String numberRequirementEvidence(String requirementDetail) {
@@ -997,6 +1431,110 @@ public class AiExtractionService {
 
     private String text(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String partitionLabel(String prompt, int partNumber) {
+        String payload = promptRequirementPayload(prompt);
+        String major = "";
+        LinkedHashSet<String> leaves = new LinkedHashSet<String>();
+        for (String line : payload.split("\\R")) {
+            String path = annotatedPath(line);
+            if (!StringUtils.hasText(path)) continue;
+            String[] levels = path.split("\\s*>\\s*");
+            if (!StringUtils.hasText(major) && levels.length >= 2) major = levels[1].trim();
+            for (int index = 2; index < levels.length; index++) {
+                String value = levels[index].trim();
+                if (StringUtils.hasText(value) && !"功能说明".equals(value)) leaves.add(value);
+            }
+        }
+        if (!StringUtils.hasText(major)) return "分段 " + partNumber;
+        if (leaves.isEmpty()) return major;
+        List<String> values = new ArrayList<String>(leaves);
+        return values.size() == 1
+                ? major + " / " + values.get(0)
+                : major + " / " + values.get(0) + "…" + values.get(values.size() - 1);
+    }
+
+    private final class PartitionProgressTracker {
+        private final AiRequestAttemptListener listener;
+        private final List<AiPartitionProgressItem> items = new ArrayList<AiPartitionProgressItem>();
+
+        private PartitionProgressTracker(AiRequestAttemptListener listener, List<String> prompts) {
+            this.listener = listener;
+            for (int index = 0; index < prompts.size(); index++) {
+                AiPartitionProgressItem item = new AiPartitionProgressItem();
+                item.setPartNumber(index + 1);
+                item.setPhase("EXTRACTION");
+                item.setLabel(partitionLabel(prompts.get(index), index + 1));
+                item.setStatus("QUEUED");
+                items.add(item);
+            }
+        }
+
+        private void cached(int partNumber) {
+            update(partNumber, "CACHED", false, null);
+        }
+
+        private void running(int partNumber) {
+            update(partNumber, "RUNNING", true, null);
+        }
+
+        private void completed(int partNumber) {
+            update(partNumber, "COMPLETED", false, null);
+        }
+
+        private void failed(int partNumber, String message) {
+            update(partNumber, "FAILED", false, message);
+        }
+
+        private void update(int partNumber, String status, boolean starting, String errorMessage) {
+            List<AiPartitionProgressItem> snapshot;
+            synchronized (this) {
+                AiPartitionProgressItem item = items.get(partNumber - 1);
+                item.setStatus(status);
+                if (starting && !StringUtils.hasText(item.getStartedAt())) {
+                    item.setStartedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
+                }
+                if ("COMPLETED".equals(status) || "CACHED".equals(status) || "FAILED".equals(status)) {
+                    item.setFinishedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
+                }
+                item.setErrorMessage(errorMessage);
+                snapshot = snapshot();
+            }
+            notifyProgress(snapshot);
+        }
+
+        private void publish() {
+            List<AiPartitionProgressItem> snapshot;
+            synchronized (this) {
+                snapshot = snapshot();
+            }
+            notifyProgress(snapshot);
+        }
+
+        private List<AiPartitionProgressItem> snapshot() {
+            List<AiPartitionProgressItem> result = new ArrayList<AiPartitionProgressItem>();
+            for (AiPartitionProgressItem item : items) result.add(new AiPartitionProgressItem(item));
+            return result;
+        }
+
+        private void notifyProgress(List<AiPartitionProgressItem> snapshot) {
+            if (listener != null) listener.onPartitionProgress(snapshot);
+        }
+    }
+
+    private static class PartitionResult {
+        private final int partNumber;
+        private final String prompt;
+        private final String response;
+        private final RuntimeException failure;
+
+        private PartitionResult(int partNumber, String prompt, String response, RuntimeException failure) {
+            this.partNumber = partNumber;
+            this.prompt = prompt;
+            this.response = response;
+            this.failure = failure;
+        }
     }
 
     private static class RequirementEvidenceLine {
