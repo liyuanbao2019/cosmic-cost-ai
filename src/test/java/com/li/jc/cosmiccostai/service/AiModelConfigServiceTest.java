@@ -55,4 +55,34 @@ class AiModelConfigServiceTest {
         assertEquals(600, service.getSettings().getModels().get(0).getTimeoutSeconds());
         assertEquals(1000, service.getSettings().getModels().get(0).getMaxConcurrency());
     }
+
+    @Test
+    void pinsProfileForAllPartitionsOfOneRunningStage() {
+        Path config = tempDir.resolve("pinned-ai-models.json");
+        AiModelProperties properties = new AiModelProperties();
+        properties.setConfigPath(config.toString());
+        properties.setSelectedId("deepseek");
+        properties.setProvider("deepseek");
+        properties.setBaseUrl("https://deepseek.invalid/v1");
+        properties.setApiKey("deepseek-key");
+        properties.setModel("deepseek-model");
+        AiModelConfigService service = new AiModelConfigService(properties);
+
+        service.beginCancellableRequest("project-1");
+        AiModelSettings changed = service.getSettings();
+        AiModelProfile alternate = new AiModelProfile(changed.getModels().get(0));
+        alternate.setId("alternate");
+        alternate.setName("Alternate");
+        alternate.setProvider("openai-compatible");
+        alternate.setBaseUrl("https://alternate.invalid/v1");
+        alternate.setModel("alternate-model");
+        alternate.setApiKey("alternate-key");
+        changed.getModels().add(alternate);
+        changed.setSelectedId("alternate");
+        service.save(changed);
+
+        assertEquals("deepseek", service.profileForRequest("project-1").getId());
+        service.endCancellableRequest("project-1");
+        assertEquals("alternate", service.profileForRequest("project-1").getId());
+    }
 }

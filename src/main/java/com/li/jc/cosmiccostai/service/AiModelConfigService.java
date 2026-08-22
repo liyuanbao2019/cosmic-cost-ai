@@ -8,6 +8,8 @@ import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.li.jc.cosmiccostai.dto.AiModelSettings;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -31,12 +33,15 @@ import java.util.concurrent.TimeUnit;
 @Service
 public class AiModelConfigService {
 
+    private static final Logger log = LoggerFactory.getLogger(AiModelConfigService.class);
     private static final String MASK_PREFIX = "********";
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final DeepSeekChatClient deepSeekChatClient = new DeepSeekChatClient(objectMapper);
     private final Path configPath;
     private final long extractionTimeoutSeconds;
     private final Map<String, Semaphore> limiters = new ConcurrentHashMap<String, Semaphore>();
+    private final Map<String, AiModelProfile> pinnedRequestProfiles =
+            new ConcurrentHashMap<String, AiModelProfile>();
     private volatile AiModelSettings settings;
 
     public AiModelConfigService(AiModelProperties properties) {
@@ -104,13 +109,13 @@ public class AiModelConfigService {
         return generateForTask(prompt, task, deepSplit, maxRetriesOverride, null, null);
     }
 
-    private String generateForTask(String prompt,
-                                   AiPromptTask task,
-                                   boolean deepSplit,
-                                   int maxRetriesOverride,
-                                   String requestId,
-                                   AiRequestAttemptListener listener) {
-        AiModelProfile profile = getActiveProfile();
+    public String generateForTask(String prompt,
+                                  AiPromptTask task,
+                                  boolean deepSplit,
+                                  int maxRetriesOverride,
+                                  String requestId,
+                                  AiRequestAttemptListener listener) {
+        AiModelProfile profile = profileForRequest(requestId);
         String apiKey = resolveApiKey(profile.getApiKey());
         if (!StringUtils.hasText(apiKey)) {
             throw new BusinessException("大模型 API Key 未配置，请进入“大模型管理”设置。");
@@ -119,6 +124,8 @@ public class AiModelConfigService {
                 ? extractionTimeoutSeconds
                 : (deepSplit ? profile.getChunkTimeoutSeconds() : profile.getTimeoutSeconds());
         int retries = maxRetriesOverride >= 0 ? maxRetriesOverride : profile.getMaxRetries();
+        log.info("AI request route task={}, requestId={}, profileId={}, provider={}, model={}, baseUrl={}",
+                task, requestId, profile.getId(), profile.getProvider(), profile.getModel(), profile.getBaseUrl());
         Semaphore limiter = limiter(profile);
         boolean acquired = false;
         try {
@@ -153,11 +160,23 @@ public class AiModelConfigService {
     }
 
     public void beginCancellableRequest(String requestId) {
+        if (StringUtils.hasText(requestId)) {
+            pinnedRequestProfiles.putIfAbsent(requestId, getActiveProfile());
+        }
         deepSeekChatClient.beginRequest(requestId);
+    }
+
+    AiModelProfile profileForRequest(String requestId) {
+        AiModelProfile pinned = StringUtils.hasText(requestId)
+                ? pinnedRequestProfiles.get(requestId) : null;
+        return pinned == null ? getActiveProfile() : new AiModelProfile(pinned);
     }
 
     public void endCancellableRequest(String requestId) {
         deepSeekChatClient.endRequest(requestId);
+        if (StringUtils.hasText(requestId)) {
+            pinnedRequestProfiles.remove(requestId);
+        }
     }
 
     public boolean cancelRequest(String requestId) {

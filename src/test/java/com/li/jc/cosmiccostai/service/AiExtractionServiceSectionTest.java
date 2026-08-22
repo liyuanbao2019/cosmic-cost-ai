@@ -1,5 +1,9 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.li.jc.cosmiccostai.dto.ExtractResponse;
+import com.li.jc.cosmiccostai.model.ExtractedFunction;
+import com.li.jc.cosmiccostai.model.ProjectMetadata;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
@@ -8,12 +12,78 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Arrays;
+import java.util.Collections;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AiExtractionServiceSectionTest {
+
+    @Test
+    void cacheMatchIgnoresChangedDeepSeekReminderAndPromptRules() throws Exception {
+        Path storagePath = Files.createTempDirectory("extract-cache-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("P-CACHE-REMINDER");
+        Files.createDirectories(projectDir);
+        String requirement = "[REQ-L0001][原文路径：功能需求 > 第一章] 第一章正文";
+        String oldPrompt = "旧规则\n【需求细则】\n" + requirement
+                + "\n\n【DeepSeek 最终输出提醒】\n旧提醒";
+        String newPrompt = "新规则\n【需求细则】\n" + requirement
+                + "\n\n【DeepSeek 最终输出提醒】\n新提醒";
+        String response = "{\"functions\":[{\"module\":\"第一章\",\"function\":\"查询结果\"}]}";
+        Files.write(projectDir.resolve("ai-prompt-part-1.txt"), oldPrompt.getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("ai-response-part-1.txt"), response.getBytes(StandardCharsets.UTF_8));
+        AiExtractionService service = new AiExtractionService(storage,
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method method = AiExtractionService.class.getDeclaredMethod(
+                "cachedPartitionResponse", Path.class, String.class);
+        method.setAccessible(true);
+
+        String cached = (String) method.invoke(service, projectDir, newPrompt);
+
+        assertEquals(response, cached);
+        assertTrue(Files.isDirectory(projectDir.resolve("ai-part-cache")));
+    }
+
+    @Test
+    void reusesMergedExtractionOnlyWhenInputHashMatches() throws Exception {
+        Path storagePath = Files.createTempDirectory("extract-checkpoint-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        String projectId = "P-CHECKPOINT";
+        Path projectDir = storage.resolveProjectDir(projectId);
+        Files.createDirectories(projectDir);
+        String requirement = "需求功能\n支持查询结果。";
+        Path detailPath = projectDir.resolve("requirement-detail.txt");
+        Path documentPath = projectDir.resolve("document-text.txt");
+        Files.write(detailPath, requirement.getBytes(StandardCharsets.UTF_8));
+        Files.write(documentPath, requirement.getBytes(StandardCharsets.UTF_8));
+
+        ExtractedFunction function = new ExtractedFunction("查询", "查询结果", "返回查询结果");
+        new ObjectMapper().writeValue(projectDir.resolve("extracted-functions.json").toFile(),
+                Collections.singletonList(function));
+        AiExtractionService service = new AiExtractionService(storage,
+                "", "", "test-model", 1, 0, "classpath:/static/split-check-rules.md");
+        Method hashMethod = AiExtractionService.class.getDeclaredMethod("sha256", String.class);
+        hashMethod.setAccessible(true);
+        String hash = (String) hashMethod.invoke(service, requirement);
+        Files.write(projectDir.resolve("extracted-functions-input.sha256"),
+                hash.getBytes(StandardCharsets.UTF_8));
+
+        ProjectMetadata metadata = new ProjectMetadata();
+        metadata.setId(projectId);
+        metadata.setName("checkpoint");
+        metadata.setDocumentTextPath(documentPath.toString());
+        metadata.setRequirementDetailPath(detailPath.toString());
+        metadata.setStatus("AI_FAILED");
+        storage.saveMetadata(metadata);
+
+        ExtractResponse result = service.extract(projectId);
+
+        assertEquals(1, result.getFunctionCount());
+        assertEquals("EXTRACTED", result.getStatus());
+        assertEquals("查询结果", result.getFunctions().get(0).getFunction());
+    }
 
     @Test
     void preservesExistingCompletePartitionPlanForCacheReuse() throws Exception {

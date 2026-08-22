@@ -115,6 +115,9 @@ public class ReuseDegreeAiAdjustmentService {
         if (!runningProjects.add(projectId)) {
             throw new BusinessException("该项目正在执行复用度 AI 调整，请等待当前任务完成。");
         }
+        if (aiModelConfigService != null) {
+            aiModelConfigService.beginCancellableRequest(projectId);
+        }
         try {
             List<FunctionSplitRow> rows = copyRows(inputRows);
             double cfpBefore = totalCfp(rows);
@@ -159,6 +162,9 @@ public class ReuseDegreeAiAdjustmentService {
             response.setRows(savedRows);
             return response;
         } finally {
+            if (aiModelConfigService != null) {
+                aiModelConfigService.endCancellableRequest(projectId);
+            }
             runningProjects.remove(projectId);
         }
     }
@@ -353,7 +359,8 @@ public class ReuseDegreeAiAdjustmentService {
                         progressTracker.running(task.partNumber);
                         try {
                             String response = aiModelConfigService.generateForTask(
-                                    task.prompt, AiPromptTask.REUSE_ADJUSTMENT, false, 0);
+                                    task.prompt, AiPromptTask.REUSE_ADJUSTMENT, false, 0,
+                                    projectId, null);
                             if (fileStorageService != null) {
                                 writeText(fileStorageService.resolveProjectDir(projectId)
                                         .resolve("reuse-response-part-" + task.partNumber + ".txt"), response);

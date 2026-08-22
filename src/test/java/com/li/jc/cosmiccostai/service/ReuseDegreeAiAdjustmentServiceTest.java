@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,7 +56,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         final CountDownLatch bothStarted = new CountDownLatch(2);
         final AtomicInteger active = new AtomicInteger();
         final AtomicInteger maxActive = new AtomicInteger();
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull()))
                 .thenAnswer(invocation -> {
                     int current = active.incrementAndGet();
                     maxActive.accumulateAndGet(current, Math::max);
@@ -180,7 +182,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("FULL-RULE-V2");
         when(rules.getRuleVersion()).thenReturn("R-test");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull()))
                 .thenReturn("{\"decisions\":[]}");
         AiModelProfile profile = new AiModelProfile();
         profile.setModel("deepseek-reasoner");
@@ -198,7 +201,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals(2D, response.getCfpBefore(), 0.0001D);
         assertEquals(2D, response.getCfpAfter(), 0.0001D);
         assertEquals("deepseek-reasoner", response.getModel());
-        verify(ai).generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0));
+        verify(ai).generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull());
         verify(review).saveReuseAdjustedReview(eq("p-1"), any());
     }
 
@@ -210,7 +214,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("UNIFIED-XINJIANG-RULES");
         when(rules.getRuleVersion()).thenReturn("R-xj-unified");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull()))
                 .thenReturn("{\"decisions\":[{\"rowIndex\":1,"
                         + "\"decisionType\":\"RULE_POLICY\","
                         + "\"ruleId\":\"XJ-TIMER-E\","
@@ -333,7 +338,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         when(rules.getEffectiveRulesPrompt()).thenReturn("FULL-RULE-V2");
         when(rules.getRuleVersion()).thenReturn("R-crud");
         when(ai.isDeepSeekActive()).thenReturn(false);
-        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0)))
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull()))
                 .thenReturn("{\"decisions\":[]}");
         AiModelProfile profile = new AiModelProfile();
         profile.setModel("deepseek-reasoner");

@@ -28,6 +28,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -54,6 +56,8 @@ public class AiExtractionService {
     private static final Logger log = LoggerFactory.getLogger(AiExtractionService.class);
     private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final String USER_EDITED_PROMPT_FLAG = "ai-prompt-user-edited.flag";
+    private static final String EXTRACTION_INPUT_HASH_FILE = "extracted-functions-input.sha256";
+    private static final String PARTITION_CACHE_DIRECTORY = "ai-part-cache";
     private static final int AUTO_PARTITION_THRESHOLD_CHARS = 60000;
     private static final int DEFAULT_PARTITION_CHARS = 18000;
     private static final int DEFAULT_PARTITION_PARALLELISM = 4;
@@ -205,10 +209,18 @@ public class AiExtractionService {
                                                        Path projectDir,
                                                        String requirementDetail,
                                                        String prompt,
-                                                       AiRequestAttemptListener listener,
-                                                       boolean allowAutoPartition) {
-        log.info("Calling AI extraction, projectId={}, model={}, baseUrl={}, requirementDetailLength={}, promptLength={}, timeoutSeconds={}",
-                projectId, model, baseUrl, requirementDetail.length(), prompt.length(), timeoutSeconds);
+                                                      AiRequestAttemptListener listener,
+                                                      boolean allowAutoPartition) {
+        if (allowAutoPartition) {
+            ExtractResponse checkpoint = reusableExtractionCheckpoint(
+                    projectId, metadata, projectDir, requirementDetail);
+            if (checkpoint != null) {
+                return checkpoint;
+            }
+        }
+        log.info("Calling AI extraction, projectId={}, requirementDetailLength={}, promptLength={}; "
+                        + "the effective profile/model/baseUrl is logged by AiModelConfigService for each request",
+                projectId, requirementDetail.length(), prompt.length());
         List<String> prompts = extractionPrompts(projectId, projectDir, requirementDetail, prompt, allowAutoPartition);
         List<PartitionResult> partitionResults = executePartitionsConcurrently(
                 projectId, projectDir, prompts, listener);
@@ -259,6 +271,7 @@ public class AiExtractionService {
         writeJson(extractedPath, functions);
         List<RequirementChapterCoverage> chapterCoverage = requirementHierarchyService
                 .validateAndWriteCoverage(projectId, requirementDetail, functions);
+        writeText(projectDir.resolve(EXTRACTION_INPUT_HASH_FILE), sha256(requirementDetail));
 
         metadata.setRequirementDetailPath(requirementDetailPath.toString());
         metadata.setExtractedFunctionsPath(extractedPath.toString());
@@ -287,6 +300,64 @@ public class AiExtractionService {
         response.setFunctions(functions);
         response.setChapterCoveragePath(projectDir.resolve("requirement-extraction-coverage.json").toString());
         response.setChapterCoverage(chapterCoverage);
+        return response;
+    }
+
+    private ExtractResponse reusableExtractionCheckpoint(String projectId,
+                                                         ProjectMetadata metadata,
+                                                         Path projectDir,
+                                                         String requirementDetail) {
+        Path hashPath = projectDir.resolve(EXTRACTION_INPUT_HASH_FILE);
+        Path extractedPath = projectDir.resolve("extracted-functions.json");
+        if (!Files.isRegularFile(hashPath) || !Files.isRegularFile(extractedPath)) {
+            return null;
+        }
+        String expectedHash = sha256(requirementDetail);
+        if (!expectedHash.equalsIgnoreCase(readText(hashPath).trim())) {
+            return null;
+        }
+        final List<ExtractedFunction> functions;
+        try {
+            functions = objectMapper.readValue(extractedPath.toFile(),
+                    new TypeReference<List<ExtractedFunction>>() { });
+        } catch (IOException ex) {
+            log.warn("Ignoring unreadable AI extraction checkpoint, projectId={}, path={}",
+                    projectId, extractedPath, ex);
+            return null;
+        }
+        if (functions == null || functions.isEmpty()) {
+            return null;
+        }
+
+        Path coveragePath = projectDir.resolve("requirement-extraction-coverage.json");
+        List<RequirementChapterCoverage> chapterCoverage = new ArrayList<RequirementChapterCoverage>();
+        if (Files.isRegularFile(coveragePath)) {
+            try {
+                chapterCoverage = objectMapper.readValue(coveragePath.toFile(),
+                        new TypeReference<List<RequirementChapterCoverage>>() { });
+            } catch (IOException ex) {
+                log.warn("Ignoring unreadable extraction coverage checkpoint, projectId={}, path={}",
+                        projectId, coveragePath, ex);
+            }
+        }
+
+        metadata.setRequirementDetailPath(projectDir.resolve("requirement-detail.txt").toString());
+        metadata.setExtractedFunctionsPath(extractedPath.toString());
+        metadata.setStatus("EXTRACTED");
+        metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
+        fileStorageService.saveMetadata(metadata);
+
+        ExtractResponse response = new ExtractResponse();
+        response.setProjectId(projectId);
+        response.setRequirementDetailPath(metadata.getRequirementDetailPath());
+        response.setExtractedFunctionsPath(extractedPath.toString());
+        response.setFunctionCount(functions.size());
+        response.setStatus(metadata.getStatus());
+        response.setFunctions(functions);
+        response.setChapterCoveragePath(coveragePath.toString());
+        response.setChapterCoverage(chapterCoverage);
+        log.info("Reusing completed AI extraction checkpoint without model request, projectId={}, functions={}",
+                projectId, functions.size());
         return response;
     }
 
@@ -733,24 +804,24 @@ public class AiExtractionService {
             prepared.add(new PartitionResult(partNumber, partPrompt, cached, null));
         }
         for (PartitionResult result : prepared) {
-            if (prompts.size() > 1) {
-                writeText(projectDir.resolve("ai-prompt-part-" + result.partNumber + ".txt"), result.prompt);
-            }
             Path responsePath = projectDir.resolve("ai-response-part-" + result.partNumber + ".txt");
             if (StringUtils.hasText(result.response)) {
+                if (prompts.size() > 1) {
+                    writeText(projectDir.resolve("ai-prompt-part-" + result.partNumber + ".txt"), result.prompt);
+                }
                 writeText(responsePath, result.response);
+                writePartitionCache(projectDir, result.prompt, result.response);
+                deleteIfExists(projectDir.resolve("ai-prompt-pending-part-" + result.partNumber + ".txt"));
                 progressTracker.cached(result.partNumber);
                 log.info("Reusing completed AI extraction part, projectId={}, part={}/{}",
                         projectId, result.partNumber, prompts.size());
-            } else {
-                try {
-                    Files.deleteIfExists(responsePath);
-                } catch (IOException ex) {
-                    throw new BusinessException("清理失效的 AI 分段缓存失败：" + responsePath, ex);
+            } else if (prompts.size() > 1) {
+                // Keep the last known-good prompt/response pair intact until the
+                // replacement request has completed successfully.
+                writeText(projectDir.resolve("ai-prompt-pending-part-" + result.partNumber + ".txt"),
+                        result.prompt);
                 }
-            }
         }
-        writeText(projectDir.resolve("ai-partition-count.txt"), String.valueOf(prompts.size()));
         progressTracker.publish();
 
         List<PartitionResult> results = new ArrayList<PartitionResult>(
@@ -764,6 +835,7 @@ public class AiExtractionService {
             }
         }
         if (pending.isEmpty()) {
+            writeText(projectDir.resolve("ai-partition-count.txt"), String.valueOf(prompts.size()));
             return results;
         }
 
@@ -788,6 +860,11 @@ public class AiExtractionService {
                         String response = callAi(task.prompt, projectId,
                                 partitionListener(listener, task.partNumber, prompts.size()));
                         writeText(projectDir.resolve("ai-response-part-" + task.partNumber + ".txt"), response);
+                        if (prompts.size() > 1) {
+                            writeText(projectDir.resolve("ai-prompt-part-" + task.partNumber + ".txt"), task.prompt);
+                        }
+                        writePartitionCache(projectDir, task.prompt, response);
+                        deleteIfExists(projectDir.resolve("ai-prompt-pending-part-" + task.partNumber + ".txt"));
                         log.info("AI extraction part completed, projectId={}, part={}/{}, responseLength={}",
                                 projectId, task.partNumber, prompts.size(), response == null ? 0 : response.length());
                         progressTracker.completed(task.partNumber);
@@ -817,13 +894,33 @@ public class AiExtractionService {
         } finally {
             executor.shutdownNow();
         }
+        boolean complete = true;
+        for (PartitionResult result : results) {
+            if (result == null || result.failure != null || !StringUtils.hasText(result.response)) {
+                complete = false;
+                break;
+            }
+        }
+        if (complete) {
+            writeText(projectDir.resolve("ai-partition-count.txt"), String.valueOf(prompts.size()));
+        }
         return results;
     }
 
     private String cachedPartitionResponse(Path projectDir, String currentPrompt) {
-        String currentRequirement = promptRequirementPayload(currentPrompt);
+        String currentRequirement = promptAnnotatedRequirement(currentPrompt);
         if (!StringUtils.hasText(currentRequirement)) {
             return "";
+        }
+        Path keyedCache = partitionCachePath(projectDir, currentRequirement);
+        if (Files.isRegularFile(keyedCache)) {
+            String cachedResponse = readText(keyedCache);
+            try {
+                parseFunctions(cachedResponse);
+                return cachedResponse;
+            } catch (BusinessException ignored) {
+                // Fall through to migrate a valid legacy numbered cache.
+            }
         }
         for (int partNumber = 1; partNumber <= 100; partNumber++) {
             Path cachedPromptPath = projectDir.resolve("ai-prompt-part-" + partNumber + ".txt");
@@ -832,12 +929,13 @@ public class AiExtractionService {
                 continue;
             }
             String cachedPrompt = readText(cachedPromptPath);
-            if (!currentRequirement.equals(promptRequirementPayload(cachedPrompt))) {
+            if (!currentRequirement.equals(promptAnnotatedRequirement(cachedPrompt))) {
                 continue;
             }
             String cachedResponse = readText(cachedResponsePath);
             try {
                 parseFunctions(cachedResponse);
+                writePartitionCache(projectDir, currentPrompt, cachedResponse);
                 return cachedResponse;
             } catch (BusinessException ignored) {
                 // Invalid or incomplete cached output must never suppress a fresh request.
@@ -1407,9 +1505,51 @@ public class AiExtractionService {
 
     private void writeText(Path path, String text) {
         try {
+            if (path.getParent() != null) {
+                Files.createDirectories(path.getParent());
+            }
             Files.write(path, text.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new BusinessException("Write text file failed: " + path, ex);
+        }
+    }
+
+    private void writePartitionCache(Path projectDir, String prompt, String response) {
+        String requirement = promptAnnotatedRequirement(prompt);
+        if (!StringUtils.hasText(requirement) || !StringUtils.hasText(response)) return;
+        Path cachePath = partitionCachePath(projectDir, requirement);
+        try {
+            Files.createDirectories(cachePath.getParent());
+            Files.write(cachePath, response.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ex) {
+            log.warn("Unable to persist content-addressed AI partition cache, path={}", cachePath, ex);
+        }
+    }
+
+    private Path partitionCachePath(Path projectDir, String annotatedRequirement) {
+        return projectDir.resolve(PARTITION_CACHE_DIRECTORY)
+                .resolve(sha256(text(annotatedRequirement)) + ".json");
+    }
+
+    private void deleteIfExists(Path path) {
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException ex) {
+            log.warn("Unable to remove obsolete pending AI prompt, path={}", path, ex);
+        }
+    }
+
+    private String sha256(String input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((input == null ? "" : input).getBytes(StandardCharsets.UTF_8));
+            StringBuilder result = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                result.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+            }
+            return result.toString();
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException("SHA-256 is not available", ex);
         }
     }
 

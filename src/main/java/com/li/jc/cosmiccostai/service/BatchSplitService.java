@@ -1494,7 +1494,7 @@ public class BatchSplitService {
                 }
             });
             assignedProjects.remove(projectId, batchId);
-        } catch (RuntimeException ex) {
+        } catch (Throwable ex) {
             boolean cancelled = ex instanceof AiRequestCancelledException;
             if (cancelledExecutions.remove(currentExecutionKey)) {
                 cancelled = true;
@@ -1503,6 +1503,12 @@ public class BatchSplitService {
                 failCancelledItem(batchId, projectId);
             } else {
                 failItem(batchId, projectId, currentStage(batchId, projectId), message(ex));
+            }
+            if (ex instanceof VirtualMachineError) {
+                throw (VirtualMachineError) ex;
+            }
+            if (ex instanceof ThreadDeath) {
+                throw (ThreadDeath) ex;
             }
         }
     }
