@@ -57,6 +57,12 @@ class BatchSplitServiceTest {
         chapterSelectionService = mock(DocumentChapterSelectionService.class);
         smartSplitPipelineService = mock(SmartSplitPipelineService.class);
         projectMaterialExportService = mock(ProjectMaterialExportService.class);
+        when(projectMaterialExportService.export(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.ProjectMaterialProgressListener.class)))
+                .thenAnswer(invocation -> projectMaterialExportService.export(
+                        invocation.getArgument(0), invocation.getArgument(1)));
 
         metadata = new ProjectMetadata();
         metadata.setId("P20260811000000ABCDEF");
@@ -528,6 +534,47 @@ class BatchSplitServiceTest {
         assertEquals(12D, generated.getProjectMaterialTotalCfp());
         verify(projectMaterialExportService).export(eq(created.getProjectGroupId() + "-V1"),
                 eq(Arrays.asList(metadata.getId())));
+    }
+
+    @Test
+    void projectMaterialAiProgressIsPersistedAndReturnedToFrontend() {
+        ProjectMaterialExportService.ProjectMaterialBundle bundle =
+                mock(ProjectMaterialExportService.ProjectMaterialBundle.class);
+        when(bundle.getFiles()).thenReturn(Collections.emptyMap());
+        when(bundle.getRequirementCount()).thenReturn(1);
+        when(bundle.getTotalCfp()).thenReturn(4D);
+        when(projectMaterialExportService.export(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.ProjectMaterialProgressListener.class)))
+                .thenAnswer(invocation -> {
+                    ProjectMaterialExportService.ProjectMaterialProgressListener listener = invocation.getArgument(2);
+                    listener.onProgress("AI_FUNCTION_DESCRIPTIONS", 39,
+                            "正在并发生成功能描述。", 0, 1, 0, 2, 1);
+                    listener.onProgress("EXPORTING_WORD", 75,
+                            "功能描述已生成。", 1, 1, 2, 2, 0);
+                    listener.onProgress("ARCHIVING", 97,
+                            "正在打包。", 1, 1, 0, 0, 0);
+                    return bundle;
+                });
+
+        BatchSplitCreateRequest request = createRequest();
+        request.setSplitLevel("PROJECT");
+        BatchSplitJobResponse created = service.create(request);
+        BatchSplitConfirmRequest confirmation = new BatchSplitConfirmRequest();
+        confirmation.setAiInput("4. 功能需求\n查询终端状态");
+        service.confirm(created.getBatchId(), metadata.getId(), confirmation);
+        service.start(created.getBatchId());
+
+        BatchSplitJobResponse generated = service.retryProjectMaterials(created.getBatchId());
+
+        assertEquals("COMPLETED", generated.getProjectMaterialStage());
+        assertEquals(100, generated.getProjectMaterialProgressPercent());
+        assertEquals(1, generated.getProjectMaterialAiCompletedRequirements());
+        assertEquals(1, generated.getProjectMaterialAiTotalRequirements());
+        assertEquals(2, generated.getProjectMaterialAiCompletedFunctions());
+        assertEquals(2, generated.getProjectMaterialAiTotalFunctions());
+        assertEquals(0, generated.getProjectMaterialAiActiveRequirements());
     }
 
     @Test

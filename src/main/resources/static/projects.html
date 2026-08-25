@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>项目列表 - COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260812-batch-error-detail-1">
+  <link rel="stylesheet" href="/app.css?v=20260823-project-list-layout-1">
 </head>
 
 <body>
@@ -87,27 +87,34 @@
       </div>
 
       <div class="project-table-wrap">
-        <table class="project-table">
+        <table class="project-table requirement-project-table">
+          <colgroup>
+            <col class="project-col-check">
+            <col class="project-col-info">
+            <col class="project-col-type">
+            <col class="project-col-functions">
+            <col class="project-col-risk">
+            <col class="project-col-export">
+            <col class="project-col-time">
+            <col class="project-col-actions">
+          </colgroup>
           <thead>
             <tr>
               <th class="project-check-cell">
                 <input id="selectPageProjects" type="checkbox" onchange="togglePageProjects(this.checked)" aria-label="选择当前页项目">
               </th>
-              <th>项目名称</th>
-              <th>拆分级别</th>
-              <th>来源</th>
-              <th>状态</th>
-              <th>功能过程</th>
+              <th>需求信息</th>
+              <th>类型与状态</th>
+              <th class="project-number-cell">功能过程</th>
               <th>初审提示</th>
               <th>导出状态</th>
-              <th>创建时间</th>
-              <th>最近修改</th>
+              <th>时间</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody id="projectTableBody">
             <tr>
-              <td class="empty" colspan="11">正在加载项目...</td>
+              <td class="empty" colspan="8">正在加载项目...</td>
             </tr>
           </tbody>
         </table>
@@ -411,7 +418,7 @@
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.className = "empty";
-        td.colSpan = 11;
+        td.colSpan = 8;
         td.textContent = "没有符合筛选条件的项目。";
         tr.appendChild(td);
         tbody.appendChild(tr);
@@ -421,15 +428,12 @@
         const tr = document.createElement("tr");
         tr.innerHTML =
           "<td class=\"project-check-cell\"><input type=\"checkbox\" " + (selectedProjectIds[project.projectId] ? "checked" : "") + " onchange=\"toggleProjectSelection('" + escapeJs(project.projectId) + "', this.checked)\" aria-label=\"选择项目\"></td>"
-          + "<td><b>" + escapeHtml(project.projectName || project.projectId) + "</b><span class=\"project-id\">" + escapeHtml(project.projectId) + (project.batchId ? " · " + escapeHtml(project.batchId) : "") + "</span><span class=\"project-file\">" + escapeHtml(project.sourceFileName || "-") + "</span></td>"
-          + "<td>" + splitLevelBadge(project.splitLevel) + "</td>"
-          + "<td>" + sourceBadge(project.sourceType) + "</td>"
-          + "<td><span class=\"status-pill\">" + escapeHtml(project.status || "-") + "</span></td>"
-          + "<td><b>" + escapeHtml(project.functionCount || 0) + "</b></td>"
+          + "<td class=\"project-info-cell\"><b class=\"project-name\">" + escapeHtml(project.projectName || project.projectId) + "</b><span class=\"project-id\">" + escapeHtml(project.projectId) + (project.batchId ? " · " + escapeHtml(project.batchId) : "") + "</span><span class=\"project-file\" title=\"" + escapeHtml(project.sourceFileName || "-") + "\">" + escapeHtml(project.sourceFileName || "-") + "</span></td>"
+          + "<td><div class=\"project-type-stack\"><div>" + splitLevelBadge(project.splitLevel) + sourceBadge(project.sourceType) + "</div><span class=\"status-pill\">" + escapeHtml(project.status || "-") + "</span></div></td>"
+          + "<td class=\"project-number-cell\"><b>" + escapeHtml(project.functionCount || 0) + "</b><span>个</span></td>"
           + "<td>" + riskSummary(project) + "</td>"
           + "<td>" + exportSummary(project) + "</td>"
-          + "<td>" + escapeHtml(project.createdAt || "-") + "</td>"
-          + "<td>" + escapeHtml(project.updatedAt || "-") + "</td>"
+          + "<td>" + projectTimeSummary(project) + "</td>"
           + "<td><div class=\"project-row-actions\"><button type=\"button\" class=\"secondary\" onclick=\"openProject('" + escapeJs(project.projectId) + "','" + escapeJs(project.splitLevel) + "','" + escapeJs(project.batchId) + "')\">进入</button>"
           + "<button type=\"button\" class=\"ghost danger\" onclick=\"deleteProject('" + escapeJs(project.projectId) + "', '" + escapeJs(project.projectName || project.projectId) + "')\">删除</button></div></td>";
         tbody.appendChild(tr);
@@ -522,6 +526,21 @@
       const projectLevel = splitLevel === "PROJECT";
       return "<span class=\"split-level-badge " + (projectLevel ? "project" : "requirement") + "\">"
         + (projectLevel ? "项目级" : "需求级") + "</span>";
+    }
+
+    function projectTimeSummary(project) {
+      return projectTimeLine("更新", project.updatedAt)
+        + projectTimeLine("创建", project.createdAt, true);
+    }
+
+    function projectTimeLine(label, value, muted) {
+      const raw = text(value) || "-";
+      const parts = raw.split(/\s+/);
+      const date = parts[0] || "-";
+      const time = parts.slice(1).join(" ");
+      return "<div class=\"project-time-line" + (muted ? " muted" : "") + "\"><span>" + label
+        + "</span><time><b>" + escapeHtml(date) + "</b>"
+        + (time ? "<small>" + escapeHtml(time) + "</small>" : "") + "</time></div>";
     }
 
     function riskSummary(project) {

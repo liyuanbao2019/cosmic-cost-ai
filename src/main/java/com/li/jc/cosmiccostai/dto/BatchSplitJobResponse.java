@@ -26,6 +26,13 @@ public class BatchSplitJobResponse {
     private int failed;
     private String projectMaterialStatus;
     private String projectMaterialMessage;
+    private String projectMaterialStage;
+    private int projectMaterialProgressPercent;
+    private int projectMaterialAiCompletedRequirements;
+    private int projectMaterialAiTotalRequirements;
+    private int projectMaterialAiCompletedFunctions;
+    private int projectMaterialAiTotalFunctions;
+    private int projectMaterialAiActiveRequirements;
     private String projectMaterialCompletedAt;
     private double projectMaterialTotalCfp;
     private int projectMaterialRequirementCount;
@@ -80,6 +87,20 @@ public class BatchSplitJobResponse {
     public void setProjectMaterialStatus(String projectMaterialStatus) { this.projectMaterialStatus = projectMaterialStatus; }
     public String getProjectMaterialMessage() { return projectMaterialMessage; }
     public void setProjectMaterialMessage(String projectMaterialMessage) { this.projectMaterialMessage = projectMaterialMessage; }
+    public String getProjectMaterialStage() { return projectMaterialStage; }
+    public void setProjectMaterialStage(String projectMaterialStage) { this.projectMaterialStage = projectMaterialStage; }
+    public int getProjectMaterialProgressPercent() { return projectMaterialProgressPercent; }
+    public void setProjectMaterialProgressPercent(int projectMaterialProgressPercent) { this.projectMaterialProgressPercent = projectMaterialProgressPercent; }
+    public int getProjectMaterialAiCompletedRequirements() { return projectMaterialAiCompletedRequirements; }
+    public void setProjectMaterialAiCompletedRequirements(int projectMaterialAiCompletedRequirements) { this.projectMaterialAiCompletedRequirements = projectMaterialAiCompletedRequirements; }
+    public int getProjectMaterialAiTotalRequirements() { return projectMaterialAiTotalRequirements; }
+    public void setProjectMaterialAiTotalRequirements(int projectMaterialAiTotalRequirements) { this.projectMaterialAiTotalRequirements = projectMaterialAiTotalRequirements; }
+    public int getProjectMaterialAiCompletedFunctions() { return projectMaterialAiCompletedFunctions; }
+    public void setProjectMaterialAiCompletedFunctions(int projectMaterialAiCompletedFunctions) { this.projectMaterialAiCompletedFunctions = projectMaterialAiCompletedFunctions; }
+    public int getProjectMaterialAiTotalFunctions() { return projectMaterialAiTotalFunctions; }
+    public void setProjectMaterialAiTotalFunctions(int projectMaterialAiTotalFunctions) { this.projectMaterialAiTotalFunctions = projectMaterialAiTotalFunctions; }
+    public int getProjectMaterialAiActiveRequirements() { return projectMaterialAiActiveRequirements; }
+    public void setProjectMaterialAiActiveRequirements(int projectMaterialAiActiveRequirements) { this.projectMaterialAiActiveRequirements = projectMaterialAiActiveRequirements; }
     public String getProjectMaterialCompletedAt() { return projectMaterialCompletedAt; }
     public void setProjectMaterialCompletedAt(String projectMaterialCompletedAt) { this.projectMaterialCompletedAt = projectMaterialCompletedAt; }
     public double getProjectMaterialTotalCfp() { return projectMaterialTotalCfp; }

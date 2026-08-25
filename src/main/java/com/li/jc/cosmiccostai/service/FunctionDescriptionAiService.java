@@ -2,6 +2,7 @@ package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
+import com.li.jc.cosmiccostai.common.BusinessException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,9 +24,13 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class FunctionDescriptionAiService {
@@ -93,6 +98,153 @@ public class FunctionDescriptionAiService {
         log.info("AI function description generation completed. groups={}, batches={}, generated={}, elapsedMs={}",
                 groups.size(), batches.size(), result.size(), System.currentTimeMillis() - startedAt);
         return result;
+    }
+
+    /**
+     * Generates project-material descriptions with one independently scheduled AI
+     * task stream per requirement. Requests never mix function processes from
+     * different requirements, while large requirements can use the remaining global
+     * concurrency after smaller requirements finish.
+     */
+    public Map<String, Map<String, String>> generateDescriptionsByRequirementConcurrently(
+            Map<String, Map<String, List<FunctionSplitRow>>> requirements,
+            RequirementProgressCallback progressCallback) {
+        if (requirements == null || requirements.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        if (!isConfigured()) {
+            throw new BusinessException("项目整合需求说明书需要调用大模型生成功能描述，但当前大模型未配置，请进入“大模型管理”检查配置。");
+        }
+        int totalGroups = 0;
+        for (Map<String, List<FunctionSplitRow>> groups : requirements.values()) {
+            totalGroups += groups == null ? 0 : groups.size();
+        }
+        if (totalGroups <= 0) {
+            return Collections.emptyMap();
+        }
+
+        final int requirementTotal = requirements.size();
+        final int groupTotal = totalGroups;
+        final AtomicInteger completedRequirements = new AtomicInteger();
+        final AtomicInteger completedGroups = new AtomicInteger();
+        final AtomicInteger activeRequirements = new AtomicInteger();
+        final ConcurrentMap<String, AtomicInteger> activeBatchesByRequirement =
+                new ConcurrentHashMap<String, AtomicInteger>();
+        Map<String, List<Map<String, List<FunctionSplitRow>>>> batchesByRequirement =
+                new LinkedHashMap<String, List<Map<String, List<FunctionSplitRow>>>>();
+        Map<String, Integer> remainingBatchesByRequirement = new LinkedHashMap<String, Integer>();
+        Map<String, Map<String, String>> result = new LinkedHashMap<String, Map<String, String>>();
+        int totalBatchCount = 0;
+        for (Map.Entry<String, Map<String, List<FunctionSplitRow>>> entry : requirements.entrySet()) {
+            Map<String, List<FunctionSplitRow>> groups = entry.getValue() == null
+                    ? Collections.<String, List<FunctionSplitRow>>emptyMap() : entry.getValue();
+            List<Map<String, List<FunctionSplitRow>>> batches = buildBatches(groups);
+            batchesByRequirement.put(entry.getKey(), batches);
+            remainingBatchesByRequirement.put(entry.getKey(), batches.size());
+            result.put(entry.getKey(), new LinkedHashMap<String, String>());
+            totalBatchCount += batches.size();
+            if (batches.isEmpty()) {
+                completedRequirements.incrementAndGet();
+            }
+        }
+        notifyRequirementProgress(progressCallback, completedRequirements.get(), requirementTotal,
+                0, groupTotal, 0);
+
+        ExecutorService executor = Executors.newFixedThreadPool(Math.min(activeParallelism(), totalBatchCount));
+        CompletionService<RequirementBatchResult> completionService =
+                new ExecutorCompletionService<RequirementBatchResult>(executor);
+        List<RequirementBatchTask> tasks = roundRobinRequirementBatches(batchesByRequirement);
+        for (final RequirementBatchTask task : tasks) {
+            completionService.submit(new Callable<RequirementBatchResult>() {
+                @Override
+                public RequirementBatchResult call() {
+                    AtomicInteger requirementActiveBatches = activeBatchesByRequirement.get(task.requirementKey);
+                    if (requirementActiveBatches == null) {
+                        AtomicInteger created = new AtomicInteger();
+                        AtomicInteger raced = activeBatchesByRequirement.putIfAbsent(task.requirementKey, created);
+                        requirementActiveBatches = raced == null ? created : raced;
+                    }
+                    if (requirementActiveBatches.incrementAndGet() == 1) {
+                        activeRequirements.incrementAndGet();
+                    }
+                    notifyRequirementProgress(progressCallback, completedRequirements.get(), requirementTotal,
+                            completedGroups.get(), groupTotal, activeRequirements.get());
+                    try {
+                        BatchResult batchResult = generateDescriptionsBatch(task.groups);
+                        if (batchResult.descriptions.size() != task.groups.size()) {
+                            throw new BusinessException("需求“" + task.requirementKey + "”当前模型分批有 "
+                                    + (task.groups.size() - batchResult.descriptions.size())
+                                    + " 个功能过程未获得大模型描述，已停止生成项目整合材料，请重试。");
+                        }
+                        return new RequirementBatchResult(task.requirementKey,
+                                batchResult.groupCount, batchResult.descriptions);
+                    } finally {
+                        if (requirementActiveBatches.decrementAndGet() == 0) {
+                            activeRequirements.decrementAndGet();
+                        }
+                    }
+                }
+            });
+        }
+
+        try {
+            for (int i = 0; i < totalBatchCount; i++) {
+                RequirementBatchResult batchResult = completionService.take().get();
+                result.get(batchResult.requirementKey).putAll(batchResult.descriptions);
+                int groupsDone = completedGroups.addAndGet(batchResult.groupCount);
+                int remaining = remainingBatchesByRequirement.get(batchResult.requirementKey) - 1;
+                remainingBatchesByRequirement.put(batchResult.requirementKey, remaining);
+                if (remaining == 0) {
+                    completedRequirements.incrementAndGet();
+                }
+                notifyRequirementProgress(progressCallback, completedRequirements.get(), requirementTotal,
+                        groupsDone, groupTotal, activeRequirements.get());
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("项目整合功能描述生成被中断，请重试。", ex);
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof BusinessException) {
+                throw (BusinessException) cause;
+            }
+            throw new BusinessException("项目整合功能描述生成失败："
+                    + (cause == null ? ex.getMessage() : cause.getMessage()), cause == null ? ex : cause);
+        } finally {
+            executor.shutdownNow();
+        }
+        return result;
+    }
+
+    private List<RequirementBatchTask> roundRobinRequirementBatches(
+            Map<String, List<Map<String, List<FunctionSplitRow>>>> batchesByRequirement) {
+        List<RequirementBatchTask> tasks = new ArrayList<RequirementBatchTask>();
+        int batchIndex = 0;
+        boolean added;
+        do {
+            added = false;
+            for (Map.Entry<String, List<Map<String, List<FunctionSplitRow>>>> entry
+                    : batchesByRequirement.entrySet()) {
+                if (batchIndex < entry.getValue().size()) {
+                    tasks.add(new RequirementBatchTask(entry.getKey(), entry.getValue().get(batchIndex)));
+                    added = true;
+                }
+            }
+            batchIndex++;
+        } while (added);
+        return tasks;
+    }
+
+    private void notifyRequirementProgress(RequirementProgressCallback callback,
+                                           int completedRequirements,
+                                           int totalRequirements,
+                                           int completedGroups,
+                                           int totalGroups,
+                                           int activeRequirements) {
+        if (callback != null) {
+            callback.onProgress(completedRequirements, totalRequirements,
+                    completedGroups, totalGroups, activeRequirements);
+        }
     }
 
     private List<Map<String, List<FunctionSplitRow>>> buildBatches(Map<String, List<FunctionSplitRow>> groups) {
@@ -246,7 +398,7 @@ public class FunctionDescriptionAiService {
         return builder.toString();
     }
 
-    private String callAi(String prompt) {
+    protected String callAi(String prompt) {
         if (aiModelConfigService != null) {
             return aiModelConfigService.generateForTask(
                     prompt, AiPromptTask.FUNCTION_DESCRIPTION, false);
@@ -341,6 +493,14 @@ public class FunctionDescriptionAiService {
         void onBatchCompleted(int completedIncrement);
     }
 
+    public interface RequirementProgressCallback {
+        void onProgress(int completedRequirements,
+                        int totalRequirements,
+                        int completedGroups,
+                        int totalGroups,
+                        int activeRequirements);
+    }
+
     private static class BatchResult {
         private final int groupCount;
         private final Map<String, String> descriptions;
@@ -348,6 +508,31 @@ public class FunctionDescriptionAiService {
         private BatchResult(int groupCount, Map<String, String> descriptions) {
             this.groupCount = groupCount;
             this.descriptions = descriptions;
+        }
+    }
+
+    private static class RequirementBatchResult {
+        private final String requirementKey;
+        private final int groupCount;
+        private final Map<String, String> descriptions;
+
+        private RequirementBatchResult(String requirementKey,
+                                       int groupCount,
+                                       Map<String, String> descriptions) {
+            this.requirementKey = requirementKey;
+            this.groupCount = groupCount;
+            this.descriptions = descriptions;
+        }
+    }
+
+    private static class RequirementBatchTask {
+        private final String requirementKey;
+        private final Map<String, List<FunctionSplitRow>> groups;
+
+        private RequirementBatchTask(String requirementKey,
+                                     Map<String, List<FunctionSplitRow>> groups) {
+            this.requirementKey = requirementKey;
+            this.groups = groups;
         }
     }
 }

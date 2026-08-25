@@ -180,6 +180,20 @@
   border-collapse: collapse;
 }
 
+.requirement-project-table {
+  min-width: 1100px;
+  table-layout: fixed;
+}
+
+.requirement-project-table .project-col-check { width: 52px; }
+.requirement-project-table .project-col-info { width: auto; }
+.requirement-project-table .project-col-type { width: 230px; }
+.requirement-project-table .project-col-functions { width: 92px; }
+.requirement-project-table .project-col-risk { width: 126px; }
+.requirement-project-table .project-col-export { width: 108px; }
+.requirement-project-table .project-col-time { width: 176px; }
+.requirement-project-table .project-col-actions { width: 136px; }
+
 .project-table th,
 .project-table td {
   padding: 12px 14px;
@@ -205,6 +219,100 @@
   background: #f8fafc;
   color: #475569;
   font-weight: 700;
+}
+
+.requirement-project-table th {
+  white-space: nowrap;
+}
+
+.project-info-cell {
+  min-width: 0;
+}
+
+.project-name {
+  display: block;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-info-cell .project-id,
+.project-info-cell .project-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-type-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.project-type-stack > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-number-cell {
+  text-align: center !important;
+  white-space: nowrap;
+}
+
+.project-number-cell b {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.project-number-cell span {
+  margin-left: 3px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.project-time-line {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  white-space: nowrap;
+}
+
+.project-time-line + .project-time-line {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.project-time-line > span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.project-time-line time,
+.project-time-line time b,
+.project-time-line time small {
+  display: block;
+}
+
+.project-time-line time b {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-time-line time small {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.project-time-line.muted {
+  opacity: .78;
 }
 
 .project-table tbody tr:hover {
@@ -1142,6 +1250,45 @@ button.flow-rule-config-btn:hover {
 
 .batch-materials-heading p {
   margin-top: 5px;
+}
+
+.batch-material-progress {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #7dd3fc;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.batch-material-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #075985;
+  font-size: 12px;
+}
+
+.batch-material-progress-track {
+  overflow: hidden;
+  height: 7px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.batch-material-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0284c7, #22c55e);
+  transition: width 180ms ease;
+}
+
+.batch-material-progress p {
+  margin: 7px 0 0;
+  font-size: 11px;
 }
 
 .batch-material-file-list {

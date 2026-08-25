@@ -37,7 +37,9 @@ class BatchSplitUiRegressionTest {
 
         assertTrue(html.contains("id=\"fileInput\" type=\"file\" accept=\".doc,.docx\" multiple"));
         assertTrue(html.contains("id=\"splitExcelInput\" type=\"file\" accept=\".xlsx,.xls\" multiple"));
-        assertTrue(html.contains("id=\"excelReuseAdjustmentEnabled\" type=\"checkbox\" checked"));
+        assertTrue(html.contains("id=\"excelReuseAdjustmentEnabled\" type=\"checkbox\" onchange"));
+        assertFalse(html.contains("id=\"excelReuseAdjustmentEnabled\" type=\"checkbox\" checked"));
+        assertTrue(html.contains("$(\"excelReuseAdjustmentEnabled\").checked = false"));
         assertTrue(html.contains("let selectedExcelFiles = []")
                 && html.contains("selectedExcelFiles.push(file)"));
         assertTrue(html.contains("function startBatchExcelPreparation()")
@@ -70,6 +72,12 @@ class BatchSplitUiRegressionTest {
         assertTrue(html.contains("COSMIC 初拆 → 复用度调整 → 规则初审"));
         assertTrue(html.contains("id=\"batchProjectMaterials\""));
         assertTrue(html.contains("/materials/retry") && html.contains("/materials/"));
+        assertTrue(html.contains("id=\"batchProjectMaterialProgress\"")
+                && html.contains("projectMaterialAiCompletedRequirements")
+                && html.contains("projectMaterialAiCompletedFunctions")
+                && html.contains("需求内模型分批并发执行")
+                && html.contains("按单个需求并发调用大模型"));
+        assertTrue(css.contains(".batch-material-progress-track"));
         assertTrue(html.contains("status === \"BLOCKED\""));
         assertTrue(html.contains("项目级送审材料不会生成，请重试失败项"));
         assertTrue(html.contains("失败文档已独立重新进入处理队列"));

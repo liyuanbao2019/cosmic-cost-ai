@@ -999,6 +999,13 @@ public class BatchSplitService {
             }
             state.setProjectMaterialStatus("PENDING");
             state.setProjectMaterialMessage("已人工确认，等待生成项目级附件 1–5。");
+            state.setProjectMaterialStage("QUEUED");
+            state.setProjectMaterialProgressPercent(0);
+            state.setProjectMaterialAiCompletedRequirements(0);
+            state.setProjectMaterialAiTotalRequirements(0);
+            state.setProjectMaterialAiCompletedFunctions(0);
+            state.setProjectMaterialAiTotalFunctions(0);
+            state.setProjectMaterialAiActiveRequirements(0);
             state.setFinishedAt(null);
             recomputeState(state);
             saveStateUnlocked(state);
@@ -1576,7 +1583,14 @@ public class BatchSplitService {
                     ? state.getProjectGroupId() + "-V" + nextVersion
                     : batchId + "-V" + nextVersion;
             state.setProjectMaterialStatus("GENERATING");
-            state.setProjectMaterialMessage("正在生成产物 1：项目级送审材料 V" + nextVersion + "（附件 1–5）。");
+            state.setProjectMaterialStage("AI_FUNCTION_DESCRIPTIONS");
+            state.setProjectMaterialProgressPercent(1);
+            state.setProjectMaterialAiCompletedRequirements(0);
+            state.setProjectMaterialAiTotalRequirements(projectIds.size());
+            state.setProjectMaterialAiCompletedFunctions(0);
+            state.setProjectMaterialAiTotalFunctions(0);
+            state.setProjectMaterialAiActiveRequirements(0);
+            state.setProjectMaterialMessage("正在准备按单个需求并发调用大模型生成功能描述，随后生成项目级附件 1–5。");
             state.setProjectMaterialCompletedAt(null);
             recomputeState(state);
             saveStateUnlocked(state);
@@ -1584,7 +1598,42 @@ public class BatchSplitService {
 
         try {
             ProjectMaterialExportService.ProjectMaterialBundle bundle =
-                    projectMaterialExportService.export(materialId, projectIds);
+                    projectMaterialExportService.export(materialId, projectIds,
+                            new ProjectMaterialExportService.ProjectMaterialProgressListener() {
+                                @Override
+                                public void onProgress(String stage,
+                                                       int progressPercent,
+                                                       String progressMessage,
+                                                       int completedRequirements,
+                                                       int totalRequirements,
+                                                       int completedFunctions,
+                                                       int totalFunctions,
+                                                       int activeRequirements) {
+                                    synchronized (lockFor(batchId)) {
+                                        BatchSplitState progressState = loadStateUnlocked(batchId);
+                                        if (!"GENERATING".equals(progressState.getProjectMaterialStatus())) {
+                                            return;
+                                        }
+                                        progressState.setProjectMaterialStage(stage);
+                                        progressState.setProjectMaterialProgressPercent(Math.max(
+                                                progressState.getProjectMaterialProgressPercent(), progressPercent));
+                                        progressState.setProjectMaterialMessage(progressMessage);
+                                        progressState.setProjectMaterialAiCompletedRequirements(Math.max(
+                                                progressState.getProjectMaterialAiCompletedRequirements(), completedRequirements));
+                                        if (totalRequirements > 0) {
+                                            progressState.setProjectMaterialAiTotalRequirements(totalRequirements);
+                                        }
+                                        progressState.setProjectMaterialAiCompletedFunctions(Math.max(
+                                                progressState.getProjectMaterialAiCompletedFunctions(), completedFunctions));
+                                        if (totalFunctions > 0) {
+                                            progressState.setProjectMaterialAiTotalFunctions(totalFunctions);
+                                        }
+                                        progressState.setProjectMaterialAiActiveRequirements(activeRequirements);
+                                        recomputeState(progressState);
+                                        saveStateUnlocked(progressState);
+                                    }
+                                }
+                            });
             synchronized (lockFor(batchId)) {
                 BatchSplitState state = loadStateUnlocked(batchId);
                 state.getProjectMaterialFiles().clear();
@@ -1593,6 +1642,9 @@ public class BatchSplitService {
                             entry.getValue().toAbsolutePath().normalize().toString());
                 }
                 state.setProjectMaterialStatus("COMPLETED");
+                state.setProjectMaterialStage("COMPLETED");
+                state.setProjectMaterialProgressPercent(100);
+                state.setProjectMaterialAiActiveRequirements(0);
                 state.setProjectMaterialVersion(nextVersion);
                 state.setProjectMaterialMessage("产物 1 已生成：项目级送审材料 V" + nextVersion
                         + "，共包含附件 1–5。");
@@ -1611,6 +1663,8 @@ public class BatchSplitService {
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
             state.setProjectMaterialStatus("FAILED");
+            state.setProjectMaterialStage("FAILED");
+            state.setProjectMaterialAiActiveRequirements(0);
             state.setProjectMaterialMessage(errorMessage);
             recomputeState(state);
             saveStateUnlocked(state);
@@ -1998,6 +2052,13 @@ public class BatchSplitService {
         response.setProjectMaterialStatus(StringUtils.hasText(state.getProjectMaterialStatus())
                 ? state.getProjectMaterialStatus() : "NOT_REQUIRED");
         response.setProjectMaterialMessage(state.getProjectMaterialMessage());
+        response.setProjectMaterialStage(state.getProjectMaterialStage());
+        response.setProjectMaterialProgressPercent(state.getProjectMaterialProgressPercent());
+        response.setProjectMaterialAiCompletedRequirements(state.getProjectMaterialAiCompletedRequirements());
+        response.setProjectMaterialAiTotalRequirements(state.getProjectMaterialAiTotalRequirements());
+        response.setProjectMaterialAiCompletedFunctions(state.getProjectMaterialAiCompletedFunctions());
+        response.setProjectMaterialAiTotalFunctions(state.getProjectMaterialAiTotalFunctions());
+        response.setProjectMaterialAiActiveRequirements(state.getProjectMaterialAiActiveRequirements());
         response.setProjectMaterialCompletedAt(state.getProjectMaterialCompletedAt());
         response.setProjectMaterialTotalCfp(state.getProjectMaterialTotalCfp());
         response.setProjectMaterialRequirementCount(state.getProjectMaterialRequirementCount());
@@ -2223,6 +2284,13 @@ public class BatchSplitService {
         private String finishedAt;
         private String projectMaterialStatus = "NOT_REQUIRED";
         private String projectMaterialMessage;
+        private String projectMaterialStage;
+        private int projectMaterialProgressPercent;
+        private int projectMaterialAiCompletedRequirements;
+        private int projectMaterialAiTotalRequirements;
+        private int projectMaterialAiCompletedFunctions;
+        private int projectMaterialAiTotalFunctions;
+        private int projectMaterialAiActiveRequirements;
         private String projectMaterialCompletedAt;
         private double projectMaterialTotalCfp;
         private int projectMaterialRequirementCount;
@@ -2259,6 +2327,20 @@ public class BatchSplitService {
         public void setProjectMaterialStatus(String projectMaterialStatus) { this.projectMaterialStatus = projectMaterialStatus; }
         public String getProjectMaterialMessage() { return projectMaterialMessage; }
         public void setProjectMaterialMessage(String projectMaterialMessage) { this.projectMaterialMessage = projectMaterialMessage; }
+        public String getProjectMaterialStage() { return projectMaterialStage; }
+        public void setProjectMaterialStage(String projectMaterialStage) { this.projectMaterialStage = projectMaterialStage; }
+        public int getProjectMaterialProgressPercent() { return projectMaterialProgressPercent; }
+        public void setProjectMaterialProgressPercent(int projectMaterialProgressPercent) { this.projectMaterialProgressPercent = projectMaterialProgressPercent; }
+        public int getProjectMaterialAiCompletedRequirements() { return projectMaterialAiCompletedRequirements; }
+        public void setProjectMaterialAiCompletedRequirements(int projectMaterialAiCompletedRequirements) { this.projectMaterialAiCompletedRequirements = projectMaterialAiCompletedRequirements; }
+        public int getProjectMaterialAiTotalRequirements() { return projectMaterialAiTotalRequirements; }
+        public void setProjectMaterialAiTotalRequirements(int projectMaterialAiTotalRequirements) { this.projectMaterialAiTotalRequirements = projectMaterialAiTotalRequirements; }
+        public int getProjectMaterialAiCompletedFunctions() { return projectMaterialAiCompletedFunctions; }
+        public void setProjectMaterialAiCompletedFunctions(int projectMaterialAiCompletedFunctions) { this.projectMaterialAiCompletedFunctions = projectMaterialAiCompletedFunctions; }
+        public int getProjectMaterialAiTotalFunctions() { return projectMaterialAiTotalFunctions; }
+        public void setProjectMaterialAiTotalFunctions(int projectMaterialAiTotalFunctions) { this.projectMaterialAiTotalFunctions = projectMaterialAiTotalFunctions; }
+        public int getProjectMaterialAiActiveRequirements() { return projectMaterialAiActiveRequirements; }
+        public void setProjectMaterialAiActiveRequirements(int projectMaterialAiActiveRequirements) { this.projectMaterialAiActiveRequirements = projectMaterialAiActiveRequirements; }
         public String getProjectMaterialCompletedAt() { return projectMaterialCompletedAt; }
         public void setProjectMaterialCompletedAt(String projectMaterialCompletedAt) { this.projectMaterialCompletedAt = projectMaterialCompletedAt; }
         public double getProjectMaterialTotalCfp() { return projectMaterialTotalCfp; }

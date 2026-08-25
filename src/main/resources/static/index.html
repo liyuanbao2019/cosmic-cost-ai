@@ -312,7 +312,7 @@
               <span>已拆分 Excel <em>（可批量追加 xlsx 或 xls）</em><small id="batchExcelFileHint" class="batch-file-hint">每次选择都会追加到已选列表。</small></span>
             </label>
             <label class="excel-reuse-toggle" title="关闭后保留 Excel 中人工确认的复用度和 CFP，不调用复用度调整模型">
-              <input id="excelReuseAdjustmentEnabled" type="checkbox" checked onchange="updateReviewStageGuide()">
+              <input id="excelReuseAdjustmentEnabled" type="checkbox" onchange="updateReviewStageGuide()">
               <span>复用度 AI 调整</span>
             </label>
           </div>
@@ -411,6 +411,14 @@
             <p id="batchProjectMaterialsSummary" class="muted">全部需求完成后，由人工点击生成。</p>
           </div>
           <button id="batchMaterialRetryBtn" type="button" class="ghost hidden" onclick="retryBatchProjectMaterials()">生成项目整合材料</button>
+        </div>
+        <div id="batchProjectMaterialProgress" class="batch-material-progress hidden">
+          <div class="batch-material-progress-head">
+            <span id="batchProjectMaterialProgressStage">准备生成</span>
+            <b id="batchProjectMaterialProgressPercent">0%</b>
+          </div>
+          <div class="batch-material-progress-track"><span id="batchProjectMaterialProgressBar"></span></div>
+          <p id="batchProjectMaterialProgressDetail" class="muted"></p>
         </div>
         <div id="batchProjectMaterialFiles" class="batch-material-file-list"></div>
       </div>
@@ -1832,7 +1840,7 @@
         $("splitExcelInput").value = "";
       }
       if ($("excelReuseAdjustmentEnabled")) {
-        $("excelReuseAdjustmentEnabled").checked = true;
+        $("excelReuseAdjustmentEnabled").checked = false;
       }
       if ($("polishFunctionDescriptionInput")) {
         $("polishFunctionDescriptionInput").checked = false;
@@ -2339,6 +2347,7 @@
     function batchJobNeedsPolling(job) {
       return !!job && (job.status === "PREPARING" || job.status === "RUNNING"
         || job.status === "GENERATING_MATERIALS"
+        || job.projectMaterialStatus === "GENERATING"
         || job.requirementMaterialStatus === "GENERATING");
     }
 
@@ -2645,8 +2654,45 @@
           || "存在拆分失败的需求，项目级送审材料已暂停；成功结果会保留。";
       } else if (status === "FAILED") {
         summary.textContent = job.projectMaterialMessage || "项目级送审材料生成失败。";
+      } else if (status === "GENERATING") {
+        summary.textContent = job.projectMaterialMessage || "正在按单个需求并发调用大模型生成功能描述。";
       } else {
         summary.textContent = job.projectMaterialMessage || "全部需求已完成后，由人工点击生成项目级附件 1–5。";
+      }
+      const progressPanel = $("batchProjectMaterialProgress");
+      const showProgress = status === "GENERATING"
+        || (status === "FAILED" && Number(job.projectMaterialProgressPercent || 0) > 0);
+      progressPanel.classList.toggle("hidden", !showProgress);
+      if (showProgress) {
+        const percent = Math.max(0, Math.min(100, Number(job.projectMaterialProgressPercent || 0)));
+        const stageLabels = {
+          QUEUED: "等待进入生成队列",
+          AI_FUNCTION_DESCRIPTIONS: "大模型生成功能描述",
+          EXPORTING_WORD: "生成附件 1 需求说明书",
+          EXPORTING_EXCEL: "写入附件 2 和附件 3",
+          EXPORTING_FORMS: "生成附件 4 和附件 5",
+          ARCHIVING: "打包项目整合材料",
+          FAILED: "生成失败"
+        };
+        $("batchProjectMaterialProgressStage").textContent = stageLabels[job.projectMaterialStage]
+          || (status === "FAILED" ? "生成失败" : "生成项目整合材料");
+        $("batchProjectMaterialProgressPercent").textContent = percent + "%";
+        $("batchProjectMaterialProgressBar").style.width = percent + "%";
+        const requirementTotal = Number(job.projectMaterialAiTotalRequirements || 0);
+        const functionTotal = Number(job.projectMaterialAiTotalFunctions || 0);
+        let detail = requirementTotal > 0
+          ? "需求 " + Number(job.projectMaterialAiCompletedRequirements || 0) + "/" + requirementTotal : "";
+        if (functionTotal > 0) {
+          detail += (detail ? " · " : "") + "功能过程 "
+            + Number(job.projectMaterialAiCompletedFunctions || 0) + "/" + functionTotal;
+        }
+        if (status === "GENERATING" && Number(job.projectMaterialAiActiveRequirements || 0) > 0) {
+          detail += (detail ? " · " : "") + "当前活跃 "
+            + Number(job.projectMaterialAiActiveRequirements || 0)
+            + " 个需求（需求内模型分批并发执行）";
+        }
+        $("batchProjectMaterialProgressDetail").textContent = detail
+          || (job.projectMaterialMessage || "正在准备生成。");
       }
       const materialButton = $("batchMaterialRetryBtn");
       materialButton.classList.toggle("hidden", !allCompleted || status === "GENERATING");
@@ -3009,7 +3055,7 @@
     async function retryBatchProjectMaterials() {
       if (!currentBatchSplitJob) return;
       if (!window.confirm("确认现在生成项目整合送审材料（附件 1–5）？\n\n"
-        + "系统只会在本次人工确认后开始生成；已有单需求材料会优先复用，不重复调用 AI。")) return;
+        + "系统会先按单个需求并发调用大模型，为每个功能过程重新生成功能描述；全部完成后再生成并打包附件 1–5。")) return;
       const button = $("batchMaterialRetryBtn");
       button.disabled = true;
       try {

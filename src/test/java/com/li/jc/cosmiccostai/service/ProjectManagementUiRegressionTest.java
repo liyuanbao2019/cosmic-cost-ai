@@ -36,6 +36,17 @@ class ProjectManagementUiRegressionTest {
     }
 
     @Test
+    void deletingModelPersistsImmediatelyAndRollsBackOnFailure() throws Exception {
+        String models = read("src/main/resources/static/models.html");
+
+        assertTrue(models.contains("async function removeModel(index)"));
+        assertTrue(models.contains("const previousSettings = JSON.parse(JSON.stringify(settings))"));
+        assertTrue(models.contains("await request(\"/api/ai-models\", { method:\"PUT\""));
+        assertTrue(models.contains("settings = previousSettings"));
+        assertTrue(models.contains("已删除并立即生效"));
+    }
+
+    @Test
     void requirementAndProjectLevelManagementAreSeparated() throws Exception {
         String projects = read("src/main/resources/static/projects.html");
 
@@ -48,6 +59,21 @@ class ProjectManagementUiRegressionTest {
         assertFalse(projects.contains("targetBatchId"));
         assertTrue(projects.contains("再次确认") && projects.contains("全部成员需求、拆分结果"));
         assertTrue(projects.contains("project-group-id-button") && projects.contains("openProjectGroup"));
+    }
+
+    @Test
+    void requirementTableUsesCompactInformationGroups() throws Exception {
+        String projects = read("src/main/resources/static/projects.html");
+        String css = read("src/main/resources/static/app.css");
+
+        assertTrue(projects.contains("requirement-project-table"));
+        assertTrue(projects.contains("<th>需求信息</th>")
+                && projects.contains("<th>类型与状态</th>")
+                && projects.contains("<th>时间</th>"));
+        assertTrue(projects.contains("projectTimeSummary(project)"));
+        assertTrue(css.contains(".requirement-project-table")
+                && css.contains("table-layout: fixed"));
+        assertTrue(css.contains(".project-name") && css.contains("text-overflow: ellipsis"));
     }
 
     private String read(String path) throws Exception {

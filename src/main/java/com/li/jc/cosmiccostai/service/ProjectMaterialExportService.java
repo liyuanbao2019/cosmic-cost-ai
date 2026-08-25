@@ -73,11 +73,19 @@ public class ProjectMaterialExportService {
     }
 
     public ProjectMaterialBundle export(String batchId, List<String> projectIds) {
+        return export(batchId, projectIds, null);
+    }
+
+    public ProjectMaterialBundle export(String batchId,
+                                        List<String> projectIds,
+                                        final ProjectMaterialProgressListener progressListener) {
         if (projectIds == null || projectIds.isEmpty()) {
             throw new BusinessException("项目级送审材料至少需要一个已完成拆分的需求。");
         }
 
         List<FunctionSplitRow> aggregateRows = new ArrayList<FunctionSplitRow>();
+        Map<String, List<FunctionSplitRow>> rowsByRequirement =
+                new LinkedHashMap<String, List<FunctionSplitRow>>();
         List<ProjectMetadata> projects = new ArrayList<ProjectMetadata>();
         String projectName = null;
         for (String projectId : projectIds) {
@@ -89,7 +97,9 @@ public class ProjectMaterialExportService {
             if (!StringUtils.hasText(projectName) && StringUtils.hasText(metadata.getName())) {
                 projectName = metadata.getName().trim();
             }
-            aggregateRows.addAll(readAndMapRows(metadata, projectName));
+            List<FunctionSplitRow> requirementRows = readAndMapRows(metadata, projectName);
+            aggregateRows.addAll(requirementRows);
+            rowsByRequirement.put(sourceName(metadata) + " [" + projectId + "]", requirementRows);
         }
         if (!StringUtils.hasText(projectName)) {
             projectName = "批量需求项目";
@@ -101,10 +111,51 @@ public class ProjectMaterialExportService {
         }
 
         Path outputDir = outputBaseDir.resolve("project-materials").resolve(batchId);
+        notifyProjectMaterialProgress(progressListener, "AI_FUNCTION_DESCRIPTIONS", 3,
+                "正在准备按单个需求并发调用大模型生成功能描述。",
+                0, projectIds.size(), 0, 0, 0);
+        WordExportService.ProjectWordExportResult word = wordExportService.exportProjectMaterial(
+                batchId, projectName, aggregateRows, rowsByRequirement, outputDir,
+                new WordExportService.ProjectMaterialDescriptionProgressCallback() {
+                    @Override
+                    public void onProgress(int completedRequirements,
+                                           int totalRequirements,
+                                           int completedGroups,
+                                           int totalGroups,
+                                           int activeRequirements) {
+                        boolean descriptionsCompleted = totalRequirements > 0
+                                && completedRequirements >= totalRequirements
+                                && totalGroups > 0 && completedGroups >= totalGroups;
+                        int percent = totalGroups <= 0 ? 3
+                                : 3 + (int) Math.round(72D * completedGroups / totalGroups);
+                        String message;
+                        if (descriptionsCompleted) {
+                            message = "全部 " + totalRequirements + " 个需求、" + totalGroups
+                                    + " 个功能过程的大模型描述已返回，正在生成附件 1 需求说明书。";
+                        } else {
+                            message = "正在按单个需求并发调用大模型生成功能描述：需求 "
+                                    + completedRequirements + "/" + totalRequirements
+                                    + "，功能过程 " + completedGroups + "/" + totalGroups;
+                            if (activeRequirements > 0) {
+                                message += "，当前活跃 " + activeRequirements
+                                        + " 个需求，需求内模型分批也会并发执行";
+                            }
+                            message += "。";
+                        }
+                        notifyProjectMaterialProgress(progressListener,
+                                descriptionsCompleted ? "EXPORTING_WORD" : "AI_FUNCTION_DESCRIPTIONS", percent,
+                                message, completedRequirements, totalRequirements,
+                                completedGroups, totalGroups, activeRequirements);
+                    }
+                });
+        notifyProjectMaterialProgress(progressListener, "EXPORTING_EXCEL", 82,
+                "大模型功能描述已全部生成，正在写入项目级附件 2 和附件 3。",
+                projectIds.size(), projectIds.size(), 0, 0, 0);
         ExcelExportService.ProjectExcelExportResult excel = excelExportService.exportProjectMaterial(
                 batchId, projectName, aggregateRows, outputDir);
-        WordExportService.ProjectWordExportResult word = wordExportService.exportProjectMaterial(
-                batchId, projectName, aggregateRows, outputDir);
+        notifyProjectMaterialProgress(progressListener, "EXPORTING_FORMS", 92,
+                "附件 1–3 已生成，正在生成项目台账和工作量评估申请表。",
+                projectIds.size(), projectIds.size(), 0, 0, 0);
         Path attachment4 = exportAttachment4(projectName, excel.getTotalCfp(), outputDir);
         Path attachment5 = exportAttachment5(projectName, excel.getTotalCfp(), outputDir);
 
@@ -114,6 +165,9 @@ public class ProjectMaterialExportService {
         files.put(ATTACHMENT_3, excel.getAttachment3Path());
         files.put(ATTACHMENT_4, attachment4);
         files.put(ATTACHMENT_5, attachment5);
+        notifyProjectMaterialProgress(progressListener, "ARCHIVING", 97,
+                "附件 1–5 已生成，正在打包项目整合送审材料。",
+                projectIds.size(), projectIds.size(), 0, 0, 0);
         Path archive = outputDir.resolve(sanitizeFileName(projectName) + "-COSMIC送审材料.zip");
         writeArchive(archive, files.values());
         files.put(ARCHIVE, archive);
@@ -124,6 +178,22 @@ public class ProjectMaterialExportService {
         bundle.totalCfp = excel.getTotalCfp();
         bundle.files.putAll(files);
         return bundle;
+    }
+
+    private void notifyProjectMaterialProgress(ProjectMaterialProgressListener listener,
+                                               String stage,
+                                               int progressPercent,
+                                               String message,
+                                               int completedRequirements,
+                                               int totalRequirements,
+                                               int completedFunctions,
+                                               int totalFunctions,
+                                               int activeRequirements) {
+        if (listener != null) {
+            listener.onProgress(stage, Math.max(0, Math.min(100, progressPercent)), message,
+                    completedRequirements, totalRequirements,
+                    completedFunctions, totalFunctions, activeRequirements);
+        }
     }
 
     /** Generates each completed requirement's normal attachment 1-3 archive and wraps those ZIP files in one batch ZIP. */
@@ -594,5 +664,16 @@ public class ProjectMaterialExportService {
 
     public interface RequirementArchiveProgressListener {
         void onProgress(int successCount, int failedCount, int totalCount);
+    }
+
+    public interface ProjectMaterialProgressListener {
+        void onProgress(String stage,
+                        int progressPercent,
+                        String message,
+                        int completedRequirements,
+                        int totalRequirements,
+                        int completedFunctions,
+                        int totalFunctions,
+                        int activeRequirements);
     }
 }

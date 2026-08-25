@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -155,7 +156,9 @@ class ProjectMaterialExportServiceTest {
                 mock(WordExportService.ProjectWordExportResult.class);
         when(wordResult.getAttachment1Path()).thenReturn(attachment1);
         when(word.exportProjectMaterial(eq("BS1"), eq("备案项目"), anyList(),
-                org.mockito.ArgumentMatchers.any(Path.class))).thenReturn(wordResult);
+                org.mockito.ArgumentMatchers.<String, java.util.List<FunctionSplitRow>>anyMap(),
+                org.mockito.ArgumentMatchers.any(Path.class),
+                any(WordExportService.ProjectMaterialDescriptionProgressCallback.class))).thenReturn(wordResult);
 
         ProjectMaterialExportService service = new ProjectMaterialExportService(
                 storage, excel, word, "target/project-material-qa/forms");

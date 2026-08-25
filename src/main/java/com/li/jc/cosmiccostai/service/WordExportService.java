@@ -155,10 +155,31 @@ public class WordExportService {
                                                          String projectName,
                                                          List<FunctionSplitRow> rows,
                                                          Path outputDir) {
+        Map<String, List<FunctionSplitRow>> rowsByRequirement = new LinkedHashMap<String, List<FunctionSplitRow>>();
+        for (FunctionSplitRow row : rows == null ? new ArrayList<FunctionSplitRow>() : rows) {
+            String requirementKey = safe(row.getLevel1Module());
+            List<FunctionSplitRow> requirementRows = rowsByRequirement.get(requirementKey);
+            if (requirementRows == null) {
+                requirementRows = new ArrayList<FunctionSplitRow>();
+                rowsByRequirement.put(requirementKey, requirementRows);
+            }
+            requirementRows.add(row);
+        }
+        return exportProjectMaterial(materialId, projectName, rows, rowsByRequirement, outputDir, null);
+    }
+
+    public ProjectWordExportResult exportProjectMaterial(String materialId,
+                                                         String projectName,
+                                                         List<FunctionSplitRow> rows,
+                                                         Map<String, List<FunctionSplitRow>> rowsByRequirement,
+                                                         Path outputDir,
+                                                         ProjectMaterialDescriptionProgressCallback progressCallback) {
         if (rows == null || rows.isEmpty()) {
             throw new BusinessException("项目级需求说明书没有可导出的功能点拆分行。");
         }
         ruleValidationService.ensureReadyForExport(rows, "导出项目级需求说明书");
+
+        applyProjectMaterialFunctionDescriptions(rowsByRequirement, progressCallback);
 
         ProjectMetadata metadata = new ProjectMetadata();
         metadata.setId(materialId);
@@ -166,7 +187,6 @@ public class WordExportService {
         metadata.setSourceFileName(projectName + zh("\u9700\u6c42\u8bf4\u660e\u4e66.docx"));
         metadata.setFileType("docx");
         List<FunctionGroup> groups = groupRows(rows);
-        applyExportFunctionDescriptions(metadata, groups);
         Path outputPath = outputDir.resolve(buildWordOutputFileName(metadata));
 
         try {
@@ -194,6 +214,56 @@ public class WordExportService {
         return result;
     }
 
+    private void applyProjectMaterialFunctionDescriptions(
+            Map<String, List<FunctionSplitRow>> rowsByRequirement,
+            final ProjectMaterialDescriptionProgressCallback progressCallback) {
+        if (rowsByRequirement == null || rowsByRequirement.isEmpty()) {
+            throw new BusinessException("项目整合需求说明书没有可生成描述的单需求数据。");
+        }
+        Map<String, Map<String, List<FunctionSplitRow>>> requirements =
+                new LinkedHashMap<String, Map<String, List<FunctionSplitRow>>>();
+        for (Map.Entry<String, List<FunctionSplitRow>> requirementEntry : rowsByRequirement.entrySet()) {
+            Map<String, List<FunctionSplitRow>> groups = new LinkedHashMap<String, List<FunctionSplitRow>>();
+            for (FunctionGroup group : groupRows(requirementEntry.getValue())) {
+                groups.put(FunctionProcessKey.of(group.rows.get(0)), group.rows);
+            }
+            requirements.put(requirementEntry.getKey(), groups);
+        }
+
+        Map<String, Map<String, String>> descriptions =
+                functionDescriptionAiService.generateDescriptionsByRequirementConcurrently(requirements,
+                        new FunctionDescriptionAiService.RequirementProgressCallback() {
+                            @Override
+                            public void onProgress(int completedRequirements,
+                                                   int totalRequirements,
+                                                   int completedGroups,
+                                                   int totalGroups,
+                                                   int activeRequirements) {
+                                if (progressCallback != null) {
+                                    progressCallback.onProgress(completedRequirements, totalRequirements,
+                                            completedGroups, totalGroups, activeRequirements);
+                                }
+                            }
+                        });
+        for (Map.Entry<String, Map<String, List<FunctionSplitRow>>> requirementEntry : requirements.entrySet()) {
+            Map<String, String> requirementDescriptions = descriptions.get(requirementEntry.getKey());
+            if (requirementDescriptions == null) {
+                throw new BusinessException("需求“" + requirementEntry.getKey()
+                        + "”未获得大模型功能描述，已停止生成项目整合材料，请重试。");
+            }
+            for (Map.Entry<String, List<FunctionSplitRow>> groupEntry : requirementEntry.getValue().entrySet()) {
+                String description = requirementDescriptions.get(groupEntry.getKey());
+                if (!StringUtils.hasText(description)) {
+                    throw new BusinessException("需求“" + requirementEntry.getKey()
+                            + "”存在未生成的功能描述，已停止生成项目整合材料，请重试。");
+                }
+                for (FunctionSplitRow row : groupEntry.getValue()) {
+                    row.setFunctionDescription(description);
+                }
+            }
+        }
+    }
+
     public static class ProjectWordExportResult {
         private Path attachment1Path;
         private int functionCount;
@@ -202,6 +272,14 @@ public class WordExportService {
         public Path getAttachment1Path() { return attachment1Path; }
         public int getFunctionCount() { return functionCount; }
         public double getTotalCfp() { return totalCfp; }
+    }
+
+    public interface ProjectMaterialDescriptionProgressCallback {
+        void onProgress(int completedRequirements,
+                        int totalRequirements,
+                        int completedGroups,
+                        int totalGroups,
+                        int activeRequirements);
     }
 
     private void validateMetadata(ProjectMetadata metadata) {

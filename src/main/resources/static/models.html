@@ -167,15 +167,27 @@
       setTimeout(function() { const cards=document.querySelectorAll(".model-card"); if(cards[expandedIndex]) cards[expandedIndex].scrollIntoView({behavior:"smooth",block:"center"}); }, 0);
     }
 
-    function removeModel(index) {
+    async function removeModel(index) {
       if (settings.models.length <= 1) { setMessage("至少需要保留一个模型配置。", "error"); return; }
       const removed = settings.models[index];
       if (!window.confirm("确认删除模型“" + (removed.name || removed.id) + "”？")) return;
+      const previousSettings = JSON.parse(JSON.stringify(settings));
       settings.models.splice(index, 1);
       if (removed.id === settings.selectedId) settings.selectedId = settings.models[0].id;
       expandedIndex = -1;
       expandedMode = "";
       renderModels();
+      setMessage("正在删除模型“" + (removed.name || removed.id) + "”...");
+      try {
+        const payload = await request("/api/ai-models", { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(settings) });
+        settings = payload.data;
+        renderModels();
+        setMessage("模型“" + (removed.name || removed.id) + "”已删除并立即生效。", "success");
+      } catch (error) {
+        settings = previousSettings;
+        renderModels();
+        setMessage("删除失败，已恢复模型配置：" + error.message, "error");
+      }
     }
 
     async function saveModels() {

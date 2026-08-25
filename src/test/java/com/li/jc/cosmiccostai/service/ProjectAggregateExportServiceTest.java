@@ -14,7 +14,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -54,8 +56,29 @@ class ProjectAggregateExportServiceTest {
             assertEquals("客户资料查询", formatter.formatCellValue(sheet.getRow(5).getCell(6)));
         }
 
+        FunctionDescriptionAiService descriptionAi = new FunctionDescriptionAiService() {
+            @Override
+            public Map<String, Map<String, String>> generateDescriptionsByRequirementConcurrently(
+                    Map<String, Map<String, List<FunctionSplitRow>>> requirements,
+                    RequirementProgressCallback progressCallback) {
+                Map<String, Map<String, String>> result =
+                        new LinkedHashMap<String, Map<String, String>>();
+                int groups = 0;
+                for (Map<String, List<FunctionSplitRow>> value : requirements.values()) groups += value.size();
+                if (progressCallback != null) progressCallback.onProgress(0, requirements.size(), 0, groups, requirements.size());
+                for (Map.Entry<String, Map<String, List<FunctionSplitRow>>> requirement : requirements.entrySet()) {
+                    Map<String, String> descriptions = new LinkedHashMap<String, String>();
+                    for (String key : requirement.getValue().keySet()) {
+                        descriptions.put(key, "大模型生成的客户资料查询功能描述。");
+                    }
+                    result.put(requirement.getKey(), descriptions);
+                }
+                if (progressCallback != null) progressCallback.onProgress(requirements.size(), requirements.size(), groups, groups, 0);
+                return result;
+            }
+        };
         WordExportService word = new WordExportService(storage, "target/project-material-qa", "",
-                mock(FunctionDescriptionAiService.class), mock(ExportProgressService.class), validation);
+                descriptionAi, mock(ExportProgressService.class), validation);
         WordExportService.ProjectWordExportResult wordResult = word.exportProjectMaterial(
                 "BSQA", "新疆移动示例项目", rows, outputDir);
         assertEquals(1, wordResult.getFunctionCount());
@@ -66,6 +89,8 @@ class ProjectAggregateExportServiceTest {
                     .anyMatch(text -> text != null && text.contains("需求甲")));
             assertTrue(document.getParagraphs().stream().map(XWPFParagraph::getText)
                     .anyMatch(text -> text != null && text.contains("客户资料查询")));
+            assertTrue(document.getParagraphs().stream().map(XWPFParagraph::getText)
+                    .anyMatch(text -> text != null && text.contains("大模型生成的客户资料查询功能描述")));
         }
     }
 
