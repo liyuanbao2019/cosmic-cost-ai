@@ -67,7 +67,7 @@ scp -r cosmic-cost-ai user@server:/opt/
 ```bash
 export OPENAI_API_KEY="your-api-key"
 export OPENAI_BASE_URL="https://api.deepseek.com/v1"
-export OPENAI_MODEL="deepseek-v4-pro"
+export OPENAI_MODEL="deepseek-flash"
 ```
 
 可选配置：
@@ -140,7 +140,7 @@ sudo vi /etc/cosmic-cost-ai/cosmic-cost-ai.env
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 OPENAI_API_KEY=your-api-key
-OPENAI_MODEL=deepseek-v4-pro
+OPENAI_MODEL=deepseek-flash
 OPENAI_TIMEOUT_SECONDS=180
 OPENAI_MAX_RETRIES=2
 COSMIC_EXCEL_TEMPLATE=templates/附件3-XX项目功能点拆分表V1.0.xlsx

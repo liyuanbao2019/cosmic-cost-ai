@@ -16,6 +16,7 @@ class DeepSeekPromptProfileTest {
         profile.setModel("custom-alias");
         assertTrue(DeepSeekPromptProfile.matches(profile));
 
+        assertTrue(DeepSeekPromptProfile.matches("openai-compatible", "https://api.example/v1", "deepseek-flash"));
         assertTrue(DeepSeekPromptProfile.matches("openai-compatible", "https://api.example/v1", "deepseek-v4-pro"));
         assertTrue(DeepSeekPromptProfile.matches("openai-compatible", "https://api.deepseek.com/v1", "alias"));
         assertFalse(DeepSeekPromptProfile.matches("openai", "https://api.openai.com/v1", "gpt-4o"));

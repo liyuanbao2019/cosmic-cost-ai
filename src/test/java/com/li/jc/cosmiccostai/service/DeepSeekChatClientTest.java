@@ -72,13 +72,13 @@ class DeepSeekChatClientTest {
     }
 
     @Test
-    void deepReviewEnablesHighEffortThinkingWithoutTemperature() {
+    void deepReviewUsesMaximumEffortThinkingWithoutTemperature() {
         client().generate(profile(), "test-key", AiPromptTask.DEEP_REVIEW,
                 "output json", 10, 0);
 
         JsonNode body = requestBody.get();
         assertEquals("enabled", body.path("thinking").path("type").asText());
-        assertEquals("high", body.path("reasoning_effort").asText());
+        assertEquals("max", body.path("reasoning_effort").asText());
         assertEquals(32768, body.path("max_tokens").asInt());
         assertFalse(body.has("temperature"));
     }
@@ -97,15 +97,25 @@ class DeepSeekChatClientTest {
     }
 
     @Test
-    void reuseAdjustmentUsesHighThinkingAndDedicatedSystemRole() {
+    void reuseAdjustmentUsesMaximumThinkingAndDedicatedSystemRole() {
         client().generate(profile(), "test-key", AiPromptTask.REUSE_ADJUSTMENT,
                 "output json", 10, 0);
 
         JsonNode body = requestBody.get();
         assertEquals("enabled", body.path("thinking").path("type").asText());
-        assertEquals("high", body.path("reasoning_effort").asText());
+        assertEquals("max", body.path("reasoning_effort").asText());
         assertTrue(body.path("messages").path(0).path("content").asText()
                 .contains("复用度全表调整"));
+    }
+
+    @Test
+    void initialReviewUsesMaximumThinking() {
+        client().generate(profile(), "test-key", AiPromptTask.INITIAL_REVIEW,
+                "output json", 10, 0);
+
+        JsonNode body = requestBody.get();
+        assertEquals("enabled", body.path("thinking").path("type").asText());
+        assertEquals("max", body.path("reasoning_effort").asText());
     }
 
     @Test
@@ -159,7 +169,7 @@ class DeepSeekChatClientTest {
         AiModelProfile profile = new AiModelProfile();
         profile.setProvider("deepseek");
         profile.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
-        profile.setModel("deepseek-v4-pro");
+        profile.setModel("deepseek-flash");
         return profile;
     }
 

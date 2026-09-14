@@ -73,7 +73,7 @@ class AiReviewValidationDeepSeekPromptTest {
 
     private AiReviewValidationService service() {
         return new AiReviewValidationService(
-                "https://api.deepseek.com/v1", "", "deepseek-v4-pro", 30, 0, null,
+                "https://api.deepseek.com/v1", "", "deepseek-flash", 30, 0, null,
                 new SplitRuleConfigService("target/deepseek-review-test-config/split-check-rules.md"));
     }
 }

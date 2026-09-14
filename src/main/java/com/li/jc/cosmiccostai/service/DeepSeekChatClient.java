@@ -234,10 +234,10 @@ final class DeepSeekChatClient {
                 || task == AiPromptTask.INITIAL_REVIEW;
         body.put("thinking", singleton("type", reasoningTask ? "enabled" : "disabled"));
         if (reasoningTask) {
-            // Initial extraction is now the authoritative structure pass while the
-            // optional deep-review stage is disabled, so prioritize quality over latency.
-            // Other reasoning tasks retain the balanced high setting.
-            body.put("reasoning_effort", task == AiPromptTask.EXTRACTION ? "max" : "high");
+            // Every reasoning stage can affect the final split. DeepSeek V4.1 Flash
+            // supports max natively, so keep the whole split pipeline at its highest
+            // reasoning level rather than weakening later review/reuse decisions.
+            body.put("reasoning_effort", "max");
         }
 
         List<Map<String, String>> messages = new ArrayList<Map<String, String>>();

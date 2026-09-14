@@ -35,6 +35,8 @@ public class AiModelConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(AiModelConfigService.class);
     private static final String MASK_PREFIX = "********";
+    private static final String RETIRED_DEEPSEEK_V4_PRO = "deepseek-v4-pro";
+    private static final String DEEPSEEK_V41_FLASH = "deepseek-flash";
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final DeepSeekChatClient deepSeekChatClient = new DeepSeekChatClient(objectMapper);
     private final Path configPath;
@@ -198,14 +200,38 @@ public class AiModelConfigService {
         if (Files.isRegularFile(configPath)) {
             try {
                 AiModelSettings stored = objectMapper.readValue(Files.readAllBytes(configPath), AiModelSettings.class);
-                return normalize(stored, null);
+                AiModelSettings normalized = normalize(stored, null);
+                if (migrateRetiredDeepSeekModels(normalized)) {
+                    persist(normalized);
+                }
+                return normalized;
             } catch (Exception ex) {
                 throw new BusinessException("读取大模型配置失败：" + configPath, ex);
             }
         }
         AiModelSettings defaults = fromProperties(properties);
+        migrateRetiredDeepSeekModels(defaults);
         persist(defaults);
         return defaults;
+    }
+
+    private boolean migrateRetiredDeepSeekModels(AiModelSettings value) {
+        boolean migrated = false;
+        for (AiModelProfile profile : value.getModels()) {
+            if (RETIRED_DEEPSEEK_V4_PRO.equalsIgnoreCase(text(profile.getModel()))
+                    && DeepSeekPromptProfile.matches(profile)) {
+                profile.setModel(DEEPSEEK_V41_FLASH);
+                if ("DeepSeek 默认模型".equals(profile.getName())) {
+                    profile.setName("DeepSeek V4.1 Flash");
+                }
+                migrated = true;
+            }
+        }
+        if (migrated) {
+            log.info("Migrated retired DeepSeek V4 Pro model profiles to DeepSeek V4.1 Flash ({})",
+                    DEEPSEEK_V41_FLASH);
+        }
+        return migrated;
     }
 
     private AiModelSettings fromProperties(AiModelProperties properties) {

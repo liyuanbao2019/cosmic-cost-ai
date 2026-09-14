@@ -62,7 +62,7 @@
 - 项目级全部需求拆分成功后同时生成两个独立产物：产物 1 是附件1至附件5组成的项目整合送审包；产物 2 是项目内每个需求各自附件1至附件3送审 ZIP 的全量总包。两个产物独立展示和下载，产物 2 个别需求生成失败时仍保留成功项并支持单独重试。
 - 项目级项目支持继续添加已有拆分结果，也支持上传新需求后只对新增需求执行解析、确认和智能拆分；已完成成员不会重跑。
 - 批量面板支持单独重新拆分一个已完成或失败的需求，其他成员结果保持不变；项目级重拆完成后生成新的 `Vn` 材料版本，旧版本目录继续保留。
-- 需求文档的每个初拆分段固定只发送 1 次，始终使用 DeepSeek V4 Pro `reasoning_effort=max`；模型开始处理后持续等待返回，不因页面等待时间自动重发，可由用户手动取消。批量面板实时展示当前分段已等待时间。
+- 需求文档的每个初拆分段固定只发送 1 次，始终使用 DeepSeek V4.1 Flash（API 模型标识 `deepseek-flash`）和 `reasoning_effort=max`；模型开始处理后持续等待返回，不因页面等待时间自动重发，可由用户手动取消。批量面板实时展示当前分段已等待时间。
 - 超过 6 万字的初拆正文优先按功能需求下的同级大章节切成多段；单个大章节仍过大时，再按下级标题或完整 `REQ-L` 原文段落细分，不截断原文段落。分段默认最多 4 路并发、每段只发送一次；某段失败不阻断其它段完成，已成功结果在手动重试时直接复用。复用度 AI 调整复用初拆的同一组 `REQ-L` 分段边界并同样并发处理，最后均由本地代码合并、去重和排序，不额外调用模型合稿。
 - 排队中或正在 AI 识别的单个需求可独立取消，不需要重启服务，也不会停止同批其他需求；请求真正结束后该项显示“已取消”，可直接重新拆分且仍使用 `max`。
 - 需求级和项目级批次完成后均可打开“拆分摘要”，查看批次汇总 CFP、功能过程数、拆分行数及逐需求明细；摘要可直接下载为带公式合计、筛选和失败原因的 Excel，便于传递与归档。
@@ -132,7 +132,7 @@
 - 当前模型的 `provider`、`model` 或 `baseUrl` 识别为 DeepSeek 时，拆分和复用度 AI 调整自动切换到 `deepseek-cosmic-v1`；深度审核专项提示词继续保留，在重新启用深审开关后生效。
 - DeepSeek 专项版不保存第二份 COSMIC 业务规则。各任务只引用 `SplitRuleConfigService` 提供的当前新疆统一 v2.1 规则及同一规则版本号，专项执行协议仅规定处理顺序和输出格式。
 - 拆分固定返回 `{"functions":[]}`，复用度 AI 调整固定返回 `{"decisions":[]}`，深度审核固定返回 `{"suggestions":[]}`；功能描述也返回严格 JSON 对象，调用统一启用 DeepSeek `json_object`。
-- 选择 DeepSeek 后，需求文档初拆统一启用 Thinking 并使用最强 `reasoning_effort=max`；单需求与批量需求共用该设置。复用度全表判断继续使用 `reasoning_effort=high`，功能描述生成保持结构化非 Thinking 模式；深度审核重新启用时使用 `high`。最终结果只读取 JSON `content`，不接收推理过程。
+- 选择 DeepSeek 后，需求文档初拆、复用度全表判断、规则初审以及重新启用后的深度审核均启用 Thinking，并统一使用 V4.1 Flash 支持的最高档 `reasoning_effort=max`；单需求与批量需求共用该设置。功能描述生成保持结构化非 Thinking 模式。最终结果只读取 JSON `content`，不接收推理过程。
 - DeepSeek 请求使用独立 System/User 消息：System 约束唯一规则源和 JSON 输出，User 携带当前任务、完整规则、审核数据及原文证据。
 - 初审“复用与 CFP”跨功能两项相同候选由独立复用度调整节点按全表同一口径自动设为复用、CFP=0.33，并记录参考拆分数据行；正常流水线中后续初审不再重复提示该风险。
 - E 类描述按真实发起方自然表达：用户/UI 主动触发使用“发起/提交”，外部平台上报或回调使用“接收”，外部同步响应使用“获取同步响应数据”；本地保存时会修正明确的“接收+功能过程名+请求”机械模板。
@@ -268,7 +268,7 @@ cosmic:
     provider: deepseek
     base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
     api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
-    model: ${OPENAI_MODEL:deepseek-v4-pro}
+    model: ${OPENAI_MODEL:deepseek-flash}
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:180}
     max-retries: ${OPENAI_MAX_RETRIES:2}
     extraction:
@@ -283,7 +283,7 @@ cosmic:
 ```bash
 OPENAI_BASE_URL=https://api.deepseek.com/v1
 OPENAI_API_KEY=your-api-key
-OPENAI_MODEL=deepseek-v4-pro
+OPENAI_MODEL=deepseek-flash
 OPENAI_TIMEOUT_SECONDS=180
 OPENAI_MAX_RETRIES=2
 COSMIC_AI_EXTRACTION_TIMEOUT_SECONDS=360

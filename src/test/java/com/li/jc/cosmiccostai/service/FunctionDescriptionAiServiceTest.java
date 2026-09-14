@@ -11,13 +11,46 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class FunctionDescriptionAiServiceTest {
+
+    @Test
+    void promptUsesBusinessContextAndExplicitlyRejectsExcelRowConcatenation() {
+        AtomicReference<String> capturedPrompt = new AtomicReference<String>();
+        FunctionDescriptionAiService service = new FunctionDescriptionAiService(
+                "http://model.test", "test-key", "test-model", 30, 0, 1) {
+            @Override
+            protected String callAi(String prompt) {
+                capturedPrompt.set(prompt);
+                return "{\"G001\":\"在客户服务人员受理查询时，系统校验客户编号并定位客户档案，汇总基础资料与当前业务状态后向服务人员反馈，便于其准确响应客户诉求。\"}";
+            }
+        };
+        FunctionSplitRow row = row("客户服务", "客户资料查询");
+        row.setFunctionalUser("客户服务人员");
+        row.setTriggerEvent("客户服务人员提交客户编号查询客户资料");
+        row.setFunctionDescription("查询客户基础资料和当前业务状态。");
+        row.setSequenceDiagram("客户服务人员->系统: 提交客户编号; 系统->客户服务人员: 返回客户资料");
+
+        Map<String, String> descriptions = service.generateDescriptions(groups(row));
+
+        String prompt = capturedPrompt.get();
+        assertEquals(1, descriptions.size());
+        assertTrue(prompt.contains("功能用户: 客户服务人员"));
+        assertTrue(prompt.contains("触发事件: 客户服务人员提交客户编号查询客户资料"));
+        assertTrue(prompt.contains("Excel已有功能描述: 查询客户基础资料和当前业务状态。"));
+        assertTrue(prompt.contains("业务交互参考: 客户服务人员->系统"));
+        assertTrue(prompt.contains("不得按表格行序逐项翻译"));
+        assertTrue(prompt.contains("业务场景与目的"));
+        assertTrue(prompt.contains("180到300字"));
+        assertFalse(prompt.contains("概括整个功能过程从输入、读取、写入到输出"));
+    }
 
     @Test
     void projectDescriptionsRunRequirementsConcurrentlyAndReportProgress() {

@@ -923,7 +923,7 @@ public class BatchSplitService {
                     item.setStatus("FAILED");
                     item.setStage("CANCELLED");
                     item.setStageMessage("当前需求已取消，其他需求继续执行；可重新拆分当前需求");
-                    item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4 Pro max。");
+                    item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4.1 Flash max。");
                     item.setFinishedAt(now());
                 } else {
                     item.setStatus("RUNNING");
@@ -1419,8 +1419,8 @@ public class BatchSplitService {
                             item.setAiAttemptDeadlineAt(null);
                             item.setStageMessage(maxAttempts > 1
                                     ? "AI 识别第 " + attempt + "/" + maxAttempts
-                                        + " 段，DeepSeek V4 Pro max；当前分段只发送一次，不自动重试"
-                                    : "AI 识别单次请求，DeepSeek V4 Pro max；持续等待模型返回，不自动重试");
+                                        + " 段，DeepSeek V4.1 Flash max；当前分段只发送一次，不自动重试"
+                                    : "AI 识别单次请求，DeepSeek V4.1 Flash max；持续等待模型返回，不自动重试");
                         }
                     });
                 }
@@ -1527,7 +1527,7 @@ public class BatchSplitService {
                 item.setStatus("FAILED");
                 item.setStage("CANCELLED");
                 item.setStageMessage("当前需求已取消，其他需求继续执行；可重新拆分当前需求");
-                item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4 Pro max。");
+                item.setErrorMessage("AI 识别已由用户取消；重新拆分时仍使用 DeepSeek V4.1 Flash max。");
                 item.setFinishedAt(now());
                 item.setAiAttemptDeadlineAt(null);
             }

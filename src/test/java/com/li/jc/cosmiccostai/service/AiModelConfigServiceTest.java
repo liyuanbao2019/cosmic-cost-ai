@@ -85,4 +85,39 @@ class AiModelConfigServiceTest {
         service.endCancellableRequest("project-1");
         assertEquals("alternate", service.profileForRequest("project-1").getId());
     }
+
+    @Test
+    void migratesPersistedDeepSeekV4ProProfileToV41Flash() throws Exception {
+        Path config = tempDir.resolve("legacy-deepseek-ai-models.json");
+        String legacy = "{\n"
+                + "  \"selectedId\": \"deepseek-default\",\n"
+                + "  \"models\": [{\n"
+                + "    \"id\": \"deepseek-default\",\n"
+                + "    \"name\": \"DeepSeek 默认模型\",\n"
+                + "    \"provider\": \"deepseek\",\n"
+                + "    \"baseUrl\": \"https://api.deepseek.com/v1\",\n"
+                + "    \"apiKey\": \"test-key\",\n"
+                + "    \"model\": \"deepseek-v4-pro\",\n"
+                + "    \"timeoutSeconds\": 720,\n"
+                + "    \"maxRetries\": 2,\n"
+                + "    \"maxConcurrency\": 1000,\n"
+                + "    \"chunkTimeoutSeconds\": 500,\n"
+                + "    \"chunkMaxRetries\": 1,\n"
+                + "    \"chunkParallelism\": 4,\n"
+                + "    \"chunkPromptChars\": 9000,\n"
+                + "    \"evidenceChars\": 5000,\n"
+                + "    \"maxRequestRows\": 10000\n"
+                + "  }]\n"
+                + "}";
+        Files.write(config, legacy.getBytes(StandardCharsets.UTF_8));
+        AiModelProperties properties = new AiModelProperties();
+        properties.setConfigPath(config.toString());
+
+        AiModelConfigService service = new AiModelConfigService(properties);
+
+        assertEquals("deepseek-flash", service.getActiveProfile().getModel());
+        assertEquals("DeepSeek V4.1 Flash", service.getActiveProfile().getName());
+        assertTrue(new String(Files.readAllBytes(config), StandardCharsets.UTF_8)
+                .contains("\"model\" : \"deepseek-flash\""));
+    }
 }

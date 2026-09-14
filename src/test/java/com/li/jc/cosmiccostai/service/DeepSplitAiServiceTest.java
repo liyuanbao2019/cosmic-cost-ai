@@ -97,7 +97,7 @@ class DeepSplitAiServiceTest {
 
     @Test
     void deepSeekDeepReviewUsesDedicatedObjectContractAndSingleRuleSource() {
-        DeepSplitAiService service = service(8000, 3000, "deepseek-v4-pro");
+        DeepSplitAiService service = service(8000, 3000, "deepseek-flash");
         DeepSplitAiService.DeepSplitJobState state = new DeepSplitAiService.DeepSplitJobState();
         state.setOriginalRows(Collections.singletonList(row("用户导出", "生成导出文件")));
         DeepSplitAiService.DeepSplitChunk chunk = new DeepSplitAiService.DeepSplitChunk();
@@ -118,7 +118,7 @@ class DeepSplitAiServiceTest {
     @Test
     @SuppressWarnings("unchecked")
     void acceptsDeepSeekObjectWrapperForDeepReview() throws Exception {
-        DeepSplitAiService service = service(8000, 3000, "deepseek-v4-pro");
+        DeepSplitAiService service = service(8000, 3000, "deepseek-flash");
         Method method = DeepSplitAiService.class.getDeclaredMethod("parseSuggestions", String.class);
         method.setAccessible(true);
 

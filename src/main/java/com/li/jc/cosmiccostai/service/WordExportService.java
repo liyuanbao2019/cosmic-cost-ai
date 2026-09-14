@@ -529,8 +529,10 @@ public class WordExportService {
         if (!StringUtils.hasText(row.getFunctionDescription())) {
             row.setFunctionDescription(row.getSubProcessDescription());
         }
-        row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
-                row.getDataGroup(), row.getDataAttributes()));
+        if (!StringUtils.hasText(row.getSequenceDiagram())) {
+            row.setSequenceDiagram(defaultSequenceDiagram(row.getMovementType(), row.getSubProcessDescription(),
+                    row.getDataGroup(), row.getDataAttributes()));
+        }
     }
 
     private void replaceFunctionRequirementSection(XWPFDocument document, List<FunctionGroup> groups) {

@@ -368,13 +368,16 @@ public class FunctionDescriptionAiService {
 
     private String buildPrompt(Map<String, List<FunctionSplitRow>> groups, Map<String, String> externalKeyToOriginalKey) {
         StringBuilder builder = new StringBuilder();
-        builder.append("你是COSMIC功能点拆分专家。请根据每个功能过程下的全部子过程，生成面向专家评审的功能描述。").append(System.lineSeparator());
+        builder.append("你是资深业务需求分析师。请把结构化拆分信息还原为可直接写入需求说明书、面向专家评审的功能描述。").append(System.lineSeparator());
         builder.append("要求：").append(System.lineSeparator());
-        builder.append("1. 每个功能过程输出一段中文功能描述，80到180字。").append(System.lineSeparator());
-        builder.append("2. 不能只复述单个子过程，要概括整个功能过程从输入、读取、写入到输出的业务目的和结果。").append(System.lineSeparator());
-        builder.append("3. 描述要拟人化、业务化，说清楚系统为用户完成什么事、处理哪些业务数据、形成什么结果。").append(System.lineSeparator());
-        builder.append("4. 不要使用“支撑”“赋能”“实现技术能力”等空泛词，不要编造子过程之外的新功能。").append(System.lineSeparator());
-        builder.append("5. 只输出严格JSON对象，key为我提供的key，value为功能描述，不要Markdown。").append(System.lineSeparator());
+        builder.append("1. 每个功能过程输出一段180到300字的中文描述，写成2到4个衔接自然的完整句子，不使用固定套话开头。").append(System.lineSeparator());
+        builder.append("2. 按需求说明书的表达方式交代业务场景与目的、使用者及触发条件、核心业务处理与判断、涉及的业务对象，以及成功后的业务结果或反馈；信息确有依据时再写异常或边界情况。").append(System.lineSeparator());
+        builder.append("3. 必须综合理解全部信息后重新组织，不得按表格行序逐项翻译，不得用“首先/然后/最后”串联子过程，也不得把功能过程名和子过程描述简单扩句拼接。").append(System.lineSeparator());
+        builder.append("4. 成文中不要出现COSMIC、E/R/W/X、数据移动、子过程、数据组、数据属性、Excel等拆分或计量术语。不同功能过程的描述应体现各自业务对象和结果，不能写成替换名称后仍通用的模板句。").append(System.lineSeparator());
+        builder.append("5. 可以从已有事实归纳业务意图和处理关系，但不得虚构未提供的角色、外部系统、审批环节、阈值、状态、计算公式或异常规则；信息不足时采用审慎、具体的业务表述，不用空话补字数。").append(System.lineSeparator());
+        builder.append("6. “Excel已有功能描述”仅作为事实线索，需结合其他字段深化和改写，不得原样照抄；“业务交互参考”只用于理解参与方和先后关系。").append(System.lineSeparator());
+        builder.append("7. 避免“支撑、赋能、实现技术能力、完成相关处理、形成输入读取写入输出结果”等空泛或计量式措辞。").append(System.lineSeparator());
+        builder.append("8. 只输出严格JSON对象，key为我提供的key，value为功能描述，不要Markdown，不要输出分析过程。").append(System.lineSeparator());
         builder.append(System.lineSeparator()).append("待生成内容：").append(System.lineSeparator());
         for (Map.Entry<String, String> keyEntry : externalKeyToOriginalKey.entrySet()) {
             List<FunctionSplitRow> rows = groups.get(keyEntry.getValue());
@@ -386,6 +389,16 @@ public class FunctionDescriptionAiService {
             builder.append("  功能过程: ").append(text(first.getFunctionProcess())).append(System.lineSeparator());
             builder.append("  模块: ").append(text(first.getLevel1Module())).append(" / ")
                     .append(text(first.getLevel2Module())).append(" / ").append(text(first.getLevel3Module())).append(System.lineSeparator());
+            builder.append("  功能用户: ").append(text(first.getFunctionalUser())).append(System.lineSeparator());
+            builder.append("  触发事件: ").append(text(first.getTriggerEvent())).append(System.lineSeparator());
+            String existingDescription = collectExistingDescriptions(rows);
+            if (StringUtils.hasText(existingDescription)) {
+                builder.append("  Excel已有功能描述: ").append(existingDescription).append(System.lineSeparator());
+            }
+            String interactionReference = collectInteractionReferences(rows);
+            if (StringUtils.hasText(interactionReference)) {
+                builder.append("  业务交互参考: ").append(interactionReference).append(System.lineSeparator());
+            }
             builder.append("  子过程:").append(System.lineSeparator());
             for (FunctionSplitRow row : rows) {
                 builder.append("    - 类型: ").append(text(row.getMovementType()))
@@ -396,6 +409,64 @@ public class FunctionDescriptionAiService {
             }
         }
         return builder.toString();
+    }
+
+    private String collectExistingDescriptions(List<FunctionSplitRow> rows) {
+        List<String> values = new ArrayList<String>();
+        List<String> structuralLabels = new ArrayList<String>();
+        for (FunctionSplitRow row : rows) {
+            String process = text(row.getFunctionProcess());
+            String subProcess = text(row.getSubProcessDescription());
+            if (StringUtils.hasText(process) && !structuralLabels.contains(process)) {
+                structuralLabels.add(process);
+            }
+            if (StringUtils.hasText(subProcess) && !structuralLabels.contains(subProcess)) {
+                structuralLabels.add(subProcess);
+            }
+        }
+        for (FunctionSplitRow row : rows) {
+            String value = text(row.getFunctionDescription());
+            if (!StringUtils.hasText(value)
+                    || "__AI_FUNCTION_DESCRIPTION_PENDING__".equals(value)
+                    || structuralLabels.contains(value)
+                    || values.contains(value)) {
+                continue;
+            }
+            values.add(value);
+            if (values.size() >= 3) {
+                break;
+            }
+        }
+        return joinPromptValues(values, 1200);
+    }
+
+    private String collectInteractionReferences(List<FunctionSplitRow> rows) {
+        List<String> values = new ArrayList<String>();
+        for (FunctionSplitRow row : rows) {
+            String value = text(row.getSequenceDiagram()).replace('\r', ' ').replace('\n', ' ');
+            if (StringUtils.hasText(value) && !values.contains(value)) {
+                values.add(value);
+            }
+            if (values.size() >= 3) {
+                break;
+            }
+        }
+        return joinPromptValues(values, 1200);
+    }
+
+    private String joinPromptValues(List<String> values, int maxLength) {
+        StringBuilder result = new StringBuilder();
+        for (String value : values) {
+            if (result.length() > 0) {
+                result.append("；");
+            }
+            int remaining = maxLength - result.length();
+            if (remaining <= 0) {
+                break;
+            }
+            result.append(value.length() <= remaining ? value : value.substring(0, remaining));
+        }
+        return result.toString();
     }
 
     protected String callAi(String prompt) {

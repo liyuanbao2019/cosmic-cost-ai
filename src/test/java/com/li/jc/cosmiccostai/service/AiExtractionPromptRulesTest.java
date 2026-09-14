@@ -75,7 +75,7 @@ class AiExtractionPromptRulesTest {
     @Test
     void deepSeekPromptUsesDedicatedProtocolAndTheSameCompleteRuleSource() throws Exception {
         AiExtractionService service = new AiExtractionService(new FileStorageService("storage"),
-                "https://api.deepseek.com/v1", "", "deepseek-v4-pro", 1, 0,
+                "https://api.deepseek.com/v1", "", "deepseek-flash", 1, 0,
                 "classpath:/static/split-check-rules.md");
         Method method = AiExtractionService.class.getDeclaredMethod("buildPrompt", String.class, String.class);
         method.setAccessible(true);

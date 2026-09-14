@@ -65,7 +65,7 @@ cosmic:
     # 大模型 API Key；优先读取 OPENAI_API_KEY，其次读取 DEEPSEEK_API_KEY
     api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
     # 大模型名称；用于 AI 拆分、AI 深度审核、导出 Word 时生成功能描述等
-    model: ${OPENAI_MODEL:deepseek-v4-pro}
+    model: ${OPENAI_MODEL:deepseek-flash}
     # 普通 AI 调用超时时间，单位秒；大文档或导出功能描述较慢时可适当调大
     timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
     # 普通 AI 调用失败后的最大重试次数；网络抖动或模型服务短暂失败时使用
@@ -118,11 +118,11 @@ cosmic:
     # 可在 YAML 中预置多个 OpenAI 兼容模型；首次启动后也可在“大模型管理”页面维护
     models:
       - id: deepseek-default
-        name: DeepSeek 默认模型
+        name: DeepSeek V4.1 Flash
         provider: deepseek
         base-url: ${OPENAI_BASE_URL:https://api.deepseek.com/v1}
         api-key: ${OPENAI_API_KEY:${DEEPSEEK_API_KEY:}}
-        model: ${OPENAI_MODEL:deepseek-v4-pro}
+        model: ${OPENAI_MODEL:deepseek-flash}
         timeout-seconds: ${OPENAI_TIMEOUT_SECONDS:720}
         max-retries: ${OPENAI_MAX_RETRIES:2}
         max-concurrency: ${OPENAI_MAX_CONCURRENCY:1000}
