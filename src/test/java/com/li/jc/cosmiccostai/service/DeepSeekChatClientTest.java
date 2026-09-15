@@ -104,6 +104,7 @@ class DeepSeekChatClientTest {
         JsonNode body = requestBody.get();
         assertEquals("enabled", body.path("thinking").path("type").asText());
         assertEquals("max", body.path("reasoning_effort").asText());
+        assertEquals(65536, body.path("max_tokens").asInt());
         assertTrue(body.path("messages").path(0).path("content").asText()
                 .contains("复用度全表调整"));
     }

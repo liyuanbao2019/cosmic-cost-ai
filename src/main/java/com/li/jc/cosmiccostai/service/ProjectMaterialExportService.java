@@ -21,6 +21,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -206,6 +207,63 @@ public class ProjectMaterialExportService {
                                                              List<String> projectIds,
                                                              RequirementArchiveProgressListener listener) {
         return exportRequirementArchives(batchId, projectIds, listener, true);
+    }
+
+    /**
+     * Refreshes and packages only each requirement's final attachment 3 spreadsheet.
+     * This path deliberately skips Word and every other review-package attachment.
+     */
+    public RequirementBatchArchive exportRequirementExcelArtifacts(String batchId,
+                                                                   List<String> projectIds,
+                                                                   RequirementArchiveProgressListener listener) {
+        if (projectIds == null || projectIds.isEmpty()) {
+            throw new BusinessException("最终 Excel 整合包至少需要一个已完成需求。");
+        }
+        Path outputDir = outputBaseDir.resolve("batch-requirement-excels").resolve(batchId);
+        try {
+            Files.createDirectories(outputDir);
+        } catch (IOException ex) {
+            throw new BusinessException("创建最终 Excel 整合目录失败。", ex);
+        }
+
+        List<Path> excelFiles = new ArrayList<Path>();
+        List<String> failedProjects = new ArrayList<String>();
+        Map<String, Integer> names = new LinkedHashMap<String, Integer>();
+        for (String projectId : projectIds) {
+            try {
+                ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
+                if (metadata == null) {
+                    throw new BusinessException("需求项目不存在");
+                }
+                excelExportService.exportFunctionPointWorkbook(projectId);
+                metadata = fileStorageService.loadMetadata(projectId);
+                Path excel = requiredExport(metadata.getExcelOutputPath(), "附件3功能点拆分表");
+                String baseName = sanitizeFileName(requirementArchiveBaseName(metadata));
+                int duplicate = names.containsKey(baseName) ? names.get(baseName) + 1 : 1;
+                names.put(baseName, duplicate);
+                String fileName = baseName + (duplicate > 1 ? "-" + duplicate : "")
+                        + "-最终功能点拆分表.xlsx";
+                Path staged = outputDir.resolve(fileName);
+                Files.copy(excel, staged, StandardCopyOption.REPLACE_EXISTING);
+                excelFiles.add(staged);
+            } catch (RuntimeException | IOException ex) {
+                failedProjects.add(projectId + "：" + rootMessage(ex));
+            }
+            if (listener != null) {
+                listener.onProgress(excelFiles.size(), failedProjects.size(), projectIds.size());
+            }
+        }
+        if (excelFiles.isEmpty()) {
+            throw new BusinessException("没有成功生成任何最终 Excel：" + String.join("；", failedProjects));
+        }
+        Path batchArchive = outputDir.resolve(batchId + "-全部需求最终功能点拆分表.zip");
+        writeArchive(batchArchive, excelFiles);
+
+        RequirementBatchArchive result = new RequirementBatchArchive();
+        result.archivePath = batchArchive;
+        result.successCount = excelFiles.size();
+        result.failedProjects.addAll(failedProjects);
+        return result;
     }
 
     /** Wraps the per-requirement exports just refreshed by project material generation without writing them twice. */
@@ -541,7 +599,7 @@ public class ProjectMaterialExportService {
                 zip.closeEntry();
             }
         } catch (IOException ex) {
-            throw new BusinessException("生成项目级送审材料压缩包失败：" + ex.getMessage(), ex);
+            throw new BusinessException("生成压缩包失败：" + ex.getMessage(), ex);
         }
     }
 

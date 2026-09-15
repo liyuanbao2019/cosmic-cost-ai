@@ -87,7 +87,7 @@ class AiModelConfigServiceTest {
     }
 
     @Test
-    void migratesPersistedDeepSeekV4ProProfileToV41Flash() throws Exception {
+    void migratesPersistedRetiredV4FlashNameToV41FlashModel() throws Exception {
         Path config = tempDir.resolve("legacy-deepseek-ai-models.json");
         String legacy = "{\n"
                 + "  \"selectedId\": \"deepseek-default\",\n"
@@ -97,7 +97,7 @@ class AiModelConfigServiceTest {
                 + "    \"provider\": \"deepseek\",\n"
                 + "    \"baseUrl\": \"https://api.deepseek.com/v1\",\n"
                 + "    \"apiKey\": \"test-key\",\n"
-                + "    \"model\": \"deepseek-v4-pro\",\n"
+                + "    \"model\": \"deepseek-v4-flash\",\n"
                 + "    \"timeoutSeconds\": 720,\n"
                 + "    \"maxRetries\": 2,\n"
                 + "    \"maxConcurrency\": 1000,\n"

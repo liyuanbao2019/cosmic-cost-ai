@@ -81,6 +81,10 @@ cosmic:
       partition-parallelism: ${COSMIC_AI_PARTITION_PARALLELISM:4}
       # 优先按大章节拆；单个大章节仍过大时，按下级标题或完整原文段落继续拆
       partition-chars: ${COSMIC_AI_PARTITION_CHARS:18000}
+      # 复用度调整在初拆章节内按完整功能过程二次切段，控制单段结构化输出规模
+      reuse-partition-rows: ${COSMIC_AI_REUSE_PARTITION_ROWS:300}
+      # 复用度单段目标行 JSON 的字符上限；与行数阈值任一命中即在完整功能过程边界切段
+      reuse-partition-target-chars: ${COSMIC_AI_REUSE_PARTITION_TARGET_CHARS:140000}
     batch-split:
       # 批量拆分按项目并发；单项目的初拆与复用度阶段还会在章节边界内受控并发
       worker-count: ${COSMIC_BATCH_SPLIT_WORKERS:1000}

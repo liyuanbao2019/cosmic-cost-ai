@@ -274,7 +274,7 @@
             <option value="2026年网优扩容">2026年网优扩容</option>
             <option value="2026年共享采集扩容">2026年共享采集扩容</option>
             <option value="2026年资源管理项目">2026年资源管理项目</option>
-            <option value="2025年家客业务运维支撑系统研发项目">2025年家客业务运维支撑系统研发项目</option>
+            <option value="2026年家客运维扩容">2026年家客运维扩容</option>
             <option value="中国移动新疆公司2026年性能管理系统研发项目">中国移动新疆公司2026年性能管理系统研发项目</option>
           </select>
         </div>
@@ -422,6 +422,16 @@
           <p id="batchProjectMaterialProgressDetail" class="muted"></p>
         </div>
         <div id="batchProjectMaterialFiles" class="batch-material-file-list"></div>
+      </div>
+      <div id="batchRequirementExcels" class="batch-project-materials hidden">
+        <div class="batch-materials-heading">
+          <div>
+            <h3>批量最终 Excel 整合包</h3>
+            <p id="batchRequirementExcelSummary" class="muted">仅生成每个需求的最终附件3功能点拆分表，不生成 Word 和完整送审包。</p>
+          </div>
+          <button id="batchRequirementExcelBtn" type="button" onclick="exportBatchRequirementExcels()">生成最终 Excel 整合包</button>
+        </div>
+        <div id="batchRequirementExcelFiles" class="batch-material-file-list"></div>
       </div>
       <div id="batchRequirementMaterials" class="batch-project-materials hidden">
         <div class="batch-materials-heading">
@@ -683,6 +693,20 @@
           <tbody id="reviewBody"></tbody>
         </table>
       </div>
+      <div id="reviewPagination" class="review-pagination hidden">
+        <span id="reviewPageSummary" class="review-page-summary">共 0 行</span>
+        <div class="review-page-controls">
+          <label for="reviewPageSize">每页</label>
+          <select id="reviewPageSize" onchange="setReviewPageSize(this.value)">
+            <option value="50" selected>50 行</option>
+            <option value="100">100 行</option>
+            <option value="200">200 行</option>
+          </select>
+          <button id="reviewPrevPage" type="button" class="ghost mini" onclick="changeReviewPage(-1)">上一页</button>
+          <span id="reviewPageIndicator">第 1 / 1 页</span>
+          <button id="reviewNextPage" type="button" class="ghost mini" onclick="changeReviewPage(1)">下一页</button>
+        </div>
+      </div>
     </section>
 
     <section id="outputPanel" class="panel hidden">
@@ -695,6 +719,8 @@
     let currentProjectId = "";
     let splitRows = [];
     let selectedRows = {};
+    let reviewPage = 1;
+    let reviewPageSize = 50;
     let reviewDensity = "comfortable";
     let cellEditorState = null;
     let splitMode = "document";
@@ -1813,6 +1839,8 @@
       currentProjectId = "";
       splitRows = [];
       selectedRows = {};
+      reviewPage = 1;
+      reviewPageSize = 50;
       reviewDensity = "comfortable";
       cellEditorState = null;
       currentProjectSourceType = "";
@@ -2174,6 +2202,7 @@
       $("batchStartBtn").textContent = "请先修正问题文档";
       $("batchRetryBtn").classList.add("hidden");
       $("batchProjectMaterials").classList.add("hidden");
+      $("batchRequirementExcels").classList.add("hidden");
       $("batchRequirementMaterials").classList.add("hidden");
       selectBatchExcelImportFailure(0);
     }
@@ -2349,7 +2378,8 @@
       return !!job && (job.status === "PREPARING" || job.status === "RUNNING"
         || job.status === "GENERATING_MATERIALS"
         || job.projectMaterialStatus === "GENERATING"
-        || job.requirementMaterialStatus === "GENERATING");
+        || job.requirementMaterialStatus === "GENERATING"
+        || job.requirementExcelStatus === "GENERATING");
     }
 
     function renderBatchSplitJob() {
@@ -2379,6 +2409,7 @@
       $("batchSplitSummary").textContent = batchJobSummary(job);
       renderBatchDocumentList(job.items || []);
       renderBatchProjectMaterials(job);
+      renderBatchRequirementExcels(job);
       renderBatchRequirementMaterials(job);
 
       const interruptedCount = (job.items || []).filter(function (item) {
@@ -2714,14 +2745,62 @@
       }).join("") || "<span class=\"muted\">材料尚未生成。</span>";
     }
 
-    function renderBatchRequirementMaterials(job) {
-      const panel = $("batchRequirementMaterials");
+    function batchRequirementExportsFinished(job) {
       const projectLevel = job && job.splitLevel === "PROJECT";
       const processingFinished = job && Number(job.completed || 0) > 0
         && Number(job.running || 0) === 0 && Number(job.queued || 0) === 0
         && Number(job.preparing || 0) === 0 && Number(job.parseQueued || 0) === 0;
-      const finished = processingFinished && (!projectLevel
+      return processingFinished && (!projectLevel
         || Number(job.completed || 0) === Number(job.total || 0));
+    }
+
+    function renderBatchRequirementExcels(job) {
+      const panel = $("batchRequirementExcels");
+      const finished = batchRequirementExportsFinished(job);
+      panel.classList.toggle("hidden", !finished);
+      if (!finished) return;
+      const status = job.requirementExcelStatus || "NOT_STARTED";
+      const button = $("batchRequirementExcelBtn");
+      const archive = job.requirementExcelArchive;
+      $("batchRequirementExcelSummary").textContent = job.requirementExcelMessage
+        || "仅生成 " + Number(job.completed || 0)
+        + " 个需求的最终附件3功能点拆分表，不调用功能描述 AI，不生成 Word 和完整送审包。";
+      button.disabled = status === "GENERATING";
+      button.textContent = status === "GENERATING" ? "正在生成最终 Excel…"
+        : ((status === "COMPLETED" || status === "PARTIAL_COMPLETED")
+          ? "重新生成最终 Excel 整合包" : "生成最终 Excel 整合包");
+      $("batchRequirementExcelFiles").innerHTML = archive
+        ? "<a class=\"batch-material-file primary\" href=\"" + escapeHtml(archive.downloadUrl)
+          + "\" download><b>下载全部需求最终 Excel</b><span>"
+          + escapeHtml(archive.name || "最终Excel整合包.zip") + "</span></a>"
+        : "<span class=\"muted\">最终 Excel 整合包尚未生成。</span>";
+    }
+
+    async function exportBatchRequirementExcels() {
+      if (!currentBatchSplitJob || !currentBatchSplitJob.batchId) return;
+      const count = Number(currentBatchSplitJob.completed || 0);
+      if (!window.confirm("确认为 " + count
+        + " 个需求生成最终功能点拆分表并打成 ZIP？\n\n不会生成 Word 或完整送审包。")) return;
+      const button = $("batchRequirementExcelBtn");
+      button.disabled = true;
+      button.textContent = "正在提交…";
+      try {
+        const response = await request("/api/projects/batch-split/"
+          + encodeURIComponent(currentBatchSplitJob.batchId) + "/excel-artifacts", { method: "POST" });
+        currentBatchSplitJob = response.data;
+        renderBatchSplitJob();
+        startBatchSplitPolling();
+        setMessage("已开始生成批量最终 Excel，完成后可直接下载 ZIP。", "success");
+      } catch (error) {
+        button.disabled = false;
+        showDialog("生成最终 Excel 整合包失败", error.message || "请稍后再试。");
+      }
+    }
+
+    function renderBatchRequirementMaterials(job) {
+      const panel = $("batchRequirementMaterials");
+      const projectLevel = job && job.splitLevel === "PROJECT";
+      const finished = batchRequirementExportsFinished(job);
       panel.classList.toggle("hidden", !finished);
       if (!finished) return;
       const status = job.requirementMaterialStatus || "NOT_STARTED";
@@ -4863,10 +4942,12 @@
         tr.appendChild(td);
         body.appendChild(tr);
         updateFilteredCount(0);
+        renderReviewPagination(0);
+        updateSelectAllRowsState([]);
         return;
       }
-      const visibleRows = filteredRowEntries();
-      if (!visibleRows.length) {
+      const filteredRows = filteredRowEntries();
+      if (!filteredRows.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
         td.colSpan = 17;
@@ -4875,10 +4956,14 @@
         tr.appendChild(td);
         body.appendChild(tr);
         updateFilteredCount(0);
+        renderReviewPagination(0);
+        updateSelectAllRowsState([]);
         return;
       }
 
+      const visibleRows = currentReviewPageEntries(filteredRows);
       const spanMap = mergeCellsEnabled ? buildMergeSpanMap(visibleRows) : null;
+      const fragment = document.createDocumentFragment();
 
       visibleRows.forEach(function (entry, vIndex) {
         const row = entry.row;
@@ -4908,9 +4993,12 @@
         tr.appendChild(cfp);
         addActionCell(tr, index);
         paintValidationRow(tr, index);
-        body.appendChild(tr);
+        fragment.appendChild(tr);
       });
-      updateFilteredCount(visibleRows.length);
+      body.appendChild(fragment);
+      updateFilteredCount(filteredRows.length);
+      renderReviewPagination(filteredRows.length);
+      updateSelectAllRowsState(visibleRows);
       window.requestAnimationFrame(function () {
         document.querySelectorAll("#reviewTable .table-cell-input").forEach(autoResizeCellInput);
       });
@@ -5016,9 +5104,6 @@
       });
       td.appendChild(input);
       tr.appendChild(td);
-      window.requestAnimationFrame(function () {
-        autoResizeCellInput(input);
-      });
     }
 
     function addRowNumberCell(tr, index) {
@@ -5290,6 +5375,7 @@
     }
 
     function onReviewFilterChange() {
+      reviewPage = 1;
       renderTable();
     }
 
@@ -5303,7 +5389,69 @@
       if ($("filterValidation")) {
         $("filterValidation").value = "";
       }
+      reviewPage = 1;
       renderTable();
+    }
+
+    function currentReviewPageEntries(filteredRows) {
+      const rows = filteredRows || [];
+      const totalPages = Math.max(1, Math.ceil(rows.length / reviewPageSize));
+      reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
+      const start = (reviewPage - 1) * reviewPageSize;
+      return rows.slice(start, start + reviewPageSize);
+    }
+
+    function setReviewPageSize(value) {
+      const parsed = Number(value);
+      reviewPageSize = [50, 100, 200].indexOf(parsed) >= 0 ? parsed : 50;
+      reviewPage = 1;
+      renderTable();
+      scrollReviewTableToTop();
+    }
+
+    function changeReviewPage(delta) {
+      const totalRows = filteredRowEntries().length;
+      const totalPages = Math.max(1, Math.ceil(totalRows / reviewPageSize));
+      reviewPage = Math.max(1, Math.min(reviewPage + Number(delta || 0), totalPages));
+      renderTable();
+      scrollReviewTableToTop();
+    }
+
+    function scrollReviewTableToTop() {
+      const wrap = document.querySelector("#reviewPanel .table-wrap");
+      if (wrap) {
+        wrap.scrollTop = 0;
+      }
+    }
+
+    function renderReviewPagination(totalRows) {
+      const pagination = $("reviewPagination");
+      if (!pagination) {
+        return;
+      }
+      const total = Math.max(0, Number(totalRows || 0));
+      const totalPages = Math.max(1, Math.ceil(total / reviewPageSize));
+      reviewPage = Math.max(1, Math.min(reviewPage, totalPages));
+      const start = total ? (reviewPage - 1) * reviewPageSize + 1 : 0;
+      const end = total ? Math.min(reviewPage * reviewPageSize, total) : 0;
+      pagination.classList.toggle("hidden", total === 0);
+      $("reviewPageSummary").textContent = "显示 " + start + "-" + end + "，共 " + total + " 行";
+      $("reviewPageIndicator").textContent = "第 " + reviewPage + " / " + totalPages + " 页";
+      $("reviewPrevPage").disabled = reviewPage <= 1;
+      $("reviewNextPage").disabled = reviewPage >= totalPages;
+      $("reviewPageSize").value = String(reviewPageSize);
+    }
+
+    function updateSelectAllRowsState(visibleRows) {
+      const checkbox = $("selectAllRows");
+      if (!checkbox) {
+        return;
+      }
+      const rows = visibleRows || [];
+      const selectedCount = rows.filter(function (entry) { return !!selectedRows[entry.index]; }).length;
+      checkbox.checked = rows.length > 0 && selectedCount === rows.length;
+      checkbox.indeterminate = selectedCount > 0 && selectedCount < rows.length;
+      checkbox.title = "选择当前页 " + rows.length + " 行";
     }
 
     function updateFilteredCount(count) {
@@ -5454,7 +5602,8 @@
         }
       });
       document.querySelectorAll("#reviewPanel .review-actions button, #reviewPanel .batch-tools button").forEach(function (button) {
-        if (button.id === "deepSplitBtn" || button.id === "densityBtn" || button.id === "mergeCellsBtn") {
+        if (button.id === "deepSplitBtn" || button.id === "densityBtn" || button.id === "mergeCellsBtn"
+            || button.id === "reviewPrevPage" || button.id === "reviewNextPage") {
           return;
         }
         button.disabled = locked;
@@ -5609,7 +5758,7 @@
     }
 
     function toggleAllRows(checked) {
-      const visibleRows = filteredRowEntries();
+      const visibleRows = currentReviewPageEntries(filteredRowEntries());
       const visibleMap = {};
       visibleRows.forEach(function (entry) {
         visibleMap[entry.index] = true;

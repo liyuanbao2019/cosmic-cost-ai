@@ -43,6 +43,11 @@ public class BatchSplitJobResponse {
     private int requirementMaterialSuccessCount;
     private int requirementMaterialFailedCount;
     private ProjectMaterialFileResponse requirementMaterialArchive;
+    private String requirementExcelStatus;
+    private String requirementExcelMessage;
+    private int requirementExcelSuccessCount;
+    private int requirementExcelFailedCount;
+    private ProjectMaterialFileResponse requirementExcelArchive;
     private List<BatchSplitItemResponse> items = new ArrayList<BatchSplitItemResponse>();
 
     public String getBatchId() { return batchId; }
@@ -121,6 +126,16 @@ public class BatchSplitJobResponse {
     public void setRequirementMaterialFailedCount(int requirementMaterialFailedCount) { this.requirementMaterialFailedCount = requirementMaterialFailedCount; }
     public ProjectMaterialFileResponse getRequirementMaterialArchive() { return requirementMaterialArchive; }
     public void setRequirementMaterialArchive(ProjectMaterialFileResponse requirementMaterialArchive) { this.requirementMaterialArchive = requirementMaterialArchive; }
+    public String getRequirementExcelStatus() { return requirementExcelStatus; }
+    public void setRequirementExcelStatus(String requirementExcelStatus) { this.requirementExcelStatus = requirementExcelStatus; }
+    public String getRequirementExcelMessage() { return requirementExcelMessage; }
+    public void setRequirementExcelMessage(String requirementExcelMessage) { this.requirementExcelMessage = requirementExcelMessage; }
+    public int getRequirementExcelSuccessCount() { return requirementExcelSuccessCount; }
+    public void setRequirementExcelSuccessCount(int requirementExcelSuccessCount) { this.requirementExcelSuccessCount = requirementExcelSuccessCount; }
+    public int getRequirementExcelFailedCount() { return requirementExcelFailedCount; }
+    public void setRequirementExcelFailedCount(int requirementExcelFailedCount) { this.requirementExcelFailedCount = requirementExcelFailedCount; }
+    public ProjectMaterialFileResponse getRequirementExcelArchive() { return requirementExcelArchive; }
+    public void setRequirementExcelArchive(ProjectMaterialFileResponse requirementExcelArchive) { this.requirementExcelArchive = requirementExcelArchive; }
     public List<BatchSplitItemResponse> getItems() { return items; }
     public void setItems(List<BatchSplitItemResponse> items) { this.items = items; }
 }

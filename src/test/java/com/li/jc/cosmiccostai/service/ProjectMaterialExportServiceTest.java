@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +39,47 @@ class ProjectMaterialExportServiceTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void packagesOnlyEachRequirementsFinalAttachment3Workbook() throws Exception {
+        FileStorageService storage = mock(FileStorageService.class);
+        ExcelExportService excel = mock(ExcelExportService.class);
+        WordExportService word = mock(WordExportService.class);
+        ProjectMetadata first = new ProjectMetadata();
+        first.setId("P1");
+        first.setSourceFileName("1.需求甲.xlsx");
+        ProjectMetadata second = new ProjectMetadata();
+        second.setId("P2");
+        second.setSourceFileName("2.需求乙.xlsx");
+        when(storage.loadMetadata("P1")).thenReturn(first);
+        when(storage.loadMetadata("P2")).thenReturn(second);
+        when(excel.exportFunctionPointWorkbook(anyString())).thenAnswer(invocation -> {
+            String id = invocation.getArgument(0);
+            ProjectMetadata metadata = "P1".equals(id) ? first : second;
+            metadata.setExcelOutputPath(Files.write(tempDir.resolve(id + "-附件3.xlsx"), id.getBytes()).toString());
+            metadata.setBusinessRequirementOutputPath(Files.write(tempDir.resolve(id + "-附件2.xlsx"), id.getBytes()).toString());
+            return null;
+        });
+        ProjectMaterialExportService service = new ProjectMaterialExportService(
+                storage, excel, word, tempDir.toString());
+
+        ProjectMaterialExportService.RequirementBatchArchive result = service.exportRequirementExcelArtifacts(
+                "BS-EXCEL", Arrays.asList("P1", "P2"), null);
+
+        assertEquals(2, result.getSuccessCount());
+        assertTrue(result.getFailedProjects().isEmpty());
+        Set<String> entries = new HashSet<String>();
+        try (ZipInputStream zip = new ZipInputStream(Files.newInputStream(result.getArchivePath()))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) entries.add(entry.getName());
+        }
+        assertEquals(new HashSet<String>(Arrays.asList(
+                "1.需求甲-最终功能点拆分表.xlsx",
+                "2.需求乙-最终功能点拆分表.xlsx")), entries);
+        verify(excel, times(2)).exportFunctionPointWorkbook(anyString());
+        verify(excel, never()).export(anyString());
+        verify(word, never()).export(anyString());
+    }
 
     @Test
     void generatesOneBatchZipContainingEachRequirementArchive() throws Exception {

@@ -198,7 +198,7 @@ public class ExcelReviewImportService {
                 continue;
             }
             String[] values = readValues(excelRow);
-            if (isBlankRow(values) || isCfpSummaryRow(values) || isTemplateInstructionRow(values)) {
+            if (isBlankBusinessRow(values) || isTotalRow(values) || isCfpSummaryRow(values) || isTemplateInstructionRow(values)) {
                 continue;
             }
 
@@ -278,8 +278,10 @@ public class ExcelReviewImportService {
         return cell == null ? "" : clean(dataFormatter.formatCellValue(cell));
     }
 
-    private boolean isBlankRow(String[] values) {
-        for (int i = 0; i <= 14; i++) {
+    private boolean isBlankBusinessRow(String[] values) {
+        // A~K define an imported split row. Template formulas, formatting artifacts or
+        // hidden export columns in L~O must not turn an otherwise empty row into data.
+        for (int i = 0; i <= 10; i++) {
             if (StringUtils.hasText(values[i])) {
                 return false;
             }
@@ -297,6 +299,11 @@ public class ExcelReviewImportService {
             }
         }
         return true;
+    }
+
+    private boolean isTotalRow(String[] values) {
+        String label = clean(values[0]).replace("：", "").replace(":", "");
+        return zh("合计").equals(label) || zh("总计").equals(label);
     }
 
     private boolean isTemplateInstructionRow(String[] values) {
@@ -392,7 +399,11 @@ public class ExcelReviewImportService {
         if (value == null) {
             return "";
         }
-        return value.replace('\u00a0', ' ').trim();
+        return value.replace('\u00a0', ' ')
+                .replace("\u200B", "")
+                .replace("\uFEFF", "")
+                .replace("\u2060", "")
+                .trim();
     }
 
     private String joinErrors(List<String> errors) {

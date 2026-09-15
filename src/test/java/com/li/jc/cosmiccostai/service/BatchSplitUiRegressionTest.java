@@ -25,6 +25,12 @@ class BatchSplitUiRegressionTest {
         assertTrue(html.contains("Number(job.completed || 0) === Number(job.total || 0)"));
         assertTrue(html.contains("function exportBatchRequirementMaterials()"));
         assertTrue(html.contains("/requirement-materials"));
+        assertTrue(html.contains("id=\"batchRequirementExcels\"")
+                && html.contains("id=\"batchRequirementExcelBtn\""));
+        assertTrue(html.contains("function exportBatchRequirementExcels()")
+                && html.contains("/excel-artifacts"));
+        assertTrue(html.contains("不会生成 Word 或完整送审包")
+                && html.contains("下载全部需求最终 Excel"));
         assertTrue(html.contains("id=\"batchSummaryBtn\"")
                 && html.contains("id=\"batchSummaryDialogOverlay\""));
         assertTrue(html.contains("function openBatchSummaryDialog()")

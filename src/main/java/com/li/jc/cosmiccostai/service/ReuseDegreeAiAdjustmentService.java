@@ -14,6 +14,8 @@ import com.li.jc.cosmiccostai.config.AiModelProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,6 +50,8 @@ import java.time.format.DateTimeFormatter;
 @Service
 public class ReuseDegreeAiAdjustmentService {
 
+    private static final Logger log = LoggerFactory.getLogger(ReuseDegreeAiAdjustmentService.class);
+    private static final int MAX_ADAPTIVE_SPLIT_DEPTH = 4;
     private static final Set<String> REUSE_VALUES = new HashSet<String>(
             Arrays.asList("新增", "复用", "利旧"));
     private static final Set<String> AUDIT_DIMENSIONS = new HashSet<String>(
@@ -65,12 +69,16 @@ public class ReuseDegreeAiAdjustmentService {
     private static final DateTimeFormatter DATE_TIME_FORMATTER =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final Pattern SOURCE_REFERENCE = Pattern.compile("\\[(REQ-L\\d+)]", Pattern.CASE_INSENSITIVE);
+    private static final Pattern PARTITION_NUMBER = Pattern.compile(
+            "【并发分段】第\\s*\\d+\\s*/\\s*\\d+\\s*段；");
 
     private final AiModelConfigService aiModelConfigService;
     private final SplitRuleConfigService splitRuleConfigService;
     private final ReviewService reviewService;
     private final FileStorageService fileStorageService;
     private final int partitionParallelism;
+    private final int reusePartitionRows;
+    private final int reusePartitionTargetChars;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Set<String> runningProjects = ConcurrentHashMap.newKeySet();
 
@@ -87,6 +95,8 @@ public class ReuseDegreeAiAdjustmentService {
         AiModelProperties.Extraction extraction = properties == null || properties.getExtraction() == null
                 ? new AiModelProperties.Extraction() : properties.getExtraction();
         this.partitionParallelism = Math.max(1, extraction.getPartitionParallelism());
+        this.reusePartitionRows = Math.max(1, extraction.getReusePartitionRows());
+        this.reusePartitionTargetChars = Math.max(1000, extraction.getReusePartitionTargetChars());
     }
 
     public ReuseDegreeAiAdjustmentService(AiModelConfigService aiModelConfigService,
@@ -97,6 +107,8 @@ public class ReuseDegreeAiAdjustmentService {
         this.reviewService = reviewService;
         this.fileStorageService = null;
         this.partitionParallelism = 4;
+        this.reusePartitionRows = 300;
+        this.reusePartitionTargetChars = 140000;
     }
 
     public ReuseDegreeAdjustmentResponse adjust(String projectId, List<FunctionSplitRow> inputRows) {
@@ -177,10 +189,10 @@ public class ReuseDegreeAiAdjustmentService {
         return buildPrompt(rows, allIndexes, 1, 1);
     }
 
-    private String buildPrompt(List<FunctionSplitRow> rows,
-                               List<Integer> targetIndexes,
-                               int partNumber,
-                               int totalParts) {
+    String buildPrompt(List<FunctionSplitRow> rows,
+                       List<Integer> targetIndexes,
+                       int partNumber,
+                       int totalParts) {
         StringBuilder builder = new StringBuilder();
         builder.append("你正在执行拆分流程最后的独立节点【复用度 AI 调整】，不是 AI 初审或风险复核。\n");
         builder.append("业务目标：依据完整规则和全表证据给出最接近最终设计院评审的复用度，降低后续核减率；不追求 CFP 多，也不追求 CFP 少。\n");
@@ -260,7 +272,125 @@ public class ReuseDegreeAiAdjustmentService {
             for (int index = 1; index <= rows.size(); index++) all.add(index);
             nonEmpty.add(all);
         }
-        return nonEmpty;
+        List<List<Integer>> sized = new ArrayList<List<Integer>>();
+        for (int index = 0; index < nonEmpty.size(); index++) {
+            List<Integer> partition = nonEmpty.get(index);
+            if (hasReusableBasePartitionCache(projectId, rows, partition,
+                    index + 1, nonEmpty.size())) {
+                sized.add(partition);
+            } else {
+                sized.addAll(splitOversizedPartition(rows, partition));
+            }
+        }
+        return splitPreviouslyFailedPartitions(projectId, rows, sized);
+    }
+
+    private boolean hasReusableBasePartitionCache(String projectId,
+                                                   List<FunctionSplitRow> rows,
+                                                   List<Integer> partition,
+                                                   int partNumber,
+                                                   int totalParts) {
+        if (fileStorageService == null || !StringUtils.hasText(projectId)) return false;
+        Path projectDir = fileStorageService.resolveProjectDir(projectId);
+        String prompt = buildPrompt(rows, partition, partNumber, totalParts);
+        return StringUtils.hasText(cachedReuseResponse(projectDir, prompt));
+    }
+
+    private List<List<Integer>> splitOversizedPartition(List<FunctionSplitRow> rows,
+                                                        List<Integer> partition) {
+        return splitPartition(rows, partition, reusePartitionRows, reusePartitionTargetChars);
+    }
+
+    private List<List<Integer>> splitPartition(List<FunctionSplitRow> rows,
+                                               List<Integer> partition,
+                                               int maxRows,
+                                               int maxTargetChars) {
+        List<List<Integer>> result = new ArrayList<List<Integer>>();
+        Map<String, List<Integer>> processGroups = new LinkedHashMap<String, List<Integer>>();
+        for (Integer rowIndex : partition) {
+            if (rowIndex == null || rowIndex < 1 || rowIndex > rows.size()) continue;
+            String processKey = FunctionProcessKey.of(rows.get(rowIndex - 1));
+            List<Integer> group = processGroups.get(processKey);
+            if (group == null) {
+                group = new ArrayList<Integer>();
+                processGroups.put(processKey, group);
+            }
+            group.add(rowIndex);
+        }
+        List<Integer> current = new ArrayList<Integer>();
+        int currentChars = 0;
+        for (List<Integer> group : processGroups.values()) {
+            int groupChars = rowsJson(rows, group).length();
+            boolean exceedsRows = current.size() + group.size() > maxRows;
+            boolean exceedsChars = currentChars + groupChars > maxTargetChars;
+            if (!current.isEmpty() && (exceedsRows || exceedsChars)) {
+                result.add(current);
+                current = new ArrayList<Integer>();
+                currentChars = 0;
+            }
+            current.addAll(group);
+            currentChars += groupChars;
+            if (current.size() >= maxRows || currentChars >= maxTargetChars) {
+                result.add(current);
+                current = new ArrayList<Integer>();
+                currentChars = 0;
+            }
+        }
+        if (!current.isEmpty()) result.add(current);
+        return result;
+    }
+
+    private List<List<Integer>> splitPreviouslyFailedPartitions(String projectId,
+                                                                 List<FunctionSplitRow> rows,
+                                                                 List<List<Integer>> partitions) {
+        if (fileStorageService == null || !StringUtils.hasText(projectId)) return partitions;
+        Path projectDir = fileStorageService.resolveProjectDir(projectId);
+        List<List<Integer>> result = new ArrayList<List<Integer>>();
+        for (int index = 0; index < partitions.size(); index++) {
+            List<Integer> partition = partitions.get(index);
+            String prompt = buildPrompt(rows, partition, index + 1, partitions.size());
+            if (!hasPreviousUnsuccessfulPrompt(projectDir, prompt)) {
+                result.add(partition);
+                continue;
+            }
+            List<List<Integer>> children = splitPartitionInHalf(rows, partition);
+            if (children.size() <= 1) {
+                result.add(partition);
+                continue;
+            }
+            log.info("Reuse partition pre-split after previous unsuccessful response. projectId={}, part={}/{}, rows={}, children={}",
+                    projectId, index + 1, partitions.size(), partition.size(), children.size());
+            result.addAll(children);
+        }
+        return result;
+    }
+
+    private boolean hasPreviousUnsuccessfulPrompt(Path projectDir, String currentPrompt) {
+        for (int part = 1; part <= 100; part++) {
+            Path promptPath = projectDir.resolve("reuse-prompt-part-" + part + ".txt");
+            if (!Files.isRegularFile(promptPath)
+                    || !cacheEquivalentPrompt(currentPrompt, readText(promptPath))) continue;
+            Path responsePath = projectDir.resolve("reuse-response-part-" + part + ".txt");
+            if (!Files.isRegularFile(responsePath)) return true;
+            try {
+                parseDecisions(readText(responsePath));
+                return false;
+            } catch (RuntimeException invalidResponse) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<List<Integer>> splitPartitionInHalf(List<FunctionSplitRow> rows,
+                                                      List<Integer> partition) {
+        if (partition == null || partition.size() <= 1) {
+            return Collections.singletonList(partition);
+        }
+        int targetChars = rowsJson(rows, partition).length();
+        return splitPartition(rows, partition,
+                Math.max(1, (partition.size() + 1) / 2),
+                Math.max(1000, (targetChars + 1) / 2));
     }
 
     private int bestReferencePartition(List<FunctionSplitRow> rows,
@@ -326,7 +456,7 @@ public class ReuseDegreeAiAdjustmentService {
         for (int index = 0; index < partitions.size(); index++) {
             String prompt = buildPrompt(rows, partitions.get(index), index + 1, partitions.size());
             String cached = cachedReuseResponse(projectDir, prompt);
-            tasks.add(new ReuseTask(index + 1, prompt, cached, null));
+            tasks.add(new ReuseTask(index + 1, partitions.get(index), prompt, cached, null));
         }
         if (projectDir != null) {
             for (ReuseTask task : tasks) {
@@ -358,18 +488,20 @@ public class ReuseDegreeAiAdjustmentService {
                     public ReuseTask call() {
                         progressTracker.running(task.partNumber);
                         try {
-                            String response = aiModelConfigService.generateForTask(
-                                    task.prompt, AiPromptTask.REUSE_ADJUSTMENT, false, 0,
-                                    projectId, null);
+                            String response = generateAdaptivePartition(
+                                    projectId, rows, task.targetIndexes, task.partNumber,
+                                    tasks.size(), task.prompt, 0);
                             if (fileStorageService != null) {
                                 writeText(fileStorageService.resolveProjectDir(projectId)
                                         .resolve("reuse-response-part-" + task.partNumber + ".txt"), response);
                             }
                             progressTracker.completed(task.partNumber);
-                            return new ReuseTask(task.partNumber, task.prompt, response, null);
+                            return new ReuseTask(task.partNumber, task.targetIndexes,
+                                    task.prompt, response, null);
                         } catch (RuntimeException failure) {
                             progressTracker.failed(task.partNumber, failure.getMessage());
-                            return new ReuseTask(task.partNumber, task.prompt, "", failure);
+                            return new ReuseTask(task.partNumber, task.targetIndexes,
+                                    task.prompt, "", failure);
                         }
                     }
                 }));
@@ -410,13 +542,59 @@ public class ReuseDegreeAiAdjustmentService {
         return decisions;
     }
 
+    private String generateAdaptivePartition(String projectId,
+                                               List<FunctionSplitRow> rows,
+                                               List<Integer> targetIndexes,
+                                               int partNumber,
+                                               int totalParts,
+                                               String prompt,
+                                               int depth) {
+        try {
+            return aiModelConfigService.generateForTask(
+                    prompt, AiPromptTask.REUSE_ADJUSTMENT, false, 0, projectId, null);
+        } catch (RuntimeException failure) {
+            if (!isOutputLengthFailure(failure) || depth >= MAX_ADAPTIVE_SPLIT_DEPTH) {
+                throw failure;
+            }
+            List<List<Integer>> children = splitPartitionInHalf(rows, targetIndexes);
+            if (children.size() <= 1) throw failure;
+            log.info("Reuse partition reached output limit and will be split automatically. projectId={}, part={}/{}, depth={}, rows={}, children={}",
+                    projectId, partNumber, totalParts, depth + 1, targetIndexes.size(), children.size());
+            List<ReuseDegreeAdjustmentDecision> combined =
+                    new ArrayList<ReuseDegreeAdjustmentDecision>();
+            for (List<Integer> child : children) {
+                String childPrompt = buildPrompt(rows, child, partNumber, totalParts);
+                String childResponse = generateAdaptivePartition(projectId, rows, child,
+                        partNumber, totalParts, childPrompt, depth + 1);
+                combined.addAll(parseDecisions(childResponse));
+            }
+            Map<String, Object> response = new LinkedHashMap<String, Object>();
+            response.put("decisions", combined);
+            return json(response, "合并自动细分后的复用度结果失败。");
+        }
+    }
+
+    private boolean isOutputLengthFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)
+                    && (message.contains("结构化输出达到长度上限")
+                    || message.contains("finish_reason=length"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private String cachedReuseResponse(Path projectDir, String currentPrompt) {
         if (projectDir == null) return "";
         for (int part = 1; part <= 100; part++) {
             Path promptPath = projectDir.resolve("reuse-prompt-part-" + part + ".txt");
             Path responsePath = projectDir.resolve("reuse-response-part-" + part + ".txt");
             if (!Files.isRegularFile(promptPath) || !Files.isRegularFile(responsePath)) continue;
-            if (!currentPrompt.equals(readText(promptPath))) continue;
+            if (!cacheEquivalentPrompt(currentPrompt, readText(promptPath))) continue;
             String response = readText(responsePath);
             try {
                 parseDecisions(response);
@@ -426,6 +604,14 @@ public class ReuseDegreeAiAdjustmentService {
             }
         }
         return "";
+    }
+
+    private boolean cacheEquivalentPrompt(String currentPrompt, String cachedPrompt) {
+        String current = PARTITION_NUMBER.matcher(text(currentPrompt))
+                .replaceFirst("【并发分段】第 */* 段；");
+        String cached = PARTITION_NUMBER.matcher(text(cachedPrompt))
+                .replaceFirst("【并发分段】第 */* 段；");
+        return current.equals(cached);
     }
 
     private String readText(Path path) {
@@ -1292,12 +1478,15 @@ public class ReuseDegreeAiAdjustmentService {
 
     private static final class ReuseTask {
         private final int partNumber;
+        private final List<Integer> targetIndexes;
         private final String prompt;
         private final String response;
         private final RuntimeException failure;
 
-        private ReuseTask(int partNumber, String prompt, String response, RuntimeException failure) {
+        private ReuseTask(int partNumber, List<Integer> targetIndexes,
+                          String prompt, String response, RuntimeException failure) {
             this.partNumber = partNumber;
+            this.targetIndexes = targetIndexes;
             this.prompt = prompt;
             this.response = response;
             this.failure = failure;

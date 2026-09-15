@@ -162,6 +162,11 @@ public class BatchSplitService {
                             state.setRequirementMaterialMessage("服务重启已停止单需求送审材料总包生成，未自动恢复；请手动重新生成。");
                             stateChanged = true;
                         }
+                        if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+                            state.setRequirementExcelStatus("FAILED");
+                            state.setRequirementExcelMessage("服务重启已停止最终 Excel 整合包生成，请手动重试。");
+                            stateChanged = true;
+                        }
                         for (BatchSplitItemState item : state.getItems()) {
                             if (!projectMetadataExists(item.getProjectId())) {
                                 assignedProjects.remove(item.getProjectId(), batchId);
@@ -830,6 +835,9 @@ public class BatchSplitService {
                 if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
                     throw new BusinessException("单需求送审材料总包正在生成，请完成后再重新拆分需求。");
                 }
+                if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+                    throw new BusinessException("最终 Excel 整合包正在生成，请完成后再重新拆分需求。");
+                }
                 if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
                         || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
                     throw new BusinessException("该需求正在处理，不能重复提交。");
@@ -851,6 +859,8 @@ public class BatchSplitService {
                     }
                 }
                 resetItemForRerun(item);
+                invalidateRequirementExcelArtifacts(state,
+                        "需求已重新拆分，旧的最终 Excel 整合包已失效；完成后请重新生成。");
                 if ("REQUIREMENT".equals(normalizeSplitLevel(state.getSplitLevel()))) {
                     state.setRequirementMaterialStatus("NOT_STARTED");
                     state.setRequirementMaterialMessage("需求已重新拆分，旧整合包已失效；完成后请重新生成。");
@@ -985,6 +995,9 @@ public class BatchSplitService {
     public BatchSplitJobResponse retryProjectMaterials(final String batchId) {
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
+            if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+                throw new BusinessException("最终 Excel 整合包正在生成，请完成后再生成项目送审材料。");
+            }
             if (!"PROJECT".equals(state.getSplitLevel())) {
                 throw new BusinessException("需求级批次不生成项目级送审材料。");
             }
@@ -1023,9 +1036,127 @@ public class BatchSplitService {
         return get(batchId);
     }
 
+    public BatchSplitJobResponse exportRequirementExcelArtifacts(final String batchId) {
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            if ("GENERATING".equals(state.getProjectMaterialStatus())
+                    || "GENERATING".equals(state.getRequirementMaterialStatus())) {
+                throw new BusinessException("送审材料正在生成，请完成后再导出最终 Excel。");
+            }
+            if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+                throw new BusinessException("最终 Excel 整合包正在生成，请等待完成。");
+            }
+            int completed = 0;
+            List<String> failedItems = new ArrayList<String>();
+            for (BatchSplitItemState item : state.getItems()) {
+                if ("COMPLETED".equals(item.getStatus())) completed++;
+                if ("FAILED".equals(item.getStatus())) failedItems.add(item.getSourceFileName());
+                if ("QUEUED".equals(item.getStatus()) || "RUNNING".equals(item.getStatus())
+                        || "PARSE_QUEUED".equals(item.getStatus()) || "PREPARING".equals(item.getStatus())) {
+                    throw new BusinessException("批量处理仍在执行，请全部复核完成后再导出最终 Excel。");
+                }
+            }
+            if (!failedItems.isEmpty()) {
+                throw new BusinessException("存在处理失败的需求，请先修复并重试：" + join(failedItems));
+            }
+            if (completed == 0 || completed != state.getItems().size()) {
+                throw new BusinessException("请先完成全部需求的复核，再导出最终 Excel 整合包。");
+            }
+            state.setRequirementExcelStatus("GENERATING");
+            state.setRequirementExcelMessage("正在逐份生成最终功能点拆分表：0/" + completed + "。");
+            state.setRequirementExcelSuccessCount(0);
+            state.setRequirementExcelFailedCount(0);
+            state.setRequirementExcelArchivePath(null);
+            saveStateUnlocked(state);
+        }
+        try {
+            batchSplitExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    generateRequirementExcelArtifacts(batchId);
+                }
+            });
+        } catch (RuntimeException ex) {
+            failRequirementExcelArtifacts(batchId, "最终 Excel 整合包生成队列已满，请稍后重试：" + message(ex));
+        }
+        return get(batchId);
+    }
+
+    private void generateRequirementExcelArtifacts(String batchId) {
+        List<String> projectIds = new ArrayList<String>();
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            if (!"GENERATING".equals(state.getRequirementExcelStatus())) return;
+            for (BatchSplitItemState item : state.getItems()) {
+                if ("COMPLETED".equals(item.getStatus())) projectIds.add(item.getProjectId());
+            }
+        }
+        try {
+            ProjectMaterialExportService.RequirementArchiveProgressListener listener =
+                    new ProjectMaterialExportService.RequirementArchiveProgressListener() {
+                        @Override
+                        public void onProgress(int successCount, int failedCount, int totalCount) {
+                            synchronized (lockFor(batchId)) {
+                                BatchSplitState state = loadStateUnlocked(batchId);
+                                if (!"GENERATING".equals(state.getRequirementExcelStatus())) return;
+                                state.setRequirementExcelSuccessCount(successCount);
+                                state.setRequirementExcelFailedCount(failedCount);
+                                state.setRequirementExcelMessage("正在逐份生成最终 Excel：已处理 "
+                                        + (successCount + failedCount) + "/" + totalCount
+                                        + "，成功 " + successCount + "，失败 " + failedCount + "。");
+                                saveStateUnlocked(state);
+                            }
+                        }
+                    };
+            ProjectMaterialExportService.RequirementBatchArchive archive =
+                    projectMaterialExportService.exportRequirementExcelArtifacts(batchId, projectIds, listener);
+            synchronized (lockFor(batchId)) {
+                BatchSplitState state = loadStateUnlocked(batchId);
+                if (!"GENERATING".equals(state.getRequirementExcelStatus())) return;
+                state.setRequirementExcelArchivePath(archive.getArchivePath().toAbsolutePath().normalize().toString());
+                state.setRequirementExcelSuccessCount(archive.getSuccessCount());
+                state.setRequirementExcelFailedCount(archive.getFailedProjects().size());
+                state.setRequirementExcelStatus(archive.getFailedProjects().isEmpty()
+                        ? "COMPLETED" : "PARTIAL_COMPLETED");
+                state.setRequirementExcelMessage(archive.getFailedProjects().isEmpty()
+                        ? "已生成全部 " + archive.getSuccessCount() + " 份最终功能点拆分表。"
+                        : "已打包成功 " + archive.getSuccessCount() + " 份，失败 "
+                        + archive.getFailedProjects().size() + " 份："
+                        + String.join("；", archive.getFailedProjects()));
+                saveStateUnlocked(state);
+            }
+        } catch (RuntimeException ex) {
+            failRequirementExcelArtifacts(batchId, message(ex));
+        }
+    }
+
+    private void failRequirementExcelArtifacts(String batchId, String errorMessage) {
+        synchronized (lockFor(batchId)) {
+            BatchSplitState state = loadStateUnlocked(batchId);
+            state.setRequirementExcelStatus("FAILED");
+            state.setRequirementExcelMessage(errorMessage);
+            saveStateUnlocked(state);
+        }
+    }
+
+    public Path requirementExcelArchiveFile(String batchId) {
+        BatchSplitState state = loadState(batchId);
+        if (!StringUtils.hasText(state.getRequirementExcelArchivePath())) {
+            throw new BusinessException("最终 Excel 整合包尚未生成。");
+        }
+        Path file = Paths.get(state.getRequirementExcelArchivePath()).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(file)) {
+            throw new BusinessException("最终 Excel 整合包文件不存在：" + file.getFileName());
+        }
+        return file;
+    }
+
     public BatchSplitJobResponse exportRequirementMaterials(final String batchId) {
         synchronized (lockFor(batchId)) {
             BatchSplitState state = loadStateUnlocked(batchId);
+            if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+                throw new BusinessException("最终 Excel 整合包正在生成，请完成后再生成送审材料。");
+            }
             if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
                 throw new BusinessException("单需求送审材料总包正在生成，请等待完成。");
             }
@@ -1921,6 +2052,9 @@ public class BatchSplitService {
         if ("GENERATING".equals(state.getRequirementMaterialStatus())) {
             throw new BusinessException("项目全量单需求送审材料总包正在生成，请完成后再维护项目成员。");
         }
+        if ("GENERATING".equals(state.getRequirementExcelStatus())) {
+            throw new BusinessException("最终 Excel 整合包正在生成，请完成后再维护项目成员。");
+        }
     }
 
     private void invalidateProjectMaterials(BatchSplitState state, String message) {
@@ -1935,7 +2069,17 @@ public class BatchSplitService {
         state.setRequirementMaterialArchivePath(null);
         state.setRequirementMaterialSuccessCount(0);
         state.setRequirementMaterialFailedCount(0);
+        invalidateRequirementExcelArtifacts(state,
+                "项目成员或拆分结果已变化，旧的最终 Excel 整合包已失效。");
         state.setFinishedAt(null);
+    }
+
+    private void invalidateRequirementExcelArtifacts(BatchSplitState state, String message) {
+        state.setRequirementExcelStatus("NOT_STARTED");
+        state.setRequirementExcelMessage(message);
+        state.setRequirementExcelArchivePath(null);
+        state.setRequirementExcelSuccessCount(0);
+        state.setRequirementExcelFailedCount(0);
     }
 
     private void resetItemForRerun(BatchSplitItemState item) {
@@ -2089,6 +2233,21 @@ public class BatchSplitService {
             archive.setDownloadUrl("/api/projects/batch-split/" + state.getBatchId()
                     + "/requirement-materials/download");
             response.setRequirementMaterialArchive(archive);
+        }
+        response.setRequirementExcelStatus(StringUtils.hasText(state.getRequirementExcelStatus())
+                ? state.getRequirementExcelStatus() : "NOT_STARTED");
+        response.setRequirementExcelMessage(state.getRequirementExcelMessage());
+        response.setRequirementExcelSuccessCount(state.getRequirementExcelSuccessCount());
+        response.setRequirementExcelFailedCount(state.getRequirementExcelFailedCount());
+        if (StringUtils.hasText(state.getRequirementExcelArchivePath())) {
+            Path archivePath = Paths.get(state.getRequirementExcelArchivePath());
+            ProjectMaterialFileResponse archive = new ProjectMaterialFileResponse();
+            archive.setType("requirementExcelArchive");
+            archive.setName(archivePath.getFileName().toString());
+            archive.setPath(state.getRequirementExcelArchivePath());
+            archive.setDownloadUrl("/api/projects/batch-split/" + state.getBatchId()
+                    + "/excel-artifacts/download");
+            response.setRequirementExcelArchive(archive);
         }
         List<BatchSplitItemResponse> items = new ArrayList<BatchSplitItemResponse>();
         for (BatchSplitItemState item : state.getItems()) {
@@ -2301,6 +2460,11 @@ public class BatchSplitService {
         private String requirementMaterialArchivePath;
         private int requirementMaterialSuccessCount;
         private int requirementMaterialFailedCount;
+        private String requirementExcelStatus = "NOT_STARTED";
+        private String requirementExcelMessage;
+        private String requirementExcelArchivePath;
+        private int requirementExcelSuccessCount;
+        private int requirementExcelFailedCount;
         private List<BatchSplitItemState> items = new ArrayList<BatchSplitItemState>();
 
         public String getBatchId() { return batchId; }
@@ -2367,6 +2531,16 @@ public class BatchSplitService {
         public void setRequirementMaterialSuccessCount(int requirementMaterialSuccessCount) { this.requirementMaterialSuccessCount = requirementMaterialSuccessCount; }
         public int getRequirementMaterialFailedCount() { return requirementMaterialFailedCount; }
         public void setRequirementMaterialFailedCount(int requirementMaterialFailedCount) { this.requirementMaterialFailedCount = requirementMaterialFailedCount; }
+        public String getRequirementExcelStatus() { return requirementExcelStatus; }
+        public void setRequirementExcelStatus(String requirementExcelStatus) { this.requirementExcelStatus = requirementExcelStatus; }
+        public String getRequirementExcelMessage() { return requirementExcelMessage; }
+        public void setRequirementExcelMessage(String requirementExcelMessage) { this.requirementExcelMessage = requirementExcelMessage; }
+        public String getRequirementExcelArchivePath() { return requirementExcelArchivePath; }
+        public void setRequirementExcelArchivePath(String requirementExcelArchivePath) { this.requirementExcelArchivePath = requirementExcelArchivePath; }
+        public int getRequirementExcelSuccessCount() { return requirementExcelSuccessCount; }
+        public void setRequirementExcelSuccessCount(int requirementExcelSuccessCount) { this.requirementExcelSuccessCount = requirementExcelSuccessCount; }
+        public int getRequirementExcelFailedCount() { return requirementExcelFailedCount; }
+        public void setRequirementExcelFailedCount(int requirementExcelFailedCount) { this.requirementExcelFailedCount = requirementExcelFailedCount; }
         public List<BatchSplitItemState> getItems() { return items; }
         public void setItems(List<BatchSplitItemState> items) { this.items = items; }
     }

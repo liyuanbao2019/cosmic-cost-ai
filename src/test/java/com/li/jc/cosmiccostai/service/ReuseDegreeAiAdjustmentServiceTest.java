@@ -1,6 +1,7 @@
 package com.li.jc.cosmiccostai.service;
 
 import com.li.jc.cosmiccostai.config.AiModelProperties;
+import com.li.jc.cosmiccostai.common.BusinessException;
 import com.li.jc.cosmiccostai.dto.AiModelProfile;
 import com.li.jc.cosmiccostai.dto.AiPartitionProgressItem;
 import com.li.jc.cosmiccostai.dto.ReuseDegreeAdjustmentDecision;
@@ -27,6 +28,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -110,6 +112,209 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertTrue(progress.get(progress.size() - 1).stream().allMatch(
                 item -> "REUSE_ADJUSTMENT".equals(item.getPhase())
                         && "COMPLETED".equals(item.getStatus())));
+    }
+
+    @Test
+    void splitsLargeReusePartitionsWithoutSplittingAFunctionProcess() {
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(3);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                null, null, null, null, properties);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                row("功能A", "接收A", "E", "A", "编号", "新增"),
+                row("功能A", "返回A", "X", "A", "编号", "新增"),
+                row("功能B", "接收B", "E", "B", "编号", "新增"),
+                row("功能B", "返回B", "X", "B", "编号", "新增"),
+                row("功能C", "接收C", "E", "C", "编号", "新增"));
+
+        List<List<Integer>> partitions = service.partitionRowIndexes("excel-project", rows);
+
+        assertEquals(Arrays.asList(
+                Arrays.asList(1, 2), Arrays.asList(3, 4, 5)), partitions);
+    }
+
+    @Test
+    void splitsReusePartitionsWhenTargetJsonIsTooLong() {
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(100);
+        properties.getExtraction().setReusePartitionTargetChars(1000);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                null, null, null, null, properties);
+        FunctionSplitRow first = row("功能A", repeat("接收超长业务数据", 100),
+                "E", "A", repeat("业务属性", 100), "新增");
+        FunctionSplitRow second = row("功能B", repeat("处理超长业务数据", 100),
+                "E", "B", repeat("结果属性", 100), "新增");
+
+        List<List<Integer>> partitions = service.partitionRowIndexes(
+                "long-target-project", Arrays.asList(first, second));
+
+        assertEquals(Arrays.asList(
+                Collections.singletonList(1), Collections.singletonList(2)), partitions);
+    }
+
+    @Test
+    void keepsOldPartitionBoundariesWhenASuccessfulResponseCanBeReused() throws Exception {
+        Path storagePath = Files.createTempDirectory("reuse-cached-partition-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("cached-project");
+        Files.createDirectories(projectDir);
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-cached");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(1);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, mock(ReviewService.class), storage, properties);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                row("功能A", "接收A", "E", "A", "编号", "新增"),
+                row("功能B", "接收B", "E", "B", "编号", "新增"));
+        Files.write(projectDir.resolve("reuse-prompt-part-1.txt"),
+                service.buildPrompt(rows).getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("reuse-response-part-1.txt"),
+                "{\"decisions\":[]}".getBytes(StandardCharsets.UTF_8));
+
+        List<List<Integer>> partitions = service.partitionRowIndexes("cached-project", rows);
+
+        assertEquals(Collections.singletonList(Arrays.asList(1, 2)), partitions);
+    }
+
+    @Test
+    void splitsOnlyFailedOldPartitionAndReusesRenumberedSuccessfulParts() throws Exception {
+        Path storagePath = Files.createTempDirectory("reuse-partial-cache-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("partial-cache-project");
+        Files.createDirectories(projectDir);
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        ReviewService review = mock(ReviewService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-partial-cache");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT),
+                eq(false), eq(0), any(String.class), isNull()))
+                .thenReturn("{\"decisions\":[]}");
+        when(review.saveReuseAdjustedReview(eq("partial-cache-project"), any()))
+                .thenAnswer(invocation -> {
+                    ReviewResponse saved = new ReviewResponse();
+                    saved.setSplitRows(invocation.getArgument(1));
+                    return saved;
+                });
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(1);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, review, storage, properties);
+        FunctionSplitRow first = row("功能A", "接收A", "E", "A", "编号", "新增");
+        FunctionSplitRow second = row("功能B", "接收B", "E", "B", "编号", "新增");
+        FunctionSplitRow third = row("功能C", "接收C", "E", "C", "编号", "新增");
+        FunctionSplitRow fourth = row("功能D", "接收D", "E", "D", "编号", "新增");
+        first.setLevel1Module("章节一");
+        second.setLevel1Module("章节二");
+        third.setLevel1Module("章节二");
+        fourth.setLevel1Module("章节三");
+        List<FunctionSplitRow> rows = Arrays.asList(first, second, third, fourth);
+        Files.write(projectDir.resolve("reuse-prompt-part-1.txt"),
+                service.buildPrompt(rows, Collections.singletonList(1), 1, 3)
+                        .getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("reuse-response-part-1.txt"),
+                "{\"decisions\":[]}".getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("reuse-prompt-part-3.txt"),
+                service.buildPrompt(rows, Collections.singletonList(4), 3, 3)
+                        .getBytes(StandardCharsets.UTF_8));
+        Files.write(projectDir.resolve("reuse-response-part-3.txt"),
+                "{\"decisions\":[]}".getBytes(StandardCharsets.UTF_8));
+
+        service.adjust("partial-cache-project", rows);
+
+        verify(ai, times(2)).generateForTask(any(String.class),
+                eq(AiPromptTask.REUSE_ADJUSTMENT), eq(false), eq(0),
+                any(String.class), isNull());
+    }
+
+    @Test
+    void preSplitsOnlyThePreviouslyFailedSizedPartition() throws Exception {
+        Path storagePath = Files.createTempDirectory("reuse-previous-failure-");
+        FileStorageService storage = new FileStorageService(storagePath.toString());
+        Path projectDir = storage.resolveProjectDir("previous-failure-project");
+        Files.createDirectories(projectDir);
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-previous-failure");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(2);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, mock(ReviewService.class), storage, properties);
+        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
+        for (int index = 1; index <= 6; index++) {
+            FunctionSplitRow row = row("功能" + index, "接收" + index,
+                    "E", "数据" + index, "编号", "新增");
+            row.setLevel1Module(index == 1 ? "章节一" : (index == 6 ? "章节三" : "章节二"));
+            rows.add(row);
+        }
+        List<List<Integer>> oldParts = Arrays.asList(
+                Collections.singletonList(1), Arrays.asList(2, 3),
+                Arrays.asList(4, 5), Collections.singletonList(6));
+        for (int index = 0; index < oldParts.size(); index++) {
+            int partNumber = index + 1;
+            Files.write(projectDir.resolve("reuse-prompt-part-" + partNumber + ".txt"),
+                    service.buildPrompt(rows, oldParts.get(index), partNumber, oldParts.size())
+                            .getBytes(StandardCharsets.UTF_8));
+            if (partNumber != 3) {
+                Files.write(projectDir.resolve("reuse-response-part-" + partNumber + ".txt"),
+                        "{\"decisions\":[]}".getBytes(StandardCharsets.UTF_8));
+            }
+        }
+
+        List<List<Integer>> partitions = service.partitionRowIndexes(
+                "previous-failure-project", rows);
+
+        assertEquals(Arrays.asList(Collections.singletonList(1), Arrays.asList(2, 3),
+                Collections.singletonList(4), Collections.singletonList(5),
+                Collections.singletonList(6)), partitions);
+    }
+
+    @Test
+    void automaticallyRecursivelySplitsAnUnexpectedOutputLengthFailure() {
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        ReviewService review = mock(ReviewService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-adaptive");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        AtomicInteger requests = new AtomicInteger();
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT),
+                eq(false), eq(0), any(String.class), isNull()))
+                .thenAnswer(invocation -> {
+                    requests.incrementAndGet();
+                    String prompt = invocation.getArgument(0);
+                    if (prompt.contains("【本段待判断目标行，共 2 行】")) {
+                        throw new BusinessException(
+                                "DeepSeek 当前分段的结构化输出达到长度上限");
+                    }
+                    return "{\"decisions\":[]}";
+                });
+        when(review.saveReuseAdjustedReview(eq("adaptive-project"), any()))
+                .thenAnswer(invocation -> {
+                    ReviewResponse saved = new ReviewResponse();
+                    saved.setSplitRows(invocation.getArgument(1));
+                    return saved;
+                });
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(100);
+        properties.getExtraction().setReusePartitionTargetChars(100000);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, review, null, properties);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                row("功能A", "接收A", "E", "A", "编号", "新增"),
+                row("功能B", "接收B", "E", "B", "编号", "新增"));
+
+        ReuseDegreeAdjustmentResponse response = service.adjust("adaptive-project", rows);
+
+        assertEquals(2, response.getTotalRows());
+        assertEquals(3, requests.get());
     }
 
     @Test
@@ -601,6 +806,12 @@ class ReuseDegreeAiAdjustmentServiceTest {
         row.setCfp("复用".equals(reuse) ? 0.33D : ("利旧".equals(reuse) ? 0D : 1D));
         row.setSourceReferences(new ArrayList<String>());
         return row;
+    }
+
+    private String repeat(String value, int times) {
+        StringBuilder result = new StringBuilder(value.length() * times);
+        for (int index = 0; index < times; index++) result.append(value);
+        return result.toString();
     }
 
     private FunctionSplitRow moduleRow(String module, String process, String reuse) {

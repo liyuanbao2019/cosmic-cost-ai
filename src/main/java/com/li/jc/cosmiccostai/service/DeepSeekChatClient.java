@@ -251,8 +251,10 @@ final class DeepSeekChatClient {
         if (task == AiPromptTask.EXTRACTION) {
             return 65536;
         }
+        if (task == AiPromptTask.REUSE_ADJUSTMENT) {
+            return 65536;
+        }
         if (task == AiPromptTask.DEEP_REVIEW
-                || task == AiPromptTask.REUSE_ADJUSTMENT
                 || task == AiPromptTask.INITIAL_REVIEW) {
             return 32768;
         }

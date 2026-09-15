@@ -109,6 +109,15 @@ public class ExcelExportService {
     }
 
     public ExcelExportResponse export(String projectId) {
+        return export(projectId, true);
+    }
+
+    /** Exports only the final attachment 3 workbook and skips the attachment 2 side product. */
+    public ExcelExportResponse exportFunctionPointWorkbook(String projectId) {
+        return export(projectId, false);
+    }
+
+    private ExcelExportResponse export(String projectId, boolean includeBusinessWorkbook) {
         ProjectMetadata metadata = fileStorageService.loadMetadata(projectId);
         validateMetadata(metadata);
 
@@ -118,12 +127,14 @@ public class ExcelExportService {
         RuleValidationResponse validation = ruleValidationService.validate(splitRows);
         ruleValidationService.ensureReadyForExport(validation, "导出送审 Excel");
         Path templatePath = resolveTemplatePath(zh("\u9644\u4ef63"));
-        Path businessTemplatePath = resolveTemplatePath(zh("\u9644\u4ef62"));
+        Path businessTemplatePath = includeBusinessWorkbook
+                ? resolveTemplatePath(zh("\u9644\u4ef62")) : null;
         Path projectOutputDir = outputBaseDir.resolve(projectId);
         Path outputPath = projectOutputDir.resolve(buildExcelOutputFileName(metadata));
-        Path businessOutputPath = projectOutputDir.resolve(buildBusinessRequirementOutputFileName(metadata));
+        Path businessOutputPath = includeBusinessWorkbook
+                ? projectOutputDir.resolve(buildBusinessRequirementOutputFileName(metadata)) : null;
         Path actualOutputPath = outputPath;
-        Path actualBusinessOutputPath = businessOutputPath;
+        Path actualBusinessOutputPath = null;
 
         int movementRows;
         double totalCfp = 0;
@@ -144,12 +155,14 @@ public class ExcelExportService {
                     workbook.write(outputStream);
                 }
             }
-            try (InputStream inputStream = Files.newInputStream(businessTemplatePath);
-                 Workbook workbook = new XSSFWorkbook(inputStream)) {
-                fillBusinessRequirementSheet(workbook, metadata, splitRows);
-                actualBusinessOutputPath = writableOutputPath(businessOutputPath);
-                try (OutputStream outputStream = Files.newOutputStream(actualBusinessOutputPath)) {
-                    workbook.write(outputStream);
+            if (includeBusinessWorkbook) {
+                try (InputStream inputStream = Files.newInputStream(businessTemplatePath);
+                     Workbook workbook = new XSSFWorkbook(inputStream)) {
+                    fillBusinessRequirementSheet(workbook, metadata, splitRows);
+                    actualBusinessOutputPath = writableOutputPath(businessOutputPath);
+                    try (OutputStream outputStream = Files.newOutputStream(actualBusinessOutputPath)) {
+                        workbook.write(outputStream);
+                    }
                 }
             }
         } catch (IOException ex) {
@@ -157,7 +170,9 @@ public class ExcelExportService {
         }
 
         metadata.setExcelOutputPath(actualOutputPath.toString());
-        metadata.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
+        if (includeBusinessWorkbook) {
+            metadata.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
+        }
         metadata.setMaterialArchiveOutputPath(null);
         metadata.setStatus("EXCEL_EXPORTED");
         metadata.setUpdatedAt(LocalDateTime.now().format(DATE_TIME_FORMATTER));
@@ -166,7 +181,7 @@ public class ExcelExportService {
         ExcelExportResponse response = new ExcelExportResponse();
         response.setProjectId(projectId);
         response.setExcelOutputPath(actualOutputPath.toString());
-        response.setBusinessRequirementOutputPath(actualBusinessOutputPath.toString());
+        response.setBusinessRequirementOutputPath(metadata.getBusinessRequirementOutputPath());
         response.setFunctionCount(results.size());
         response.setMovementRowCount(movementRows);
         response.setTotalCfp(totalCfp);

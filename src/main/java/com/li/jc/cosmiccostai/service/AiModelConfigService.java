@@ -35,7 +35,8 @@ public class AiModelConfigService {
 
     private static final Logger log = LoggerFactory.getLogger(AiModelConfigService.class);
     private static final String MASK_PREFIX = "********";
-    private static final String RETIRED_DEEPSEEK_V4_PRO = "deepseek-v4-pro";
+    private static final String RETIRED_DEEPSEEK_V4_FLASH = "deepseek-v4-flash";
+    private static final String RETIRED_DEEPSEEK_V4_FLASH_VISION = "deepseek-v4-flash-vision-exp";
     private static final String DEEPSEEK_V41_FLASH = "deepseek-flash";
     private final ObjectMapper objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     private final DeepSeekChatClient deepSeekChatClient = new DeepSeekChatClient(objectMapper);
@@ -201,7 +202,7 @@ public class AiModelConfigService {
             try {
                 AiModelSettings stored = objectMapper.readValue(Files.readAllBytes(configPath), AiModelSettings.class);
                 AiModelSettings normalized = normalize(stored, null);
-                if (migrateRetiredDeepSeekModels(normalized)) {
+                if (migrateRetiredDeepSeekFlashModels(normalized)) {
                     persist(normalized);
                 }
                 return normalized;
@@ -210,15 +211,17 @@ public class AiModelConfigService {
             }
         }
         AiModelSettings defaults = fromProperties(properties);
-        migrateRetiredDeepSeekModels(defaults);
+        migrateRetiredDeepSeekFlashModels(defaults);
         persist(defaults);
         return defaults;
     }
 
-    private boolean migrateRetiredDeepSeekModels(AiModelSettings value) {
+    private boolean migrateRetiredDeepSeekFlashModels(AiModelSettings value) {
         boolean migrated = false;
         for (AiModelProfile profile : value.getModels()) {
-            if (RETIRED_DEEPSEEK_V4_PRO.equalsIgnoreCase(text(profile.getModel()))
+            String model = text(profile.getModel());
+            if ((RETIRED_DEEPSEEK_V4_FLASH.equalsIgnoreCase(model)
+                    || RETIRED_DEEPSEEK_V4_FLASH_VISION.equalsIgnoreCase(model))
                     && DeepSeekPromptProfile.matches(profile)) {
                 profile.setModel(DEEPSEEK_V41_FLASH);
                 if ("DeepSeek 默认模型".equals(profile.getName())) {
@@ -228,7 +231,7 @@ public class AiModelConfigService {
             }
         }
         if (migrated) {
-            log.info("Migrated retired DeepSeek V4 Pro model profiles to DeepSeek V4.1 Flash ({})",
+            log.info("Migrated retired DeepSeek V4 Flash model names to DeepSeek V4.1 Flash ({})",
                     DEEPSEEK_V41_FLASH);
         }
         return migrated;

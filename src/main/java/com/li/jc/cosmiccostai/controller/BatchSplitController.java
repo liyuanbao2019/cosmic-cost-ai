@@ -154,6 +154,26 @@ public class BatchSplitController {
         return ApiResponse.ok(batchSplitService.retryProjectMaterials(batchId));
     }
 
+    @Operation(summary = "Generate final requirement Excel bundle", description = "Refresh only each completed requirement's final attachment 3 workbook and package the workbooks in one ZIP; Word and other review materials are skipped.")
+    @PostMapping("/{batchId}/excel-artifacts")
+    public ApiResponse<BatchSplitJobResponse> exportRequirementExcelArtifacts(@PathVariable String batchId) {
+        return ApiResponse.ok(batchSplitService.exportRequirementExcelArtifacts(batchId));
+    }
+
+    @Operation(summary = "Download final requirement Excel bundle", description = "Download the ZIP containing only final attachment 3 workbooks for the batch.")
+    @GetMapping("/{batchId}/excel-artifacts/download")
+    public ResponseEntity<Resource> downloadRequirementExcelArtifacts(@PathVariable String batchId) {
+        Path path = batchSplitService.requirementExcelArchiveFile(batchId);
+        ContentDisposition disposition = ContentDisposition.attachment()
+                .filename(path.getFileName().toString(), StandardCharsets.UTF_8)
+                .build();
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .contentLength(path.toFile().length())
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .body(new PathResource(path));
+    }
+
     @Operation(summary = "Generate requirement material bundle", description = "Generate every completed requirement's attachment 1-3 archive and wrap all requirement archives in one ZIP.")
     @PostMapping("/{batchId}/requirement-materials")
     public ApiResponse<BatchSplitJobResponse> exportRequirementMaterials(@PathVariable String batchId) {

@@ -220,6 +220,46 @@ class BatchSplitServiceTest {
     }
 
     @Test
+    void exportsFinalExcelBundleWithoutGeneratingReviewMaterials() throws Exception {
+        metadata.setSourceFileName("人工复核完成.xlsx");
+        metadata.setFileType("xlsx");
+        metadata.setStatus("EXCEL_IMPORTED");
+        Path archivePath = Files.write(tempDir.resolve("全部最终Excel.zip"), new byte[]{1});
+        ProjectMaterialExportService.RequirementBatchArchive excelArchive =
+                mock(ProjectMaterialExportService.RequirementBatchArchive.class);
+        when(excelArchive.getArchivePath()).thenReturn(archivePath);
+        when(excelArchive.getSuccessCount()).thenReturn(1);
+        when(excelArchive.getFailedProjects()).thenReturn(Collections.<String>emptyList());
+        when(projectMaterialExportService.exportRequirementExcelArtifacts(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class)))
+                .thenReturn(excelArchive);
+        BatchSplitCreateRequest request = createRequest();
+        request.setReuseDegreeAdjustmentEnabled(false);
+        BatchSplitJobResponse created = service.create(request);
+        service.start(created.getBatchId());
+
+        BatchSplitJobResponse exported = service.exportRequirementExcelArtifacts(created.getBatchId());
+
+        assertEquals("COMPLETED", exported.getRequirementExcelStatus());
+        assertEquals(1, exported.getRequirementExcelSuccessCount());
+        assertEquals(0, exported.getRequirementExcelFailedCount());
+        assertTrue(exported.getRequirementExcelArchive() != null);
+        assertEquals(archivePath.toAbsolutePath().normalize(),
+                service.requirementExcelArchiveFile(created.getBatchId()));
+        verify(projectMaterialExportService).exportRequirementExcelArtifacts(eq(created.getBatchId()),
+                eq(Arrays.asList(metadata.getId())),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
+        verify(projectMaterialExportService, never()).exportRequirementArchives(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.<String>anyList(),
+                any(ProjectMaterialExportService.RequirementArchiveProgressListener.class));
+        verify(projectMaterialExportService, never()).export(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.<String>anyList());
+    }
+
+    @Test
     void confirmingValidSelectedContentClearsTheEarlyParseWarning() {
         ParseResponse parsedWithWarning = new ParseResponse();
         parsedWithWarning.setRequirementRecognized(false);

@@ -53,6 +53,8 @@ public class AiModelProperties {
         private int maxRetries = 0;
         private int partitionParallelism = 4;
         private int partitionChars = 18000;
+        private int reusePartitionRows = 300;
+        private int reusePartitionTargetChars = 140000;
 
         public long getTimeoutSeconds() { return timeoutSeconds; }
         public void setTimeoutSeconds(long timeoutSeconds) { this.timeoutSeconds = timeoutSeconds; }
@@ -62,6 +64,10 @@ public class AiModelProperties {
         public void setPartitionParallelism(int partitionParallelism) { this.partitionParallelism = partitionParallelism; }
         public int getPartitionChars() { return partitionChars; }
         public void setPartitionChars(int partitionChars) { this.partitionChars = partitionChars; }
+        public int getReusePartitionRows() { return reusePartitionRows; }
+        public void setReusePartitionRows(int reusePartitionRows) { this.reusePartitionRows = reusePartitionRows; }
+        public int getReusePartitionTargetChars() { return reusePartitionTargetChars; }
+        public void setReusePartitionTargetChars(int value) { this.reusePartitionTargetChars = value; }
     }
 
     public static class DeepSplit {

@@ -2248,6 +2248,52 @@ button.mini {
   background: #94a3b8;
 }
 
+.review-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  color: var(--secondary);
+  font-size: 12px;
+}
+
+.review-page-summary {
+  font-weight: 600;
+}
+
+.review-page-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.review-page-controls select {
+  width: 86px;
+  height: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.review-page-controls button {
+  min-width: 64px;
+}
+
+@media (max-width: 720px) {
+  .review-pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .review-page-controls {
+    flex-wrap: wrap;
+  }
+}
+
 .w-select {
   width: 36px;
   min-width: 36px;
