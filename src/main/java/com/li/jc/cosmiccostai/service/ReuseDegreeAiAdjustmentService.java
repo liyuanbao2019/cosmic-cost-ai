@@ -20,6 +20,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -51,7 +52,9 @@ import java.time.format.DateTimeFormatter;
 public class ReuseDegreeAiAdjustmentService {
 
     private static final Logger log = LoggerFactory.getLogger(ReuseDegreeAiAdjustmentService.class);
-    private static final int MAX_ADAPTIVE_SPLIT_DEPTH = 4;
+    private static final int MAX_ADAPTIVE_SPLIT_DEPTH = 8;
+    private static final int MAX_COMPARISON_ROWS = 600;
+    private static final int MAX_COMPARISON_CHARS = 220000;
     private static final Set<String> REUSE_VALUES = new HashSet<String>(
             Arrays.asList("新增", "复用", "利旧"));
     private static final Set<String> AUDIT_DIMENSIONS = new HashSet<String>(
@@ -215,9 +218,11 @@ public class ReuseDegreeAiAdjustmentService {
         builder.append("【本段待判断目标行，共 ").append(targetIndexes.size()).append(" 行】\n");
         builder.append(rowsJson(rows, targetIndexes));
         builder.append("\n【本段目标行结束】\n\n");
+        ComparisonContext comparison = comparisonRowsJson(rows, targetIndexes);
         builder.append("【完整拆分表，共 ").append(rows.size()).append(" 行的跨分段比对索引】\n");
-        builder.append("【全表跨分段比对索引，共 ").append(rows.size()).append(" 行】\n");
-        builder.append(comparisonRowsJson(rows));
+        builder.append("【全表跨分段比对候选索引，已由服务端按模块、功能过程和审核三要素从 ")
+                .append(rows.size()).append(" 行筛选 ").append(comparison.rowCount).append(" 行】\n");
+        builder.append(comparison.json);
         builder.append("\n【全表跨分段比对索引结束】");
         String prompt = builder.toString();
         return aiModelConfigService.isDeepSeekActive()
@@ -388,9 +393,15 @@ public class ReuseDegreeAiAdjustmentService {
             return Collections.singletonList(partition);
         }
         int targetChars = rowsJson(rows, partition).length();
-        return splitPartition(rows, partition,
+        List<List<Integer>> grouped = splitPartition(rows, partition,
                 Math.max(1, (partition.size() + 1) / 2),
                 Math.max(1000, (targetChars + 1) / 2));
+        if (grouped.size() > 1) return grouped;
+        int middle = (partition.size() + 1) / 2;
+        List<List<Integer>> rowFallback = new ArrayList<List<Integer>>();
+        rowFallback.add(new ArrayList<Integer>(partition.subList(0, middle)));
+        rowFallback.add(new ArrayList<Integer>(partition.subList(middle, partition.size())));
+        return rowFallback;
     }
 
     private int bestReferencePartition(List<FunctionSplitRow> rows,
@@ -550,16 +561,19 @@ public class ReuseDegreeAiAdjustmentService {
                                                String prompt,
                                                int depth) {
         try {
-            return aiModelConfigService.generateForTask(
+            String response = aiModelConfigService.generateForTask(
                     prompt, AiPromptTask.REUSE_ADJUSTMENT, false, 0, projectId, null);
+            parseDecisions(response);
+            return response;
         } catch (RuntimeException failure) {
-            if (!isOutputLengthFailure(failure) || depth >= MAX_ADAPTIVE_SPLIT_DEPTH) {
+            if (!isRecoverablePartitionFailure(failure) || depth >= MAX_ADAPTIVE_SPLIT_DEPTH) {
                 throw failure;
             }
             List<List<Integer>> children = splitPartitionInHalf(rows, targetIndexes);
             if (children.size() <= 1) throw failure;
-            log.info("Reuse partition reached output limit and will be split automatically. projectId={}, part={}/{}, depth={}, rows={}, children={}",
-                    projectId, partNumber, totalParts, depth + 1, targetIndexes.size(), children.size());
+            log.info("Reuse partition returned a recoverable structured-output failure and will be split automatically. projectId={}, part={}/{}, depth={}, rows={}, children={}, reason={}",
+                    projectId, partNumber, totalParts, depth + 1, targetIndexes.size(), children.size(),
+                    compactFailureMessage(failure));
             List<ReuseDegreeAdjustmentDecision> combined =
                     new ArrayList<ReuseDegreeAdjustmentDecision>();
             for (List<Integer> child : children) {
@@ -574,18 +588,27 @@ public class ReuseDegreeAiAdjustmentService {
         }
     }
 
-    private boolean isOutputLengthFailure(Throwable failure) {
+    private boolean isRecoverablePartitionFailure(Throwable failure) {
         Throwable current = failure;
         while (current != null) {
             String message = current.getMessage();
             if (StringUtils.hasText(message)
                     && (message.contains("结构化输出达到长度上限")
-                    || message.contains("finish_reason=length"))) {
+                    || message.contains("finish_reason=length")
+                    || message.contains("返回了空的结构化结果")
+                    || message.contains("没有返回 JSON 对象")
+                    || message.contains("结果缺少 decisions 数组")
+                    || message.contains("结果不是合法 JSON"))) {
                 return true;
             }
             current = current.getCause();
         }
         return false;
+    }
+
+    private String compactFailureMessage(Throwable failure) {
+        String message = failure == null ? "" : text(failure.getMessage());
+        return message.length() <= 160 ? message : message.substring(0, 160) + "...";
     }
 
     private String cachedReuseResponse(Path projectDir, String currentPrompt) {
@@ -607,11 +630,17 @@ public class ReuseDegreeAiAdjustmentService {
     }
 
     private boolean cacheEquivalentPrompt(String currentPrompt, String cachedPrompt) {
-        String current = PARTITION_NUMBER.matcher(text(currentPrompt))
-                .replaceFirst("【并发分段】第 */* 段；");
-        String cached = PARTITION_NUMBER.matcher(text(cachedPrompt))
-                .replaceFirst("【并发分段】第 */* 段；");
+        String current = cacheIdentity(currentPrompt);
+        String cached = cacheIdentity(cachedPrompt);
         return current.equals(cached);
+    }
+
+    private String cacheIdentity(String prompt) {
+        String value = PARTITION_NUMBER.matcher(text(prompt))
+                .replaceFirst("【并发分段】第 */* 段；");
+        String marker = "【本段目标行结束】";
+        int end = value.indexOf(marker);
+        return end < 0 ? value : value.substring(0, end + marker.length());
     }
 
     private String readText(Path path) {
@@ -1292,12 +1321,95 @@ public class ReuseDegreeAiAdjustmentService {
         return json(values, "生成复用度分段判断输入失败。");
     }
 
-    private String comparisonRowsJson(List<FunctionSplitRow> rows) {
-        List<Map<String, Object>> values = new ArrayList<Map<String, Object>>();
+    private ComparisonContext comparisonRowsJson(List<FunctionSplitRow> rows,
+                                                 List<Integer> targetIndexes) {
+        List<Integer> indexes = new ArrayList<Integer>();
+        if (rows.size() <= MAX_COMPARISON_ROWS) {
+            for (int index = 1; index <= rows.size(); index++) indexes.add(index);
+            String json = comparisonRowsJsonForIndexes(rows, indexes);
+            return new ComparisonContext(json, indexes.size());
+        }
+
+        Set<Integer> targets = new HashSet<Integer>(targetIndexes == null
+                ? Collections.<Integer>emptyList() : targetIndexes);
+        List<ComparisonCandidate> candidates = new ArrayList<ComparisonCandidate>();
         for (int index = 0; index < rows.size(); index++) {
-            FunctionSplitRow row = rows.get(index);
+            int rowIndex = index + 1;
+            if (targets.contains(rowIndex)) continue;
+            int score = comparisonScore(rows.get(index), rows, targetIndexes);
+            if (score > 0) candidates.add(new ComparisonCandidate(rowIndex, score));
+        }
+        Collections.sort(candidates, new Comparator<ComparisonCandidate>() {
+            @Override
+            public int compare(ComparisonCandidate left, ComparisonCandidate right) {
+                int byScore = Integer.compare(right.score, left.score);
+                return byScore != 0 ? byScore : Integer.compare(left.rowIndex, right.rowIndex);
+            }
+        });
+        for (ComparisonCandidate candidate : candidates) {
+            if (indexes.size() >= MAX_COMPARISON_ROWS) break;
+            indexes.add(candidate.rowIndex);
+        }
+        if (indexes.isEmpty()) {
+            for (int index = 1; index <= rows.size() && indexes.size() < 100; index++) {
+                if (!targets.contains(index)) indexes.add(index);
+            }
+        }
+        Collections.sort(indexes);
+        String json = comparisonRowsJsonForIndexes(rows, indexes);
+        while (json.length() > MAX_COMPARISON_CHARS && indexes.size() > 50) {
+            int remove = Math.min(25, indexes.size() - 50);
+            indexes = new ArrayList<Integer>(indexes.subList(0, indexes.size() - remove));
+            json = comparisonRowsJsonForIndexes(rows, indexes);
+        }
+        return new ComparisonContext(json, indexes.size());
+    }
+
+    private int comparisonScore(FunctionSplitRow candidate,
+                                List<FunctionSplitRow> rows,
+                                List<Integer> targetIndexes) {
+        int best = 0;
+        for (Integer targetIndex : targetIndexes == null
+                ? Collections.<Integer>emptyList() : targetIndexes) {
+            if (targetIndex == null || targetIndex < 1 || targetIndex > rows.size()) continue;
+            FunctionSplitRow target = rows.get(targetIndex - 1);
+            int score = 0;
+            if (FunctionProcessKey.of(candidate).equals(FunctionProcessKey.of(target))) score += 500;
+            else if (sameText(candidate.getFunctionProcess(), target.getFunctionProcess())) score += 300;
+            else if (containsEither(candidate.getFunctionProcess(), target.getFunctionProcess())) score += 40;
+            if (sameText(candidate.getSubProcessDescription(), target.getSubProcessDescription())) score += 90;
+            if (sameText(candidate.getMovementType(), target.getMovementType())) score += 25;
+            if (sameText(candidate.getDataAttributes(), target.getDataAttributes())) score += 100;
+            if (sameText(candidate.getDataGroup(), target.getDataGroup())) score += 60;
+            if (sameText(candidate.getLevel3Module(), target.getLevel3Module())) score += 80;
+            if (sameText(candidate.getLevel2Module(), target.getLevel2Module())) score += 40;
+            if (sameText(candidate.getLevel1Module(), target.getLevel1Module())) score += 20;
+            if (sameText(candidate.getFunctionalUser(), target.getFunctionalUser())) score += 15;
+            if (sameText(candidate.getTriggerEvent(), target.getTriggerEvent())) score += 15;
+            best = Math.max(best, score);
+        }
+        return best;
+    }
+
+    private boolean sameText(String left, String right) {
+        String first = text(left);
+        return StringUtils.hasText(first) && first.equals(text(right));
+    }
+
+    private boolean containsEither(String left, String right) {
+        String first = text(left);
+        String second = text(right);
+        return first.length() >= 2 && second.length() >= 2
+                && (first.contains(second) || second.contains(first));
+    }
+
+    private String comparisonRowsJsonForIndexes(List<FunctionSplitRow> rows, List<Integer> indexes) {
+        List<Map<String, Object>> values = new ArrayList<Map<String, Object>>();
+        for (Integer rowIndex : indexes) {
+            if (rowIndex == null || rowIndex < 1 || rowIndex > rows.size()) continue;
+            FunctionSplitRow row = rows.get(rowIndex - 1);
             Map<String, Object> value = new LinkedHashMap<String, Object>();
-            value.put("rowIndex", index + 1);
+            value.put("rowIndex", rowIndex);
             value.put("module", moduleLabel(row));
             value.put("functionProcess", text(row.getFunctionProcess()));
             value.put("subProcessDescription", text(row.getSubProcessDescription()));
@@ -1473,6 +1585,26 @@ public class ReuseDegreeAiAdjustmentService {
 
         private void notifyProgress(List<AiPartitionProgressItem> snapshot) {
             if (listener != null) listener.onPartitionProgress(snapshot);
+        }
+    }
+
+    private static final class ComparisonContext {
+        private final String json;
+        private final int rowCount;
+
+        private ComparisonContext(String json, int rowCount) {
+            this.json = json;
+            this.rowCount = rowCount;
+        }
+    }
+
+    private static final class ComparisonCandidate {
+        private final int rowIndex;
+        private final int score;
+
+        private ComparisonCandidate(int rowIndex, int score) {
+            this.rowIndex = rowIndex;
+            this.score = score;
         }
     }
 

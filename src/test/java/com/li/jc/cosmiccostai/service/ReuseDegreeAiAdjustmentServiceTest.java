@@ -170,8 +170,11 @@ class ReuseDegreeAiAdjustmentServiceTest {
         List<FunctionSplitRow> rows = Arrays.asList(
                 row("功能A", "接收A", "E", "A", "编号", "新增"),
                 row("功能B", "接收B", "E", "B", "编号", "新增"));
+        String cachedPrompt = service.buildPrompt(rows);
+        int targetEnd = cachedPrompt.indexOf("【本段目标行结束】") + "【本段目标行结束】".length();
+        cachedPrompt = cachedPrompt.substring(0, targetEnd) + "\n旧版全表索引格式";
         Files.write(projectDir.resolve("reuse-prompt-part-1.txt"),
-                service.buildPrompt(rows).getBytes(StandardCharsets.UTF_8));
+                cachedPrompt.getBytes(StandardCharsets.UTF_8));
         Files.write(projectDir.resolve("reuse-response-part-1.txt"),
                 "{\"decisions\":[]}".getBytes(StandardCharsets.UTF_8));
 
@@ -315,6 +318,73 @@ class ReuseDegreeAiAdjustmentServiceTest {
 
         assertEquals(2, response.getTotalRows());
         assertEquals(3, requests.get());
+    }
+
+    @Test
+    void automaticallySplitsAnEmptyStructuredResult() {
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        ReviewService review = mock(ReviewService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-empty-adaptive");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        AtomicInteger requests = new AtomicInteger();
+        when(ai.generateForTask(any(String.class), eq(AiPromptTask.REUSE_ADJUSTMENT),
+                eq(false), eq(0), any(String.class), isNull()))
+                .thenAnswer(invocation -> {
+                    requests.incrementAndGet();
+                    String prompt = invocation.getArgument(0);
+                    if (prompt.contains("【本段待判断目标行，共 2 行】")) {
+                        throw new BusinessException("DeepSeek 返回了空的结构化结果，请重试。");
+                    }
+                    return "{\"decisions\":[]}";
+                });
+        when(review.saveReuseAdjustedReview(eq("empty-adaptive-project"), any()))
+                .thenAnswer(invocation -> {
+                    ReviewResponse saved = new ReviewResponse();
+                    saved.setSplitRows(invocation.getArgument(1));
+                    return saved;
+                });
+        AiModelProperties properties = new AiModelProperties();
+        properties.getExtraction().setReusePartitionRows(100);
+        properties.getExtraction().setReusePartitionTargetChars(100000);
+        ReuseDegreeAiAdjustmentService service = new ReuseDegreeAiAdjustmentService(
+                ai, rules, review, null, properties);
+        List<FunctionSplitRow> rows = Arrays.asList(
+                row("功能A", "接收A", "E", "A", "编号", "新增"),
+                row("功能B", "接收B", "E", "B", "编号", "新增"));
+
+        ReuseDegreeAdjustmentResponse response = service.adjust("empty-adaptive-project", rows);
+
+        assertEquals(2, response.getTotalRows());
+        assertEquals(3, requests.get());
+    }
+
+    @Test
+    void boundsComparisonContextForLargeExcelWorkbooks() {
+        AiModelConfigService ai = mock(AiModelConfigService.class);
+        SplitRuleConfigService rules = mock(SplitRuleConfigService.class);
+        when(rules.getEffectiveRulesPrompt()).thenReturn("RULES");
+        when(rules.getRuleVersion()).thenReturn("R-large-context");
+        when(ai.isDeepSeekActive()).thenReturn(false);
+        ReuseDegreeAiAdjustmentService service = service(ai, rules, mock(ReviewService.class));
+        List<FunctionSplitRow> rows = new ArrayList<FunctionSplitRow>();
+        for (int index = 1; index <= 3390; index++) {
+            FunctionSplitRow row = row("功能" + index, "处理业务数据" + index,
+                    index % 2 == 0 ? "R" : "E", "数据组" + index,
+                    repeat("业务属性", 12) + index, "新增");
+            row.setLevel1Module("资源全生命周期流程");
+            row.setLevel2Module("专业" + (index % 20));
+            row.setLevel3Module("场景" + (index % 100));
+            rows.add(row);
+        }
+        List<Integer> targets = new ArrayList<Integer>();
+        for (int index = 1; index <= 120; index++) targets.add(index);
+
+        String prompt = service.buildPrompt(rows, targets, 1, 30);
+
+        assertTrue(prompt.contains("从 3390 行筛选"));
+        assertTrue(prompt.length() < 400000, "prompt chars=" + prompt.length());
     }
 
     @Test
