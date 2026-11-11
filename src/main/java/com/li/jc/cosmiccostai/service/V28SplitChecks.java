@@ -43,6 +43,8 @@ final class V28SplitChecks {
         TITLES.put("V13", "模板化补齐行");
         TITLES.put("V15", "调度基础设施过程");
         TITLES.put("V21", "优化/扩容类标题下按新增申报");
+        TITLES.put("V31", "申报 CFP / 唯一事务数大于 3.5");
+        TITLES.put("V34", "新建档占比偏高");
         TITLES.put("V35", "数据组为英文代号或占位");
         TITLES.put("V36", "状态词过程名或子过程非动词开头");
         TITLES.put("V37", "数据属性少于 2 个");
@@ -236,7 +238,7 @@ final class V28SplitChecks {
             FunctionSplitRow row = rows.get(indexes.get(k));
             String reuse = safe(row.getReuseDegree());
             all.add(reuse);
-            boolean timerEntry = k == 0 && SCHEDULE_WORDS.matcher(trigger).find();
+            boolean timerEntry = k == 0 && isScheduled(trigger);
             boolean logWrite = "W".equals(movement(row)) && LOG_WRITE.matcher(safe(row.getSubProcessDescription())).find();
             if (!timerEntry && !logWrite) {
                 body.add(reuse);
@@ -434,6 +436,42 @@ final class V28SplitChecks {
 
     static String normalizeName(String value) {
         return NAME_NORMALIZE.matcher(safe(value)).replaceAll("");
+    }
+
+    /** 去掉层级与粒度后的过程名，用于识别加工链变体（v2.8 第 3.2 节第 2 步）。 */
+    static String normalizeVariant(String value) {
+        return GRANULARITY.matcher(normalizeName(value)).replaceAll("");
+    }
+
+    /** 日志/调用记录/操作记录 W：v2.8 允许单独按 1/3，不参与过程级复用度统一。 */
+    static boolean isLogWrite(FunctionSplitRow row) {
+        return "W".equals(movement(row)) && LOG_WRITE.matcher(safe(row.getSubProcessDescription())).find();
+    }
+
+    static boolean isUiProcess(String process) {
+        return UI_WORDS.matcher(safe(process)).find();
+    }
+
+    static boolean isInternalTrigger(String trigger) {
+        String value = safe(trigger);
+        return INTERNAL_TRIGGER.matcher(value).find() && !(value.contains("接口") || value.contains("调用本系统"));
+    }
+
+    static boolean isTemplateStage(String process) {
+        return TEMPLATE_STAGE.matcher(safe(process)).find();
+    }
+
+    static boolean isSchedulerInfrastructure(String process) {
+        return SCHEDULER_INFRA.matcher(safe(process)).find();
+    }
+
+    static boolean isOptimizeTitle(String modules) {
+        return OPTIMIZE_TITLE.matcher(safe(modules)).find();
+    }
+
+    static boolean isScheduled(String trigger) {
+        String value = safe(trigger).replace("调度员", "");
+        return SCHEDULE_WORDS.matcher(value).find() || TIMER_TRIGGER.matcher(value).find();
     }
 
     private static int countAttributes(String attributes) {

@@ -3,6 +3,7 @@ package com.li.jc.cosmiccostai.service;
 import com.li.jc.cosmiccostai.dto.RuleCheckSummary;
 import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
+import com.li.jc.cosmiccostai.dto.StrictEstimate;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -107,9 +108,40 @@ public class RuleValidationService {
             validateKeywords(response, rows.get(i), i + 1, structureRiskRows.contains(i + 1), highRiskKeywords);
         }
         response.getIssues().addAll(V28SplitChecks.check(rows));
+        StrictEstimate estimate = TransactionTierEstimator.estimate(rows);
+        response.setStrictEstimate(estimate);
+        validateTransactionStatistics(response, estimate);
         fillCfpImpact(response, rows);
         finish(response);
         return response;
+    }
+
+    /** 统计类检查只在成立事务较多时判断，避免小样本误报。 */
+    static final int TRANSACTION_STATISTICS_MIN = 10;
+
+    /** V31 申报/事务数 > 3.5；V34 新建档占比 > 50%（研发类实证上限）。 */
+    private void validateTransactionStatistics(RuleValidationResponse response, StrictEstimate estimate) {
+        if (estimate == null || estimate.getTransactionCount() < TRANSACTION_STATISTICS_MIN) {
+            return;
+        }
+        double reduction = Math.max(0D, estimate.getDeclaredCfp() - estimate.getStrictCfp());
+        if (estimate.getDeclaredPerTransaction() > 3.5D) {
+            RuleValidationIssue issue = add(response, 0, "", "事务级", "RISK",
+                    "V31 申报 CFP / 唯一事务数 = " + formatCfp(estimate.getDeclaredPerTransaction())
+                            + "（申报 " + formatCfp(estimate.getDeclaredCfp()) + "，事务 " + estimate.getTransactionCount()
+                            + " 个），大于 3.5，申报结构必被压到事务数量级；严口径预估 " + formatCfp(estimate.getStrictCfp()),
+                    "每个事务按三行骨架写，删掉中间 R/W；把额度投向可区分的处理逻辑数量，而不是行数。");
+            issue.setRuleCode("V31");
+            issue.setCfpImpact(reduction);
+        }
+        if (estimate.getNewShare() > 0.5D) {
+            RuleValidationIssue issue = add(response, 0, "", "事务级", "RISK",
+                    "V34 新建档事务占比 " + Math.round(estimate.getNewShare() * 100D) + "%，高于研发类实证上限 50%"
+                            + "（扩容/优化类项目上限约 25%）",
+                    "核对每个新建档是否是需求说明书中有独立章节、对端系统或字段清单的新对象；只是名字不同的按改造。");
+            issue.setRuleCode("V34");
+            issue.setCfpImpact(reduction);
+        }
     }
 
     /** 未单独计算影响的问题，按所在行当前 CFP 记为“涉及 CFP”。 */

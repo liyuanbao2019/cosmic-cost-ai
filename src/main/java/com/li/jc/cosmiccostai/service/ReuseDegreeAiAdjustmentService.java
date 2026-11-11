@@ -153,6 +153,7 @@ public class ReuseDegreeAiAdjustmentService {
             }
             List<ReuseDegreeAdjustmentDecision> moduleRuleDecisions =
                     applyModuleReusePlan(rows, moduleReusePlan);
+            moduleRuleDecisions.addAll(unifyProcessReuse(rows));
             summary.applied += moduleRuleDecisions.size();
             ReviewResponse saved = reviewService.saveReuseAdjustedReview(projectId, rows);
             List<FunctionSplitRow> savedRows = saved.getSplitRows() == null ? rows : saved.getSplitRows();
@@ -744,6 +745,65 @@ public class ReuseDegreeAiAdjustmentService {
             summary.warnings.add("有 " + summary.skipped + " 条模型建议未通过服务端证据闸门，已保持原复用度。 ");
         }
         return summary;
+    }
+
+    /**
+     * v2.8 过程级复用度（规则 11-2 / V40）：同一功能过程的新增与复用不得混填。
+     * 按事务三档定档统一：新建档（新、定）→ 新增，改造档与不成立 → 复用。
+     * 定时首 E、日志 W 允许单独为复用，利旧行（判 N 的行）保持不动。
+     */
+    List<ReuseDegreeAdjustmentDecision> unifyProcessReuse(List<FunctionSplitRow> rows) {
+        List<ReuseDegreeAdjustmentDecision> decisions = new ArrayList<ReuseDegreeAdjustmentDecision>();
+        Map<String, String> tiers = TransactionTierEstimator.tiersByProcessKey(rows);
+        for (Map.Entry<String, List<Integer>> entry : TransactionTierEstimator.groupProcesses(rows).entrySet()) {
+            List<Integer> indexes = entry.getValue();
+            String trigger = text(rows.get(indexes.get(0)).getTriggerEvent());
+            List<Integer> body = new ArrayList<Integer>();
+            Set<String> values = new HashSet<String>();
+            for (int k = 0; k < indexes.size(); k++) {
+                FunctionSplitRow row = rows.get(indexes.get(k));
+                String reuse = normalizeReuse(row.getReuseDegree());
+                boolean timerEntry = k == 0 && V28SplitChecks.isScheduled(trigger);
+                if (timerEntry || V28SplitChecks.isLogWrite(row) || "利旧".equals(reuse)) {
+                    continue;
+                }
+                body.add(indexes.get(k));
+                values.add(reuse);
+            }
+            if (!(values.contains("新增") && values.contains("复用"))) {
+                continue;
+            }
+            String tier = tiers.get(entry.getKey());
+            String target = TransactionTierEstimator.NEW.equals(tier) || TransactionTierEstimator.TIMER_NEW.equals(tier)
+                    ? "新增" : "复用";
+            for (Integer index : body) {
+                FunctionSplitRow row = rows.get(index);
+                String original = normalizeReuse(row.getReuseDegree());
+                if (target.equals(original)) {
+                    continue;
+                }
+                row.setReuseDegree(target);
+                row.setCfp(cfp(target));
+                row.setReuseBasis("PROCESS_LEVEL_UNIFY");
+                row.setReuseRuleId("V40");
+                ReuseDegreeAdjustmentDecision decision = new ReuseDegreeAdjustmentDecision();
+                decision.setRowIndex(index + 1);
+                decision.setOriginalReuseDegree(original);
+                decision.setSuggestedReuseDegree(target);
+                decision.setSuggestedCfp(cfp(target));
+                decision.setDecisionType("PROCESS_LEVEL_UNIFY");
+                decision.setRuleId("V40");
+                decision.setRowScope("PROCESS");
+                decision.setDuplicateScope("PROCESS");
+                decision.setReason("同一功能过程新增与复用混填，按事务三档定档（" + tier + "）整过程统一为" + target + "。");
+                decision.setEvidenceSufficient(true);
+                decision.setConfidence(1D);
+                decision.setApplied(true);
+                decision.setApplyMessage("已按 v2.8 过程级复用度统一为" + target + "，CFP=" + formatCfp(cfp(target)) + "。");
+                decisions.add(decision);
+            }
+        }
+        return decisions;
     }
 
     List<ReuseDegreeAdjustmentDecision> applyModuleReuseDefaults(List<FunctionSplitRow> rows) {

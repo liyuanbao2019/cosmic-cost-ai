@@ -16,6 +16,8 @@ public class RuleValidationResponse {
     private List<RuleValidationIssue> issues = new ArrayList<RuleValidationIssue>();
     /** 按规则编号汇总（命中行数、涉及 CFP），按涉及 CFP 从大到小排序。 */
     private List<RuleCheckSummary> ruleSummaries = new ArrayList<RuleCheckSummary>();
+    /** 事务三档法严口径预估（v2.8）。 */
+    private StrictEstimate strictEstimate;
 
     public int getTotalRows() {
         return totalRows;
@@ -88,6 +90,14 @@ public class RuleValidationResponse {
     public void setIssues(List<RuleValidationIssue> issues) {
         this.issues = issues;
     }
+    public StrictEstimate getStrictEstimate() {
+        return strictEstimate;
+    }
+
+    public void setStrictEstimate(StrictEstimate strictEstimate) {
+        this.strictEstimate = strictEstimate;
+    }
+
     public List<RuleCheckSummary> getRuleSummaries() {
         return ruleSummaries;
     }
