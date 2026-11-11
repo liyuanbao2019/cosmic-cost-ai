@@ -403,7 +403,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
                 rows, Arrays.asList(accepted, rejected));
 
         assertEquals("复用", rows.get(0).getReuseDegree());
-        assertEquals(0.33D, rows.get(0).getCfp(), 0.0001D);
+        assertEquals(1D / 3D, rows.get(0).getCfp(), 1e-12);
         assertTrue(accepted.isApplied());
         assertEquals("新增", rows.get(1).getReuseDegree());
         assertFalse(rejected.isApplied());
@@ -526,7 +526,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
                 .adjust("p-xj-timer", rows);
 
         assertEquals("复用", response.getRows().get(0).getReuseDegree());
-        assertEquals(0.33D, response.getRows().get(0).getCfp(), 0.0001D);
+        assertEquals(1D / 3D, response.getRows().get(0).getCfp(), 1e-12);
         assertEquals("RULE_POLICY", response.getRows().get(0).getReuseBasis());
         assertEquals("XJ-TIMER-E", response.getRows().get(0).getReuseRuleId());
         assertEquals("新增", response.getRows().get(1).getReuseDegree());
@@ -593,7 +593,9 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertTrue(prompt.contains("降低后续核减率"));
         assertTrue(prompt.contains("不追求 CFP 多，也不追求 CFP 少"));
         assertTrue(prompt.contains("三项完全相同但整个功能过程并不重复"));
-        assertTrue(prompt.contains("当前行自动设为复用/0.33"));
+        assertTrue(prompt.contains("当前行自动设为复用/精确 1/3"));
+        assertTrue(prompt.contains("按 v2.8 事务三档法"));
+        assertFalse(prompt.contains("复用=0.33"));
         assertTrue(prompt.contains("导入或上传若是同模块新增数据功能的配套能力"));
         assertTrue(prompt.contains("若同模块不存在新增功能则可作为新增基准"));
         assertTrue(prompt.contains("同模块修改、删除、导出、下载功能过程的全部子过程设为复用"));
@@ -650,8 +652,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals("复用", response.getRows().get(5).getReuseDegree());
         assertEquals("复用", response.getRows().get(6).getReuseDegree());
         assertEquals(1D, response.getRows().get(0).getCfp(), 0.0001D);
-        assertEquals(0.33D, response.getRows().get(2).getCfp(), 0.0001D);
-        assertEquals(3.65D, response.getCfpAfter(), 0.0001D);
+        assertEquals(1D / 3D, response.getRows().get(2).getCfp(), 1e-12);
+        assertEquals(3.67D, response.getCfpAfter(), 0.0001D);
         for (ReuseDegreeAdjustmentDecision decision : response.getDecisions()) {
             assertEquals("MODULE_ANCHOR_DEFAULT", decision.getDuplicateScope());
             assertTrue(decision.isApplied());
@@ -689,8 +691,8 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals("新增", rows.get(0).getReuseDegree());
         assertEquals("复用", rows.get(1).getReuseDegree());
         assertEquals("复用", rows.get(2).getReuseDegree());
-        assertEquals(0.33D, rows.get(1).getCfp(), 0.0001D);
-        assertEquals(0.33D, rows.get(2).getCfp(), 0.0001D);
+        assertEquals(1D / 3D, rows.get(1).getCfp(), 1e-12);
+        assertEquals(1D / 3D, rows.get(2).getCfp(), 1e-12);
         assertEquals(Collections.singletonList(1), decisions.get(0).getReferenceRowIndexes());
         assertTrue(decisions.get(0).getReason().contains("配套能力"));
     }
@@ -740,7 +742,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         }
         for (int index = 6; index < rows.size(); index++) {
             assertEquals("复用", rows.get(index).getReuseDegree());
-            assertEquals(0.33D, rows.get(index).getCfp(), 0.0001D);
+            assertEquals(1D / 3D, rows.get(index).getCfp(), 1e-12);
         }
     }
 
@@ -777,7 +779,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         assertEquals(1, decisions.size());
         assertEquals("新增", rows.get(0).getReuseDegree());
         assertEquals("复用", rows.get(1).getReuseDegree());
-        assertEquals(0.33D, rows.get(1).getCfp(), 0.0001D);
+        assertEquals(1D / 3D, rows.get(1).getCfp(), 1e-12);
         assertEquals("CROSS_FUNCTION_TWO_DIMENSIONS", decisions.get(0).getDuplicateScope());
         assertEquals(Collections.singletonList(1), decisions.get(0).getReferenceRowIndexes());
         assertTrue(decisions.get(0).getMatchedDimensions().contains("movementType"));
@@ -825,7 +827,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
 
         assertEquals(1, decisions.size());
         assertEquals("复用", secondRead.getReuseDegree());
-        assertEquals(0.33D, secondRead.getCfp(), 0.0001D);
+        assertEquals(1D / 3D, secondRead.getCfp(), 1e-12);
         assertEquals("CROSS_FUNCTION_SHARED_MOVEMENT", decisions.get(0).getDuplicateScope());
         assertEquals(Collections.singletonList(2), decisions.get(0).getReferenceRowIndexes());
         assertEquals(3, decisions.get(0).getMatchedDimensions().size());
@@ -873,7 +875,7 @@ class ReuseDegreeAiAdjustmentServiceTest {
         row.setDataGroup(group);
         row.setDataAttributes(attributes);
         row.setReuseDegree(reuse);
-        row.setCfp("复用".equals(reuse) ? 0.33D : ("利旧".equals(reuse) ? 0D : 1D));
+        row.setCfp("复用".equals(reuse) ? 1D / 3D : ("利旧".equals(reuse) ? 0D : 1D));
         row.setSourceReferences(new ArrayList<String>());
         return row;
     }

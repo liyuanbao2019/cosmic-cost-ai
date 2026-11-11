@@ -136,7 +136,8 @@ final class FunctionSplitRowFactory {
         }
         String object = value.startsWith("接收") ? value.substring(2) : value;
         object = stripRequestSuffix(object);
-        return "返回" + (StringUtils.hasText(object) ? object : "业务") + "处理结果";
+        // v2.8：不生成“返回XX处理结果”模板化 X，改写为具体对象的结果输出。
+        return "输出" + (StringUtils.hasText(object) ? object : "业务") + "结果";
     }
 
     private static String fallbackDescription(String type, String function) {

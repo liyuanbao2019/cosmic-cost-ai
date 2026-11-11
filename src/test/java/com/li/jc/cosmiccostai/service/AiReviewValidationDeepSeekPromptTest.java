@@ -68,7 +68,7 @@ class AiReviewValidationDeepSeekPromptTest {
         method.invoke(service, Collections.singletonList(item));
 
         assertEquals("复用", item.getSuggestedReuseDegree());
-        assertEquals(0.33D, item.getSuggestedCfp(), 0.0001D);
+        assertEquals(1D / 3D, item.getSuggestedCfp(), 1e-12);
     }
 
     private AiReviewValidationService service() {

@@ -91,7 +91,7 @@ public class AiReviewValidationService {
                 continue;
             }
             item.setSuggestedReuseDegree(reuse);
-            item.setSuggestedCfp("新增".equals(reuse) ? 1D : ("复用".equals(reuse) ? 0.33D : 0D));
+            item.setSuggestedCfp("新增".equals(reuse) ? 1D : ("复用".equals(reuse) ? 1D / 3D : 0D));
         }
     }
 
@@ -109,10 +109,10 @@ public class AiReviewValidationService {
         builder.append("6. verdict \u53ea\u80fd\u662f CONFIRMED_RISK\u3001FALSE_POSITIVE\u3001NEED_REVIEW \u4e4b\u4e00\u3002\n");
         builder.append("7. suggestion \u5fc5\u987b\u6709\u503c\uff1aCONFIRMED_RISK \u5fc5\u987b\u7ed9\u51fa\u53ef\u91c7\u7eb3\u7684\u4fee\u6539\u5efa\u8bae\uff1bFALSE_POSITIVE \u8bf7\u5199\u660e\u201c\u65e0\u9700\u4fee\u6539\u201d\u548c\u5224\u65ad\u539f\u56e0\uff1bNEED_REVIEW \u8bf7\u5199\u660e\u9700\u4eba\u5de5\u786e\u8ba4\u7684\u70b9\u3002\n");
         builder.append("8. CONFIRMED_RISK 时，尽量填写可直接采纳的建议字段；涉及复用与 CFP 时必须填写 suggestedReuseDegree 和 suggestedCfp。\n");
-        builder.append("8.1 \u7ed3\u6784\u53e3\u5f84\uff1a\u529f\u80fd\u8fc7\u7a0b\u81f3\u5c11 2 \u884c\uff0c\u9996\u884c\u662f\u521d\u59cb\u89e6\u53d1 E\uff0c\u672b\u884c\u5fc5\u987b\u662f W/X\uff1b\u540e\u7eed E \u53ea\u80fd\u662f\u672c\u7cfb\u7edf\u53d1\u51fa\u5916\u90e8\u8bf7\u6c42 X \u540e\u7684\u540c\u6b65\u54cd\u5e94\uff0c\u7981\u6b62\u65e0\u4f9d\u636e\u8fde\u7eed E\uff1b\u4e0d\u8bbe\u6700\u591a 4 \u884c\u9650\u5236\u3002\n");
+        builder.append("8.1 结构口径（v2.8 三行骨架）：功能过程至少 2 行，首行是初始触发 E，末行必须是 W/X；后续 E 只能是本系统发出外部请求 X 后的同步响应，禁止无依据连续 E；每个过程只写首 E + 主体（W 或 R）+ 末 X，超过 4 行只允许用户触发的外部调用链和需求明示的第二接收方 X。\n");
         builder.append("8.2 \u7eaf\u524d\u7aef\u7ffb\u9875\u3001\u52fe\u9009\u3001\u56fe\u5c42\u5207\u6362\u3001\u81ea\u52a8\u586b\u5145\u3001\u9ad8\u4eae\u6e32\u67d3\u4e0d\u5355\u72ec\u8ba1\u91cf\uff1b\u6821\u9a8c\u3001\u8ba1\u7b97\u3001\u89e3\u6790\u7b49\u6570\u636e\u64cd\u4f5c\u4e0d\u5355\u72ec\u8ba1\u6570\u636e\u79fb\u52a8\u3002\n");
-        builder.append("8.3 \u6570\u636e\u5c5e\u6027\u5e94\u5148\u68c0\u7d22\u539f\u6587\u8868\u683c\u5b57\u6bb5\u3001\u63a5\u53e3/\u62a5\u6587\u53c2\u6570\u3001\u6b63\u6587\u660e\u786e\u4e1a\u52a1\u6570\u636e\u9879\u548c\u540c\u4e00\u529f\u80fd\u8fc7\u7a0b\u4e0a\u4e0b\u6587\u3002\u76f8\u540c\u6570\u636e\u7ec4\u4f20\u9012\u540c\u4e00\u6279\u6570\u636e\u65f6\u590d\u7528\u5df2\u77e5\u5c5e\u6027\uff1b\u65e0\u8f7d\u8377\u5b9a\u65f6\u89e6\u53d1\u586b\u201c\u65e0\u4e1a\u52a1\u6570\u636e\u201d\u3002\u53ea\u6709\u4ecd\u65e0\u6cd5\u8bc6\u522b\u4efb\u4f55\u5c5e\u6027\u65f6\u624d\u6574\u683c\u586b\u201c\u5f85\u786e\u8ba4\u201d\uff0c\u7981\u6b62\u201c\u5b57\u6bb5\u540d\uff08\u5f85\u786e\u8ba4\uff09\u201d\u6df7\u5199\u3001\u865a\u6784\u5b57\u6bb5\u6216\u5199\u201c\u540c\u4e0a/\u89c1\u4e0a\u201d\u3002\n");
-        builder.append("8.4 复用度与 CFP 映射为新增=1、复用=0.33、利旧=0。必须根据 reviewContextRows 做语义查重：完整用户目标重复/包含才建议利旧=0；用户目标不同但当前数据移动复用才建议复用=0.33；只有两项相同且证据不足时保持 NEED_REVIEW，不得为了消除风险强制改复用。\n");
+        builder.append("8.3 数据属性应先检索原文表格字段、接口/报文参数、正文明确业务数据项和同一功能过程上下文。相同数据组传递同一批数据时复用已知属性；无载荷定时触发属性填“调度时间、调度任务名称”。数据属性至少 2 个，数据组用中文业务名；禁止虚构字段或写“同上/见上”。\n");
+        builder.append("8.4 复用度与 CFP 映射为新增=1、复用=精确 1/3、利旧=0。必须根据 reviewContextRows 做语义查重：完整用户目标重复/包含才建议利旧=0；用户目标不同但当前数据移动复用才建议复用=1/3；只有两项相同且证据不足时保持 NEED_REVIEW，不得为了消除风险强制改复用。\n");
         builder.append("8.5 \u5386\u53f2\u8bc4\u5ba1 N/NM/\u6570\u5b57\u884c\u53f7/O/OLD/UIUE/C/NR/\u7b97\u6cd5/\u9700\u6c42\u6587\u6863\u4e0d\u6d89\u53ca\u4f18\u5148\u4e8e\u901a\u7528\u6a21\u677f\uff1b\u4e0d\u5f97\u4e3a\u51d1\u7ed3\u6784\u8865\u201c\u8bfb\u53d6\u76f8\u5173\u6570\u636e/\u4fdd\u5b58\u5904\u7406\u7ed3\u679c\u201d\u6216\u6cdb\u5316\u5c5e\u6027\u3002\n");
         builder.append("8.6 E 类子过程按真实发起方自然表达：用户/UI 主动操作使用“发起/提交”，外部平台上报或回调才使用“接收”，X 后同步响应使用“获取同步响应数据”；不得机械拼接“接收+功能过程名+请求”。\n");
         builder.append(splitRuleConfigService.getEffectiveRulesPrompt());

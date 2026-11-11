@@ -51,7 +51,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void flagsReadInCreateButAcceptsFileWriteInExport() {
+    void flagsReadInCreateAndTemplateFileWriteInUserExport() {
         RuleValidationService service = new RuleValidationService();
 
         RuleValidationResponse createResponse = service.validate(Arrays.asList(
@@ -65,7 +65,8 @@ class RuleValidationServiceTest {
                 row("用户导出", "X", "导出结果", "文件内容", "新增")));
 
         assertTrue(hasCombinationIssue(createResponse, "不应包含 R"));
-        assertFalse(hasCombinationIssue(exportResponse, "不应包含 W"), describe(exportResponse));
+        // v2.8 V4：需求未明示服务器留存时，用户导出的“生成导出文件”W 判 N
+        assertTrue(hasCombinationIssue(exportResponse, "不应包含 W"), describe(exportResponse));
         assertFalse(hasCombinationIssue(exportResponse, "当前缺少"), describe(exportResponse));
     }
 
@@ -92,7 +93,7 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void requiresSeparateWriteAndExitForImportAndDynamicExport() {
+    void requiresImportWriteAndAcceptsUserExportAsEntryReadExit() {
         RuleValidationService service = new RuleValidationService();
 
         RuleValidationResponse importResponse = service.validate(Arrays.asList(
@@ -107,9 +108,10 @@ class RuleValidationServiceTest {
         assertTrue(hasCombinationIssue(importResponse,
                 "写入导入业务数据 W 与返回导入结果信息 X 拆成两个独立子过程，当前缺少 W"),
                 describe(importResponse));
-        assertTrue(hasCombinationIssue(exportResponse,
-                "生成/写入 Excel 等导出文件 W 与返回文件或导出结果 X 拆成两个独立子过程，当前缺少 W"),
-                describe(exportResponse));
+        assertTrue(hasCombinationIssue(importResponse, "不应包含 R"), describe(importResponse));
+        // v2.8：用户导出按 E-R-X，不要求生成文件 W
+        assertFalse(hasCombinationIssue(exportResponse, "当前缺少"), describe(exportResponse));
+        assertFalse(hasCombinationIssue(exportResponse, "不应包含"), describe(exportResponse));
     }
 
     @Test
@@ -167,7 +169,6 @@ class RuleValidationServiceTest {
 
         RuleValidationResponse importResponse = service.validate(Arrays.asList(
                 row("用户导入", "E", "导入请求", "文件名称", "新增"),
-                row("用户导入", "R", "Excel导入文件", "文件数据", "新增"),
                 row("用户导入", "W", "用户数据表", "用户字段", "新增"),
                 row("用户导入", "X", "导入结果", "校验结果", "新增")));
 
@@ -204,7 +205,7 @@ class RuleValidationServiceTest {
                 withTrigger(row("定时汇总库存", "R", "库存明细表", "库存编号", "新增"), "每日定时触发"),
                 withTrigger(row("定时汇总库存", "W", "库存汇总表", "统计日期、库存数量", "新增"), "每日定时触发")));
 
-        assertTrue(hasIssue(missed, "初始触发 E 未按新疆统一规则设为复用 0.33"),
+        assertTrue(hasIssue(missed, "初始触发 E 未按新疆统一规则设为复用 1/3"),
                 describe(missed));
 
         FunctionSplitRow technicalEntry = withTrigger(
@@ -390,14 +391,14 @@ class RuleValidationServiceTest {
     }
 
     @Test
-    void exportObjectNameContainingDispatchStillRequiresOnlyTheExportFileWrite() {
+    void exportObjectNameContainingDispatchDoesNotRequireWrite() {
         RuleValidationService service = new RuleValidationService();
         RuleValidationResponse response = service.validate(Arrays.asList(
                 row("导出盘点派发任务统计数据", "E", "导出请求", "规则名称、时间范围", "新增"),
                 row("导出盘点派发任务统计数据", "R", "盘点派发任务统计表", "规则名称、派发时间", "新增"),
                 row("导出盘点派发任务统计数据", "X", "盘点派发任务导出文件", "统计数据", "新增")));
 
-        assertTrue(hasCombinationIssue(response, "生成/写入 Excel 等导出文件 W"), describe(response));
+        assertFalse(hasCombinationIssue(response, "当前缺少"), describe(response));
         assertFalse(hasIssue(response, "派发/导出"), describe(response));
     }
 
@@ -698,7 +699,7 @@ class RuleValidationServiceTest {
         row.setDataGroup(dataGroup);
         row.setDataAttributes(dataAttributes + "、审计字段二、审计字段三、审计字段四、审计字段五、审计字段六");
         row.setReuseDegree(reuse);
-        row.setCfp("复用".equals(reuse) ? 0.33D : ("利旧".equals(reuse) ? 0D : 1D));
+        row.setCfp("复用".equals(reuse) ? 1D / 3D : ("利旧".equals(reuse) ? 0D : 1D));
         return row;
     }
 

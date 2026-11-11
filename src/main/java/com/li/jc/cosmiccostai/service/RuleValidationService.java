@@ -245,14 +245,14 @@ public class RuleValidationService {
         if (!("\u65b0\u589e".equals(reuse) || "\u590d\u7528".equals(reuse) || "\u5229\u65e7".equals(reuse))) {
             return;
         }
-        double expected = "\u65b0\u589e".equals(reuse) ? 1D : ("\u590d\u7528".equals(reuse) ? 0.33D : 0D);
+        double expected = "\u65b0\u589e".equals(reuse) ? 1D : ("\u590d\u7528".equals(reuse) ? 1D / 3D : 0D);
         if (Math.abs(row.getCfp() - expected) <= CFP_TOLERANCE) {
             return;
         }
         add(response, rowNumber, safe(row.getFunctionProcess()), "M CFP", "ERROR",
                 "\u590d\u7528\u5ea6\u4e0e CFP \u4e0d\u4e00\u81f4\uff1a" + reuse + " \u5e94\u4e3a " + formatCfp(expected)
                         + "\uff0c\u5f53\u524d\u4e3a " + formatCfp(row.getCfp()),
-                "\u6309\u7edf\u4e00\u53e3\u5f84\u4fee\u6b63\uff1a\u65b0\u589e=1\u3001\u590d\u7528=0.33\u3001\u5229\u65e7=0\u3002");
+                "按统一口径修正：新增=1、复用=精确 1/3（公式 =1/3）、利旧=0。");
     }
 
     private String formatCfp(double value) {
@@ -318,7 +318,7 @@ public class RuleValidationService {
         }
         String suggestion = containsAny(decision, "N", "NM", "UIUE", "C", "NR", "\u7b97\u6cd5", "\u9700\u6c42\u6587\u6863\u4e0d\u6d89\u53ca")
                 ? "\u8be5\u5386\u53f2\u5224\u4f8b\u901a\u5e38\u8868\u793a\u4e0d\u5b58\u5728\u3001\u65e0\u6570\u636e\u79fb\u52a8\u6216\u975e COSMIC \u5185\u5bb9\uff1b\u5e94\u5220\u9664\u65e0\u4f9d\u636e\u884c\uff0c\u7b97\u6cd5\u4ec5\u4fdd\u7559\u771f\u5b9e E/R/W/X\u3002"
-                : "\u5386\u53f2\u5224\u4f8b\u4f18\u5148\u4e8e\u901a\u7528\u6a21\u677f\uff1b\u6838\u5bf9\u5bf9\u5e94\u53c2\u8003\u884c\u53ca\u529f\u80fd\u5305\u542b\u5173\u7cfb\uff0c\u529f\u80fd\u7ea7\u91cd\u590d/OLD \u6309 0\uff0c\u5b50\u8fc7\u7a0b\u590d\u7528\u5019\u9009\u6309 0.33 \u590d\u6838\u3002";
+                : "\u5386\u53f2\u5224\u4f8b\u4f18\u5148\u4e8e\u901a\u7528\u6a21\u677f\uff1b\u6838\u5bf9\u5bf9\u5e94\u53c2\u8003\u884c\u53ca\u529f\u80fd\u5305\u542b\u5173\u7cfb\uff0c\u529f\u80fd\u7ea7\u91cd\u590d/OLD \u6309 0\uff0c\u5b50\u8fc7\u7a0b\u590d\u7528\u5019\u9009\u6309 1/3 \u590d\u6838\u3002";
         add(response, rowNumber, safe(row.getFunctionProcess()), "\u5386\u53f2\u8bc4\u5ba1\u5224\u4f8b", "RISK",
                 "\u8bc1\u636e/\u529f\u80fd\u63cf\u8ff0\u4e2d\u5305\u542b\u8bbe\u8ba1\u9662\u8bc4\u5ba1\u6807\u7b7e\u201c" + decision + "\u201d", suggestion);
     }
@@ -781,8 +781,8 @@ public class RuleValidationService {
             return "导入功能必须将写入导入业务数据 W 与返回导入结果信息 X 拆成两个独立子过程，当前缺少 "
                     + joinMovements(missing);
         }
-        if (hasActionLabel(matches, "导出") && (missing.contains("W") || missing.contains("X"))) {
-            return "导出功能必须将生成/写入 Excel 等导出文件 W 与返回文件或导出结果 X 拆成两个独立子过程，当前缺少 "
+        if (hasActionLabel(matches, "导出") && (missing.contains("R") || missing.contains("X"))) {
+            return "用户导出按 E-R-X：读取待导出业务数据 R，末行 X 返回导出文件或下载地址，当前缺少 "
                     + joinMovements(missing);
         }
         return "“" + actionKeywords(matches) + "”类功能通常应包含 "
@@ -792,12 +792,11 @@ public class RuleValidationService {
     private String missingMovementSuggestion(List<ActionMovementRule.Match> matches,
                                              Set<String> missing) {
         if (hasActionLabel(matches, "导入") && (missing.contains("W") || missing.contains("X"))) {
-            return "在读取并校验导入文件后，单独增加 W 写入目标业务数据；末行单独使用 X 返回成功/失败、导入数量或错误信息。"
-                    + "不得把写入数据和返回结果合并到同一个子过程。";
+            return "导入按 E-W-X：上传文件 E 之后单独增加 W 写入目标业务数据；末行单独使用 X 返回成功/失败、导入数量或错误信息。"
+                    + "解析、校验不计 R，不得把写入数据和返回结果合并到同一个子过程。";
         }
-        if (hasActionLabel(matches, "导出") && (missing.contains("W") || missing.contains("X"))) {
-            return "在读取待导出数据后，单独增加 W 生成/写入 Excel、CSV、PDF 等导出文件；末行单独使用 X 返回文件、"
-                    + "下载地址或导出结果。临时文件也不得省略 W。";
+        if (hasActionLabel(matches, "导出") && (missing.contains("R") || missing.contains("X"))) {
+            return "补齐读取待导出业务数据的 R，末行用 X 返回导出文件或下载地址。生成导出文件不计 W。";
         }
         return "请先核对原始需求，再补充有明确依据的 " + joinMovements(missing)
                 + " 数据移动；不得为了满足形式完整而虚构数据组或属性。";
@@ -817,6 +816,13 @@ public class RuleValidationService {
     private boolean isSupportedOptionalMovement(ActionMovementRule.Profile profile,
                                                 String movement,
                                                 FunctionSplitRow row) {
+        if ("W".equals(movement) && "导出".equals(profile.getLabel())) {
+            // v2.8 V4：用户导出不计生成文件 W；只有需求明示服务器留存或定时生成供下游使用时才保留。
+            String text = safe(row.getSubProcessDescription()) + " " + safe(row.getDataGroup()) + " "
+                    + safe(row.getFunctionDescription()) + " " + safe(row.getTriggerEvent());
+            return ActionMovementRule.hasServerRetentionEvidence(text)
+                    || containsAny(text, "定时", "调度", "推送", "上报");
+        }
         if (!"R".equals(movement) || !"新增".equals(profile.getLabel())) {
             return false;
         }
@@ -884,6 +890,14 @@ public class RuleValidationService {
             return "请核对原始需求；新增、删除或被调用方同步写入通常不自动增加 R。"
                     + "如确需关联查询其他业务表，必须在子过程和数据组中写清被读取的业务表及其作用；"
                     + "没有明确依据时删除 R。";
+        }
+        if ("W".equals(movement) && "导出".equals(profile.getLabel())) {
+            return "用户导出按 E-R-X，“生成导出文件”W 会被评审判 N（规则 V4）。"
+                    + "只有需求明示文件在服务器留存、可再次下载时才保留 W，并在子过程中写明留存要求；否则删除 W。";
+        }
+        if ("R".equals(movement) && "导入".equals(profile.getLabel())) {
+            return "导入按 E-W-X，读取/解析/校验导入文件不计 R。只有需求明示读取独立持久化参考数据时才保留，"
+                    + "并写清被读取的业务表；否则删除 R。";
         }
         if ("W".equals(movement) && ("查询".equals(profile.getLabel())
                 || "被调用方查询接口".equals(profile.getLabel()))) {
@@ -964,11 +978,11 @@ public class RuleValidationService {
                 continue;
             }
             if ("复用".equals(safe(first.row.getReuseDegree()))
-                    && Math.abs(first.row.getCfp() - 0.33D) <= CFP_TOLERANCE) {
+                    && Math.abs(first.row.getCfp() - 1D / 3D) <= CFP_TOLERANCE) {
                 continue;
             }
             add(response, first.rowNumber, safe(first.row.getFunctionProcess()), "复用与 CFP", "RISK",
-                    "有效定时/时钟/系统事件功能过程的初始触发 E 未按新疆统一规则设为复用 0.33",
+                    "有效定时/时钟/系统事件功能过程的初始触发 E 未按新疆统一规则设为复用 1/3",
                     "重新执行复用度 AI 调整，按 XJ-TIMER-E 核对当前行证据；只调整首行 E，后续 R/W/X 独立判断。若只是技术定时器或内部轮询，应排除该非 COSMIC 触发。");
         }
     }
@@ -1020,7 +1034,7 @@ public class RuleValidationService {
                 if (exact != null && !isReuseOrLegacyCfp(row)) {
                     add(response, rowRef.rowNumber, safe(row.getFunctionProcess()), "复用与 CFP", "RISK",
                             "与第 " + exact.rowRef.rowNumber + " 行跨功能过程的子过程描述、数据移动类型、数据属性三要素完全相同，且未发现跨层/跨边界依据",
-                            "先判断两个完整用户目标：功能级重复/包含时当前功能按利旧、CFP=0；若完整功能不同而只是该子过程被后置功能共享，应由复用度调整节点自动设为复用、CFP=0.33。");
+                            "先判断两个完整用户目标：功能级重复/包含时当前功能按利旧、CFP=0；若完整功能不同而只是该子过程被后置功能共享，应由复用度调整节点自动设为复用、CFP=1/3。");
                     reported = true;
                 }
                 if (!reported && !isReuseOrLegacyCfp(row)) {
@@ -1036,7 +1050,7 @@ public class RuleValidationService {
                         }
                         add(response, rowRef.rowNumber, safe(row.getFunctionProcess()), "复用与 CFP", "RISK",
                                 "与第 " + previous.rowRef.rowNumber + " 行跨功能过程的审核三要素有两项相同，存在语义复用候选",
-                                "该候选应由复用度调整节点自动设为复用、CFP=0.33；若仍出现本提示，请重新执行复用度调整。");
+                                "该候选应由复用度调整节点自动设为复用、CFP=1/3；若仍出现本提示，请重新执行复用度调整。");
                         reported = true;
                         break;
                     }
@@ -1073,7 +1087,7 @@ public class RuleValidationService {
                 RowRef current = rows.get(0);
                 add(response, current.rowNumber, safe(current.row.getFunctionProcess()), "复用与 CFP", "RISK",
                         "当前完整功能过程与第 " + previous.rowRef.rowNumber + " 行所在功能过程的数据移动、数据组和数据属性结构完全相同，疑似功能级重复",
-                        "按业务目标和历史判例核对包含关系；若已有功能已完整实现该用户目标，当前整个功能过程按利旧、CFP=0，而不是仅逐行改成 0.33。");
+                        "按业务目标和历史判例核对包含关系；若已有功能已完整实现该用户目标，当前整个功能过程按利旧、CFP=0，而不是仅逐行改成 1/3。");
             } else if (previous == null) {
                 fingerprints.put(key, new ProcessRowRef(entry.getKey(), rows.get(0)));
             }
@@ -1195,7 +1209,7 @@ public class RuleValidationService {
     }
 
     private boolean isReuseCfp(FunctionSplitRow row) {
-        return "\u590d\u7528".equals(safe(row.getReuseDegree())) && Math.abs(row.getCfp() - 0.33D) <= CFP_TOLERANCE;
+        return "\u590d\u7528".equals(safe(row.getReuseDegree())) && Math.abs(row.getCfp() - 1D / 3D) <= CFP_TOLERANCE;
     }
 
     private boolean isDistinctDataGroupMovement(FunctionSplitRow left, FunctionSplitRow right) {

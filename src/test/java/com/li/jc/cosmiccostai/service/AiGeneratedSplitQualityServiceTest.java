@@ -41,16 +41,26 @@ class AiGeneratedSplitQualityServiceTest {
     }
 
     @Test
-    void reportsAiGeneratedExportThatCombinesFileGenerationIntoOnlyOneExit() {
+    void acceptsUserExportAsEntryReadExitWithoutFileWrite() {
         ExtractedFunction function = function("导出业务明细", "用户发起业务明细导出请求",
-                movement("E", "发起业务明细导出请求", "导出条件", "时间范围"),
+                movement("E", "发起业务明细导出请求", "导出条件", "时间范围、业务类型"),
                 movement("R", "读取业务明细", "业务明细表", "业务编号、业务状态"),
-                movement("X", "生成Excel明细文件并返回用户下载", "Excel明细文件", "文件名称、文件内容"));
+                movement("X", "输出Excel明细文件供用户下载", "Excel明细文件", "文件名称、文件内容"));
+
+        assertTrue(service.validate(Arrays.asList(function)).isEmpty());
+    }
+
+    @Test
+    void reportsAiGeneratedExportFileWriteAsTemplateMovement() {
+        ExtractedFunction function = function("导出业务明细", "用户发起业务明细导出请求",
+                movement("E", "发起业务明细导出请求", "导出条件", "时间范围、业务类型"),
+                movement("R", "读取业务明细", "业务明细表", "业务编号、业务状态"),
+                movement("W", "生成Excel明细文件", "Excel明细文件", "文件名称、文件内容"),
+                movement("X", "输出Excel明细文件供用户下载", "Excel明细文件", "文件名称、文件内容"));
 
         List<RuleValidationIssue> issues = service.validate(Arrays.asList(function));
 
-        assertTrue(hasMessage(issues, "生成/写入 Excel 等导出文件 W"), describe(issues));
-        assertTrue(hasMessage(issues, "当前缺少 W"), describe(issues));
+        assertTrue(hasMessage(issues, "不应包含 W"), describe(issues));
     }
 
     @Test

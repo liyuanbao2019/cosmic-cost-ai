@@ -12,6 +12,8 @@ import java.util.Set;
 
 final class MovementDataAttributeNormalizer {
 
+    static final String SCHEDULED_ENTRY_ATTRIBUTES = "调度时间、调度任务名称";
+
     private MovementDataAttributeNormalizer() {
     }
 
@@ -24,7 +26,8 @@ final class MovementDataAttributeNormalizer {
                 continue;
             }
             if (isNoPayloadScheduledEntry(movement)) {
-                movement.setDataAttributes("无业务数据");
+                // v2.8 V37：属性至少 2 个，定时触发 E 用调度信息本身作属性，不写“无业务数据”。
+                movement.setDataAttributes(SCHEDULED_ENTRY_ATTRIBUTES);
             }
         }
 
@@ -78,6 +81,7 @@ final class MovementDataAttributeNormalizer {
         return StringUtils.hasText(attributes)
                 && !attributes.contains("待确认")
                 && !"无业务数据".equals(attributes)
+                && !SCHEDULED_ENTRY_ATTRIBUTES.equals(attributes)
                 && !containsAny(attributes, "同上", "见上", "与上相同");
     }
 

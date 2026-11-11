@@ -24,12 +24,12 @@ class CosmicAnalysisMovementRuleTest {
     }
 
     @Test
-    void queryDoesNotGainWriteButTemporaryExportUsesFileWriteAndResultExit() {
+    void queryDoesNotGainWriteAndTemporaryExportIsEntryReadExit() {
         CosmicResult queried = analyze("用户查询", "保存查询条件并生成查询结果");
         CosmicResult exported = analyze("用户导出", "临时生成导出文件，下载后立即删除");
 
         assertMovements(queried, 1, 1, 0, 1);
-        assertMovements(exported, 1, 1, 1, 1);
+        assertMovements(exported, 1, 1, 0, 1);
     }
 
     @Test
@@ -38,7 +38,7 @@ class CosmicAnalysisMovementRuleTest {
         CosmicResult notified = analyze("用户通知", "生成通知并发送给用户");
         CosmicResult recordedNotification = analyze("用户通知", "读取通知内容，发送给用户并保存发送记录");
 
-        assertMovements(imported, 1, 1, 1, 1);
+        assertMovements(imported, 1, 0, 1, 1);
         assertMovements(notified, 1, 1, 0, 1);
         assertMovements(recordedNotification, 1, 1, 1, 1);
     }
@@ -50,8 +50,8 @@ class CosmicAnalysisMovementRuleTest {
         CosmicResult combinedCollection = analyze("定时文件采集", "下载文件并保存文件，同时写入业务数据表");
 
         assertMovements(persistentExport, 1, 1, 1, 1);
-        assertMovements(scheduledStatistics, 1, 1, 1, 0);
-        assertMovements(combinedCollection, 1, 0, 2, 0);
+        assertMovements(scheduledStatistics, 1, 0, 1, 0);
+        assertMovements(combinedCollection, 1, 0, 1, 0);
     }
 
     @Test
@@ -63,7 +63,7 @@ class CosmicAnalysisMovementRuleTest {
 
         assertMovements(calledQuery, 1, 1, 0, 1);
         assertMovements(calledSync, 1, 0, 1, 1);
-        assertMovements(callerPull, 1, 0, 1, 1);
+        assertMovements(callerPull, 1, 0, 1, 0);
         assertMovements(callerPush, 1, 1, 0, 1);
     }
 
@@ -97,7 +97,7 @@ class CosmicAnalysisMovementRuleTest {
 
         CosmicResult result = service.analyzeFunction(function);
 
-        assertEquals("无业务数据", result.getMovements().get(0).getDataAttributes());
+        assertEquals("调度时间、调度任务名称", result.getMovements().get(0).getDataAttributes());
         assertEquals("公告编号、六级地址", result.getMovements().get(2).getDataAttributes());
         assertEquals("结果状态（待确认）", result.getMovements().get(3).getDataAttributes());
     }

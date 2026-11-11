@@ -179,10 +179,14 @@ public class CosmicAnalysisService {
                 String evidence = safe(function.getFunction()) + " " + safe(function.getDescription());
                 if ("发送/推送".equals(profile.getLabel())) {
                     write = ActionMovementRule.hasMessageRecordEvidence(evidence) ? 1 : 0;
-                } else if ("定时文件采集".equals(profile.getLabel())
-                        && ActionMovementRule.hasCombinedCollectionEvidence(evidence)) {
-                    write = 2;
+                } else if ("导出".equals(profile.getLabel())
+                        && ActionMovementRule.hasServerRetentionEvidence(evidence)) {
+                    // v2.8：导出文件只有需求明示在服务器留存、可再次下载时才计 W。
+                    write = 1;
                 }
+            } else if (read > 0 && write > 0) {
+                // v2.8 三行骨架：未匹配动作模板的兜底生成，不同时写主体 R 和 W，有写入时以 W 为主体。
+                read = 0;
             }
         }
 

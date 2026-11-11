@@ -202,13 +202,13 @@ public class ReuseDegreeAiAdjustmentService {
         builder.append("必须遵守：\n");
         builder.append("1. 必须把整张表作为同一判断范围，先识别功能级重复/包含，再识别子过程级复用，最后识别真实跨层、跨边界的新增。\n");
         builder.append("2. 同一一级/二级/三级模块路径内，新增和查询功能过程的全部子过程设为新增；导入或上传若是同模块新增数据功能的配套能力，全部子过程设为复用，若同模块不存在新增功能则可作为新增基准；同模块修改、删除、导出、下载功能过程的全部子过程设为复用。不要求增删改查四类齐全。该规则由服务端统一落地，模型不要为这些行输出 decision，也不得提出相反值。\n");
-        builder.append("3. 服务端先判断整个功能过程是否重复/包含，再按表格顺序判断跨功能共享子过程：后置功能过程中审核三要素恰有两项相同，或三项完全相同但整个功能过程并不重复，且未发现跨层/跨边界差异时，当前行自动设为复用/0.33；模型不要为这些行输出 decision，也不得提出相反值。\n");
-        builder.append("4. 新增=1、复用=0.33、利旧=0。你只判断 suggestedReuseDegree，CFP 由服务端统一映射。\n");
+        builder.append("3. 服务端先判断整个功能过程是否重复/包含，再按表格顺序判断跨功能共享子过程：后置功能过程中审核三要素恰有两项相同，或三项完全相同但整个功能过程并不重复，且未发现跨层/跨边界差异时，当前行自动设为复用/精确 1/3；模型不要为这些行输出 decision，也不得提出相反值。\n");
+        builder.append("4. 新增=1、复用=精确 1/3、利旧=0。你只判断 suggestedReuseDegree，CFP 由服务端统一映射。按 v2.8 事务三档法：模块内某类业务对象的首个查询/首个新增、新对端首个接口、新加工链链首才是新增；关联操作、对象族/维度族变体、“优化/升级/扩容/改造/调整/治理”类标题下的过程按复用；页面交互、表单步骤、前后端重复、调度基础设施、模板链步骤、粒度/制式/Topic 变体按利旧/0。同一功能过程统一一个复用度，不要行内混填（定时首 E 与日志 W 例外）。\n");
         builder.append("5. 一般表内复用判断使用 decisionType=CURRENT_TABLE_REUSE；建议复用时 duplicateScope=MOVEMENT，必须给出有效 referenceRowIndexes，并在 matchedDimensions 中列出审核三要素中至少两项：subProcessDescription、movementType、dataAttributes。\n");
         builder.append("6. 建议利旧时 duplicateScope=FUNCTION，必须证明整个用户目标重复/被包含，并为该功能过程的每一行分别输出 decision；matchedDimensions 必须包含全部三项。\n");
         builder.append("7. 将复用/利旧恢复为新增时，必须在 boundaryDifference 中写清真实的功能用户、业务目标、跨层或跨软件边界差异。\n");
         builder.append("8. evidenceSufficient 只有在当前行、参考行、原文 evidence/sourceReferences 能形成闭环时才可为 true；不得用同义词、字段换序或模板常识代替证据。\n");
-        builder.append("9. 执行统一规则中的新疆特殊场景 XJ-TIMER-E：逐个识别有效定时/时钟/系统事件功能过程。只有功能过程成立、有明确业务目标且后续存在真实 W 或 X 时，首个初始触发 E 才调整为复用/0.33；纯技术定时器不计，后续 R/W/X 不随 E 调整。该决策使用 decisionType=RULE_POLICY、ruleId=XJ-TIMER-E、rowScope=MOVEMENT，不要求引用其它表格行，但必须在 evidenceReferences 中引用当前行真实 REQ 标识；Excel 导入没有 REQ 标识时引用 ROW-行号。\n");
+        builder.append("9. 执行统一规则中的新疆特殊场景 XJ-TIMER-E：逐个识别有效定时/时钟/系统事件功能过程。只有功能过程成立、有明确业务目标且后续存在真实 W 或 X 时，首个初始触发 E 才调整为复用/精确 1/3；纯技术定时器不计，后续 R/W/X 不随 E 调整。该决策使用 decisionType=RULE_POLICY、ruleId=XJ-TIMER-E、rowScope=MOVEMENT，不要求引用其它表格行，但必须在 evidenceReferences 中引用当前行真实 REQ 标识；Excel 导入没有 REQ 标识时引用 ROW-行号。\n");
         builder.append("10. 只输出本分段目标行中确需改变的行；其它分段只作跨表比对，不得为其输出 decision；不改变功能过程、E/R/W/X、数据组、数据属性、描述和行顺序。\n");
         builder.append("11. 输出顶层 JSON 对象：{\"decisions\":[{\"rowIndex\":1,\"decisionType\":\"CURRENT_TABLE_REUSE\",\"ruleId\":\"\",\"rowScope\":\"MOVEMENT\",\"evidenceReferences\":[\"REQ-L0001\"],\"suggestedReuseDegree\":\"复用\",\"duplicateScope\":\"MOVEMENT\",\"referenceRowIndexes\":[2],\"matchedDimensions\":[\"movementType\",\"dataAttributes\"],\"boundaryDifference\":\"\",\"reason\":\"...\",\"evidenceSufficient\":true,\"confidence\":0.96}]}。无可靠调整时输出 {\"decisions\":[]}。\n\n");
         builder.append("【当前生效完整规则】\n");
@@ -1160,7 +1160,7 @@ public class ReuseDegreeAiAdjustmentService {
             return "当前行缺少定时、时钟、调度或系统事件触发证据。";
         }
         if (looksLikeTechnicalTimer(row)) {
-            return "当前描述更接近技术定时器、轮询或保活，不得机械保留 0.33 E。";
+            return "当前描述更接近技术定时器、轮询或保活，不得机械保留 1/3 的 E。";
         }
         if (!hasIndependentBusinessOutcome(rows, group)) {
             return "当前定时处理未形成有依据的持久化或跨边界业务结果。";
@@ -1468,7 +1468,7 @@ public class ReuseDegreeAiAdjustmentService {
     }
 
     private double cfp(String reuse) {
-        return "复用".equals(reuse) ? 0.33D : ("利旧".equals(reuse) ? 0D : 1D);
+        return "复用".equals(reuse) ? 1D / 3D : ("利旧".equals(reuse) ? 0D : 1D);
     }
 
     private double totalCfp(List<FunctionSplitRow> rows) {

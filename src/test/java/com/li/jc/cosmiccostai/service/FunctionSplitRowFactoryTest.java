@@ -61,7 +61,7 @@ class FunctionSplitRowFactoryTest {
 
         List<FunctionSplitRow> rows = FunctionSplitRowFactory.create(metadata(), result);
 
-        assertEquals("无业务数据", rows.get(0).getDataAttributes());
+        assertEquals("调度时间、调度任务名称", rows.get(0).getDataAttributes());
         assertEquals("公告编号、六级地址", rows.get(2).getDataAttributes());
     }
 
