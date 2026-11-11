@@ -5,7 +5,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>COSMIC 软件造价 AI 工作台</title>
-  <link rel="stylesheet" href="/app.css?v=20260820-table-merge-expanded">
+  <link rel="stylesheet" href="/app.css?v=20261111-rules-v2.8">
 </head>
 
 <body>
@@ -576,6 +576,8 @@
           <div id="ruleValidationBar" class="rewrite-progress-bar"></div>
         </div>
         <div id="ruleValidationSummary" class="validation-summary"></div>
+        <div id="strictEstimatePanel" class="strict-estimate hidden"></div>
+        <div id="ruleCheckSummaryPanel" class="rule-check-summary hidden"></div>
         <div id="ruleValidationDetail" class="rewrite-progress-detail"></div>
       </div>
 
@@ -3826,6 +3828,8 @@
         : "\u672a\u53d1\u73b0\u89c4\u5219\u95ee\u9898";
       $("ruleValidationStatus").textContent = title;
       renderRuleValidationSummary(result);
+      renderStrictEstimate(result.strictEstimate);
+      renderRuleCheckSummaries(result.ruleSummaries || []);
       if (issues.length) {
         const level = result.errorCount ? "error" : ((result.riskCount || 0) > 0 ? "" : "success");
         setMessage("\u89c4\u5219\u521d\u5ba1\u5b8c\u6210\uff1a\u5fc5\u987b\u4fee\u6b63 " + (result.errorCount || 0)
@@ -3874,6 +3878,61 @@
         card.appendChild(label);
         summary.appendChild(card);
       });
+    }
+
+    // 事务三档法严口径预估（规则 v2.8 第 3 节）
+    function renderStrictEstimate(estimate) {
+      const panel = $("strictEstimatePanel");
+      if (!panel) {
+        return;
+      }
+      if (!estimate || !estimate.processCount) {
+        panel.classList.add("hidden");
+        panel.innerHTML = "";
+        return;
+      }
+      panel.classList.remove("hidden");
+      const ratio = Number(estimate.declaredPerTransaction || 0);
+      const newShare = Math.round(Number(estimate.newShare || 0) * 100);
+      panel.innerHTML = "<div class=\"strict-estimate-head\"><b>事务三档法严口径预估</b>"
+        + "<span>按关键词与表内结构估算，新对象粒度仍需通读需求确认</span></div>"
+        + "<div class=\"strict-estimate-grid\">"
+        + strictEstimateCell("申报 CFP", formatCfp(estimate.declaredCfp), "")
+        + strictEstimateCell("严口径预估", formatCfp(estimate.strictCfp), "accent")
+        + strictEstimateCell("成立事务 / 过程", (estimate.transactionCount || 0) + " / " + (estimate.processCount || 0), "")
+        + strictEstimateCell("新建 / 定时 / 改造 / 0", (estimate.newCount || 0) + " / " + (estimate.timerNewCount || 0)
+          + " / " + (estimate.modifyCount || 0) + " / " + (estimate.zeroCount || 0), "")
+        + strictEstimateCell("申报 ÷ 事务数", ratio.toFixed(2), ratio > 3.5 ? "warn" : "")
+        + strictEstimateCell("新建档占比", newShare + "%", newShare > 50 ? "warn" : "")
+        + "</div>";
+    }
+
+    function strictEstimateCell(label, value, className) {
+      return "<div class=\"strict-estimate-cell " + className + "\"><b>" + escapeHtml(value) + "</b><span>"
+        + escapeHtml(label) + "</span></div>";
+    }
+
+    // v2.8 检查项汇总：按涉及 CFP 从大到小（后端已排序）
+    function renderRuleCheckSummaries(summaries) {
+      const panel = $("ruleCheckSummaryPanel");
+      if (!panel) {
+        return;
+      }
+      if (!summaries.length) {
+        panel.classList.add("hidden");
+        panel.innerHTML = "";
+        return;
+      }
+      panel.classList.remove("hidden");
+      const rows = summaries.map(function (item) {
+        return "<tr><td><b>" + escapeHtml(item.ruleCode) + "</b></td><td>" + escapeHtml(item.title || "")
+          + "</td><td>" + escapeHtml(item.category || "") + "</td><td class=\"num\">" + escapeHtml(item.rowCount || 0)
+          + "</td><td class=\"num\">" + escapeHtml(formatCfp(item.cfpImpact || 0)) + "</td></tr>";
+      }).join("");
+      panel.innerHTML = "<div class=\"strict-estimate-head\"><b>v2.8 检查项（按涉及 CFP 排序）</b>"
+        + "<span>拆分约束 AI 生成时必须清零；表达层、评审侧只提示；过程级检查按过程计数</span></div>"
+        + "<table><thead><tr><th>编号</th><th>检查项</th><th>类别</th><th class=\"num\">命中数</th>"
+        + "<th class=\"num\">涉及 CFP</th></tr></thead><tbody>" + rows + "</tbody></table>";
     }
 
     async function aiValidateSelectedRisks() {

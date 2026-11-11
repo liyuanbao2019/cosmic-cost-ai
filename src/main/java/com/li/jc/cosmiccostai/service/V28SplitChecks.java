@@ -23,7 +23,9 @@ import java.util.regex.Pattern;
  *   <li>评审侧 V45：只提示；</li>
  *   <li>不成立的移动/过程 V2、V3、V13、V15、V21。</li>
  * </ul>
- * 每条问题按行输出，cfpImpact 为该行当前 CFP，同一编号求和即“涉及 CFP”。
+ * 行级问题（V2、V3、V13、V21、V35–V37、V39）每行一条，cfpImpact 为该行 CFP；
+ * 过程级与三级功能级问题每个过程一条、记在过程首行，cfpImpact 为该过程 CFP 合计。
+ * 同一编号的 cfpImpact 求和即“涉及 CFP”。
  */
 final class V28SplitChecks {
 
@@ -245,7 +247,7 @@ final class V28SplitChecks {
             }
         }
         if (body.size() > 1) {
-            addEach(issues, rows, indexes, "V40", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V40", FIELD_SPLIT_CONSTRAINT,
                     "过程内复用度混填（" + String.join("/", all) + "），评审会按过程定档抹平",
                     "先按事务三档给过程定档，再整过程统一填新增或复用；只有定时首 E 和日志 W 可以单独为复用。");
         }
@@ -253,7 +255,7 @@ final class V28SplitChecks {
         // V41 内部事件触发（外部系统通过接口回调/上报属于独立触发，不算）
         boolean externalCallback = trigger.contains("接口") || trigger.contains("调用本系统");
         if (INTERNAL_TRIGGER.matcher(trigger).find() && !externalCallback) {
-            addEach(issues, rows, indexes, "V41", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V41", FIELD_SPLIT_CONSTRAINT,
                     "触发事件“" + cut(trigger, 24) + "”是本系统内部事件/轮询，评审判内部事件二段过程 0",
                     "并入上游过程，触发事件改为“{功能用户}触发{过程名}”或真实调度时间。");
         }
@@ -265,20 +267,20 @@ final class V28SplitChecks {
         }
         // V42 UI/步骤词
         if (UI_WORDS.matcher(process).find()) {
-            addEach(issues, rows, indexes, "V42", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V42", FIELD_SPLIT_CONSTRAINT,
                     "过程名“" + cut(process, 24) + "”含 UI/步骤词，评估师见到即判页面交互 0",
                     "改为“业务对象+操作”名词短语，如“机顶盒设备信息稽核”“预警对象查询”。");
         }
         // V43 粒度变体
         if (GRANULARITY.matcher(process).find()) {
-            addEach(issues, rows, indexes, "V43", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V43", FIELD_SPLIT_CONSTRAINT,
                     "过程名“" + cut(process, 24) + "”含分钟/小时/天/周/月粒度，严口径变体整过程 0",
                     "同一指标的各粒度只写一个过程，粒度差异写进数据组和属性。");
         }
         // V44 归一化后重名
         Integer sameName = normalizedNames.get(normalizeName(process));
         if (sameName != null && sameName > 1) {
-            addEach(issues, rows, indexes, "V44", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V44", FIELD_SPLIT_CONSTRAINT,
                     "过程名归一化后“" + cut(normalizeName(process), 24) + "”出现 " + sameName + " 次，会被判“功能同 xx-yy”",
                     "同名或同义过程只保留一个，其余删除或引用首个；不同场景按“对象×阶段”命名区分。");
         }
@@ -286,19 +288,19 @@ final class V28SplitChecks {
         if ((HUMAN_TRIGGER.matcher(trigger).find() && BATCH_PROCESS.matcher(process).find())
                 || (TIMER_TRIGGER.matcher(trigger).find() && VIEW_PROCESS.matcher(process).find()
                 && !BATCH_PROCESS.matcher(process).find())) {
-            addEach(issues, rows, indexes, "V45", FIELD_REVIEW_SIDE,
+            addProcess(issues, rows, indexes, "V45", FIELD_REVIEW_SIDE,
                     "触发“" + cut(trigger, 20) + "”与过程“" + cut(process, 20) + "”语义不符，评估师可据此质疑功能用户真实性",
                     "采集、汇总、同步、统计写定时或接口触发；查询、展示写用户触发。");
         }
         // V47 功能用户占位
         if (PLACEHOLDER_USER.matcher(user).find()) {
-            addEach(issues, rows, indexes, "V47", FIELD_SPLIT_CONSTRAINT,
+            addProcess(issues, rows, indexes, "V47", FIELD_SPLIT_CONSTRAINT,
                     "功能用户“" + cut(user, 12) + "”是占位写法",
                     "写真实角色或系统：装维人员、代维调度员、业务编排系统、集团 EOMS、调度任务。");
         }
         // V15 调度基础设施
         if (SCHEDULER_INFRA.matcher(process).find()) {
-            addEach(issues, rows, indexes, "V15", FIELD_INVALID_MOVEMENT,
+            addProcess(issues, rows, indexes, "V15", FIELD_INVALID_MOVEMENT,
                     "过程“" + cut(process, 24) + "”属于调度基础设施（锁/Token/准备/完成/超时/统一调度），评审整过程 N",
                     "删除该过程，只保留各业务定时任务本身。");
         }
@@ -488,8 +490,19 @@ final class V28SplitChecks {
                                         List<List<Integer>> processes, String code, String field,
                                         String message, String suggestion) {
         for (List<Integer> process : processes) {
-            addEach(issues, rows, process, code, field, message, suggestion);
+            addProcess(issues, rows, process, code, field, message, suggestion);
         }
+    }
+
+    /** 过程级问题只记在过程首行，涉及 CFP 为整个过程的 CFP 合计，避免同一提示铺满每一行。 */
+    private static void addProcess(List<RuleValidationIssue> issues, List<FunctionSplitRow> rows, List<Integer> indexes,
+                                   String code, String field, String message, String suggestion) {
+        double total = 0D;
+        for (Integer index : indexes) {
+            total += rows.get(index).getCfp();
+        }
+        add(issues, rows, indexes.get(0), code, field, message, suggestion);
+        issues.get(issues.size() - 1).setCfpImpact(total);
     }
 
     private static void addEach(List<RuleValidationIssue> issues, List<FunctionSplitRow> rows, List<Integer> indexes,

@@ -74,7 +74,8 @@ class V28SplitChecksTest {
                 m("R", "读取设备台账", "设备台账表", "设备编码、设备名称"),
                 m("X", "输出设备信息列表", "设备信息列表", "设备编码、设备名称"));
         reuse(mixed.get(2), "复用");
-        assertEquals(3, issues(mixed, "V40").size());
+        assertEquals(1, issues(mixed, "V40").size());
+        assertEquals(1D + 1D + 1D / 3D, issues(mixed, "V40").get(0).getCfpImpact(), 1e-9);
 
         List<FunctionSplitRow> timer = process("性能汇总", "小区性能数据定时汇总入库", "调度任务", "每日 02:00 调度", "新增",
                 m("E", "接收定时调度指令", "定时调度指令", "调度时间、调度任务名称"),
@@ -90,7 +91,8 @@ class V28SplitChecksTest {
         List<FunctionSplitRow> internal = process("文件推送", "资源文件推送", "调度任务", "文件生成事件触发", "新增",
                 m("E", "接收文件生成通知", "文件生成通知", "文件名称、生成时间"),
                 m("X", "推送资源文件至对端SFTP", "资源文件", "文件名称、记录条数"));
-        assertEquals(2, issues(internal, "V41").size());
+        assertEquals(1, issues(internal, "V41").size());
+        assertEquals(1, issues(internal, "V41").get(0).getRowIndex());
 
         List<FunctionSplitRow> callback = process("告警处理", "告警处理结果接收", "集团 EOMS", "集团 EOMS 通过接口回调", "新增",
                 m("E", "接收告警处理结果", "告警处理结果", "告警编号、处理结论"),
@@ -130,7 +132,7 @@ class V28SplitChecksTest {
                 m("E", "接收查询条件", "质差查询条件", "区县、日期"),
                 m("R", "读取质差小区", "质差小区表", "小区编码、质差原因"),
                 m("X", "输出质差小区", "质差小区列表", "小区编码、质差原因")));
-        assertEquals(6, issues(rows, "V44").size());
+        assertEquals(2, issues(rows, "V44").size());
 
         List<FunctionSplitRow> generations = new ArrayList<FunctionSplitRow>();
         generations.addAll(process("网络", "4G小区信息查询", "优化人员", "优化人员触发4G小区信息查询", "新增",
@@ -172,14 +174,14 @@ class V28SplitChecksTest {
                     m("E", "接收定时调度指令", "定时调度指令", "调度时间、调度任务名称"),
                     m("W", "保存" + stage + "结果", "性能数据表", "小区编码、统计日期")));
         }
-        assertEquals(6, issues(chain, "V46").size());
+        assertEquals(3, issues(chain, "V46").size());
 
         List<FunctionSplitRow> placeholder = process("设备台账", "设备信息查询", "发起者：功能用户\n接收者：系统",
                 "功能用户触发设备信息查询", "新增",
                 m("E", "接收设备查询条件", "设备查询条件", "设备编码、所属地市"),
                 m("R", "读取设备台账", "设备台账表", "设备编码、设备名称"),
                 m("X", "输出设备信息列表", "设备信息列表", "设备编码、设备名称"));
-        assertEquals(3, issues(placeholder, "V47").size());
+        assertEquals(1, issues(placeholder, "V47").size());
 
         List<FunctionSplitRow> crud = new ArrayList<FunctionSplitRow>();
         for (String op : Arrays.asList("查询", "新增", "修改", "删除", "导入", "导出", "详情查看")) {
@@ -187,8 +189,8 @@ class V28SplitChecksTest {
                     m("E", "接收站点台账" + op + "信息", "站点台账请求", "站点编码、站点名称"),
                     m("X", "输出站点台账" + op + "结果", "站点台账结果", "站点编码、站点名称")));
         }
-        assertEquals(14, issues(crud, "V48").size());
-        assertEquals(14, issues(crud, "V38").size());
+        assertEquals(7, issues(crud, "V48").size());
+        assertEquals(7, issues(crud, "V38").size());
     }
 
     // ---------- 表达层 ----------
@@ -233,7 +235,7 @@ class V28SplitChecksTest {
         List<FunctionSplitRow> infra = process("调度", "获取分布式锁", "调度任务", "每日 02:00 调度", "复用",
                 m("E", "接收定时调度指令", "定时调度指令", "调度时间、调度任务名称"),
                 m("W", "保存锁记录", "分布式锁表", "锁名称、持有者"));
-        assertEquals(2, issues(infra, "V15").size());
+        assertEquals(1, issues(infra, "V15").size());
 
         List<FunctionSplitRow> optimize = process("工单时限优化", "工单时限查询", "代维调度员", "代维调度员触发工单时限查询", "新增",
                 m("E", "接收查询条件", "时限查询条件", "工单类型、地市"),
@@ -262,7 +264,7 @@ class V28SplitChecksTest {
 
         RuleCheckSummary v42 = summary(summaries, "V42");
         RuleCheckSummary v39 = summary(summaries, "V39");
-        assertEquals(3, v42.getRowCount());
+        assertEquals(1, v42.getRowCount());
         assertEquals(3D, v42.getCfpImpact(), 1e-9);
         assertEquals(1, v39.getRowCount());
         assertEquals(0.33D, v39.getCfpImpact(), 1e-9);
@@ -273,7 +275,8 @@ class V28SplitChecksTest {
         for (RuleValidationIssue issue : response.getIssues()) {
             if ("V42".equals(issue.getRuleCode())) {
                 assertTrue(issue.getMessage().startsWith("V42 "));
-                assertEquals(1D, issue.getCfpImpact(), 1e-9);
+                assertEquals(1, issue.getRowIndex());
+                assertEquals(3D, issue.getCfpImpact(), 1e-9);
             }
         }
     }

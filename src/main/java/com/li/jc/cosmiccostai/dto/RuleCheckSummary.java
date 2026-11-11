@@ -6,6 +6,7 @@ public class RuleCheckSummary {
     private String ruleCode;
     private String title;
     private String category;
+    /** 命中数：行级检查为行数，过程级检查为过程数。 */
     private int rowCount;
     private double cfpImpact;
 

@@ -3390,6 +3390,71 @@ body.review-stage-dialog-open {
   color: #1d4ed8;
 }
 
+.strict-estimate,
+.rule-check-summary {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--soft);
+}
+
+.strict-estimate-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.strict-estimate-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.strict-estimate-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.strict-estimate-cell b {
+  display: block;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.strict-estimate-cell span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.strict-estimate-cell.accent b {
+  color: #1d4ed8;
+}
+
+.strict-estimate-cell.warn b {
+  color: #b45309;
+}
+
+.rule-check-summary table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.rule-check-summary th,
+.rule-check-summary td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.rule-check-summary .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .ai-validation-result {
   margin-top: 12px;
   border-top: 1px solid var(--line);
