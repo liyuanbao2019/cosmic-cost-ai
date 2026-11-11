@@ -1295,8 +1295,7 @@ public class RuleValidationService {
         if (!StringUtils.hasText(rules)) {
             return keywords;
         }
-        if (rules.contains("COSMIC 软件造价拆分基础规则 v2.0")
-                || rules.contains("COSMIC 软件造价拆分基础规则 v2.1")) {
+        if (SplitRuleConfigService.contentVersion(rules) != null) {
             return parseV2Keywords(rules);
         }
         boolean collecting = false;

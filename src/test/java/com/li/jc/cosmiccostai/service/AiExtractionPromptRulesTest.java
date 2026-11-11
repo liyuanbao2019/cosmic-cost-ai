@@ -22,12 +22,12 @@ class AiExtractionPromptRulesTest {
         String prompt = (String) method.invoke(service, "prompt-project", "用户提交规则校验需求");
 
         assertTrue(prompt.contains("【内部拆分校验与可计量改写规则】"));
-        assertTrue(prompt.contains("COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）"));
+        assertTrue(prompt.contains("COSMIC 软件造价拆分基础规则 v2.8（事务三档法 + 拆分输出约束版）"));
         assertTrue(prompt.contains("规则校验"));
         assertTrue(prompt.contains("所有功能过程、子过程、数据组、数据属性必须能从需求原文"));
-        assertTrue(prompt.contains("需求信息不足时，应输出“待确认事项”"));
-        assertTrue(prompt.contains("绝不为了增加功能点而过度拆分"));
-        assertTrue(prompt.contains("不得新增无业务依据的时间、枚举值或属性"));
+        assertTrue(prompt.contains("需求信息不足时，输出“待确认事项”"));
+        assertTrue(prompt.contains("事务三档法"));
+        assertTrue(prompt.contains("不得为了增加功能点、降低复用率或满足模板而虚构功能"));
         assertTrue(prompt.contains("用户查询 E-R-X；新增/删除 E-W-X；修改、导入和动态导出文件 E-R-W-X"));
         assertTrue(prompt.contains("临时文件也必须拆开 W 和 X"));
         assertTrue(prompt.contains("不得只写“生成文件并返回”的单个 X"));
@@ -49,10 +49,10 @@ class AiExtractionPromptRulesTest {
         assertTrue(prompt.contains("不因“配置”一词单独提示风险"));
         assertTrue(prompt.contains("至少输出 2 个 movements"));
         assertTrue(prompt.contains("最后一个必须是 W 或 X"));
-        assertTrue(prompt.contains("不同功能过程中"));
-        assertTrue(prompt.contains("三要素全部相同且没有跨层/跨边界"));
-        assertTrue(prompt.contains("子过程数量不再设置“最多 4 行”硬限制"));
-        assertTrue(prompt.contains("多外部系统调用、多个独立持久数据组读写可自然超过 4 条"));
+        assertTrue(prompt.contains("同构族"));
+        assertTrue(prompt.contains("整过程重复/被包含"));
+        assertTrue(prompt.contains("三行骨架"));
+        assertTrue(prompt.contains("例外只有两种：用户触发的外部调用链"));
         assertFalse(prompt.contains("2—4 个 movements"));
         assertTrue(prompt.contains("翻页、勾选/取消勾选、图层切换"));
         assertTrue(prompt.contains("校验、计算、解析、匹配、过滤、排序是数据操作"));
@@ -64,7 +64,7 @@ class AiExtractionPromptRulesTest {
         assertTrue(prompt.contains("新疆专项：数据库中数据汇总"));
         assertTrue(prompt.contains("新疆专项：Kafka 接入及共享"));
         assertTrue(prompt.contains("新疆专项：实时交互接口"));
-        assertTrue(prompt.contains("有效的定时任务触发 E 默认按复用（0.33 CFP）处理"));
+        assertTrue(prompt.contains("有效定时触发的首行 E → 1/3"));
         assertTrue(prompt.contains("functions 必须按功能自身 sourceReferences 对应的 REQ-L 原文先后顺序输出"));
         assertTrue(prompt.contains("同一功能过程的全部 movements 必须连续"));
         assertTrue(prompt.contains("【需求细则】"));
@@ -81,7 +81,7 @@ class AiExtractionPromptRulesTest {
         method.setAccessible(true);
 
         String prompt = (String) method.invoke(service, "prompt-project", "用户提交规则校验需求");
-        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）";
+        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.8（事务三档法 + 拆分输出约束版）";
 
         assertTrue(prompt.contains("DeepSeek 专项执行协议"));
         assertTrue(prompt.contains("deepseek-cosmic-v1"));

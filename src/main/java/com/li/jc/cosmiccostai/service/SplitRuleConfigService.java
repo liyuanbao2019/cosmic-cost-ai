@@ -14,6 +14,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 public class SplitRuleConfigService {
@@ -23,7 +27,10 @@ public class SplitRuleConfigService {
      * Bump whenever deterministic validation semantics change. The public rule
      * version must identify both the editable prose and the server-side judge.
      */
-    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-08-17.v4.1-import-export-wx";
+    private static final String DETERMINISTIC_RULE_ENGINE_REVISION = "2026-11-11.v2.8-transaction-skeleton";
+    /** 规则文件标题中的内容版本号，例如“COSMIC 软件造价拆分基础规则 v2.8”。 */
+    private static final Pattern RULE_CONTENT_VERSION = Pattern.compile(
+            "COSMIC 软件造价拆分基础规则\\s*v(\\d+)\\.(\\d+)");
 
     private final Path editableRulePath;
 
@@ -101,29 +108,66 @@ public class SplitRuleConfigService {
         }
     }
 
+    /**
+     * 运行副本迁移：按标题中的内容版本号判断，不只看标题文字。
+     * 运行副本版本低于打包版本（或是更早的无版本旧规则）时，先备份旧文件，再整份替换为打包版本；
+     * 版本相同或更高时视为用户维护的规则，保持不动。
+     */
     private void upgradeLegacyBundledRules(Path path) {
         try {
             String existing = new String(Files.readAllBytes(path), StandardCharsets.UTF_8);
-            if (existing.contains("COSMIC 软件造价拆分基础规则 v2.1")) {
+            String bundled = readDefaultRules();
+            int[] bundledVersion = contentVersion(bundled);
+            int[] existingVersion = contentVersion(existing);
+            boolean outdated;
+            if (existingVersion != null) {
+                outdated = bundledVersion != null && compareVersion(existingVersion, bundledVersion) < 0;
+            } else {
+                outdated = existing.startsWith("# 拆分校验规则")
+                        && (existing.contains("暂不按“三要素相同/两项相同”自动判定不同功能过程")
+                        || existing.contains("X 后不得再出现 E/R/W")
+                        || existing.contains("X 输出后再次出现 E"));
+            }
+            if (!outdated) {
                 return;
             }
-            // This application is deployed only for Xinjiang. Once v2.1 became
-            // the unified rule source, an existing v2.0 file must not keep the
-            // runtime on the old semantics after an application upgrade.
-            if (existing.contains("COSMIC 软件造价拆分基础规则 v2.0")) {
-                Files.write(path, readDefaultRules().getBytes(StandardCharsets.UTF_8));
-                return;
-            }
-            boolean legacyBundledRules = existing.startsWith("# 拆分校验规则")
-                    && (existing.contains("暂不按“三要素相同/两项相同”自动判定不同功能过程")
-                    || existing.contains("X 后不得再出现 E/R/W")
-                    || existing.contains("X 输出后再次出现 E"));
-            if (legacyBundledRules) {
-                Files.write(path, readDefaultRules().getBytes(StandardCharsets.UTF_8));
-            }
+            backupRuleFile(path, existing, existingVersion);
+            Files.write(path, bundled.getBytes(StandardCharsets.UTF_8));
         } catch (IOException ex) {
             throw new BusinessException("升级统一拆分规则失败：" + path, ex);
         }
+    }
+
+    /** 规则文件内容版本号，如 v2.8；无法识别时返回空字符串。 */
+    public String getRuleContentVersion() {
+        int[] version = contentVersion(getRules());
+        return version == null ? "" : "v" + version[0] + "." + version[1];
+    }
+
+    static int[] contentVersion(String rules) {
+        if (rules == null) {
+            return null;
+        }
+        Matcher matcher = RULE_CONTENT_VERSION.matcher(rules);
+        if (!matcher.find()) {
+            return null;
+        }
+        return new int[]{Integer.parseInt(matcher.group(1)), Integer.parseInt(matcher.group(2))};
+    }
+
+    private static int compareVersion(int[] left, int[] right) {
+        if (left[0] != right[0]) {
+            return left[0] < right[0] ? -1 : 1;
+        }
+        return Integer.compare(left[1], right[1]);
+    }
+
+    private void backupRuleFile(Path path, String content, int[] version) throws IOException {
+        String label = version == null ? "legacy" : "v" + version[0] + "." + version[1];
+        String stamp = new SimpleDateFormat("yyyyMMddHHmmss").format(new Date());
+        Path backup = path.resolveSibling(path.getFileName().toString().replaceAll("\\.md$", "")
+                + "." + label + "." + stamp + ".bak.md");
+        Files.write(backup, content.getBytes(StandardCharsets.UTF_8));
     }
 
     private Path resolveEditableRulePath() {

@@ -105,7 +105,7 @@ class DeepSplitAiServiceTest {
 
         String prompt = service.buildPrompt(
                 state, chunk, Collections.<DeepSplitAiService.EvidenceBlock>emptyList());
-        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.1（设计院评审 + 新疆特殊场景沉淀版）";
+        String ruleTitle = "COSMIC 软件造价拆分基础规则 v2.8（事务三档法 + 拆分输出约束版）";
 
         assertTrue(prompt.contains("DeepSeek 专项执行协议"));
         assertTrue(prompt.contains("顶层为 suggestions 数组"));
