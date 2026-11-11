@@ -1,5 +1,6 @@
 package com.li.jc.cosmiccostai.service;
 
+import com.li.jc.cosmiccostai.dto.RuleCheckSummary;
 import com.li.jc.cosmiccostai.dto.RuleValidationIssue;
 import com.li.jc.cosmiccostai.dto.RuleValidationResponse;
 import com.li.jc.cosmiccostai.model.FunctionSplitRow;
@@ -10,6 +11,7 @@ import org.springframework.util.StringUtils;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -46,7 +48,8 @@ public class RuleValidationService {
     private static final double CFP_TOLERANCE = 0.005D;
     private static final Set<String> GENERATED_BLOCKING_RISK_FIELDS = new HashSet<String>(Arrays.asList(
             "G功能过程", "H子过程描述", "功能过程", "数据移动结构", "数据移动组合",
-            "数据组", "复用与 CFP", "拆分粒度", "纯前端操作", "开发术语", "日志审计", "持久化语义"));
+            "数据组", "复用与 CFP", "拆分粒度", "纯前端操作", "开发术语", "日志审计", "持久化语义",
+            V28SplitChecks.FIELD_SPLIT_CONSTRAINT, V28SplitChecks.FIELD_INVALID_MOVEMENT));
 
     private final SplitRuleConfigService splitRuleConfigService;
 
@@ -103,8 +106,20 @@ public class RuleValidationService {
         for (int i = 0; i < rows.size(); i++) {
             validateKeywords(response, rows.get(i), i + 1, structureRiskRows.contains(i + 1), highRiskKeywords);
         }
+        response.getIssues().addAll(V28SplitChecks.check(rows));
+        fillCfpImpact(response, rows);
         finish(response);
         return response;
+    }
+
+    /** 未单独计算影响的问题，按所在行当前 CFP 记为“涉及 CFP”。 */
+    private void fillCfpImpact(RuleValidationResponse response, List<FunctionSplitRow> rows) {
+        for (RuleValidationIssue issue : response.getIssues()) {
+            int index = issue.getRowIndex() - 1;
+            if (issue.getCfpImpact() == 0D && index >= 0 && index < rows.size()) {
+                issue.setCfpImpact(rows.get(index).getCfp());
+            }
+        }
     }
 
     private void validatePersistentDataGroupCardinality(RuleValidationResponse response,
@@ -683,10 +698,13 @@ public class RuleValidationService {
                     && isSupportedOptionalMovement(discouragingMatch.getProfile(), movement, ref.row)) {
                 continue;
             }
-            add(response, ref.rowNumber, process, "数据移动组合", "RISK",
+            RuleValidationIssue discouragedIssue = add(response, ref.rowNumber, process, "数据移动组合", "RISK",
                     "“" + actionKeywords(actionMatches) + "”类功能通常不应包含 " + movement + " 数据移动",
                     discouragedMovementSuggestion(discouragingMatch == null
                             ? actionMatches.get(0).getProfile() : discouragingMatch.getProfile(), movement));
+            if ("W".equals(movement) && hasActionLabel(actionMatches, "导出")) {
+                discouragedIssue.setRuleCode("V4");
+            }
             structureRiskRows.add(ref.rowNumber);
         }
         validateConditionalMovementEvidence(response, process, rows, actionMatches, required, structureRiskRows);
@@ -981,9 +999,10 @@ public class RuleValidationService {
                     && Math.abs(first.row.getCfp() - 1D / 3D) <= CFP_TOLERANCE) {
                 continue;
             }
-            add(response, first.rowNumber, safe(first.row.getFunctionProcess()), "复用与 CFP", "RISK",
+            RuleValidationIssue timerIssue = add(response, first.rowNumber, safe(first.row.getFunctionProcess()), "复用与 CFP", "RISK",
                     "有效定时/时钟/系统事件功能过程的初始触发 E 未按新疆统一规则设为复用 1/3",
                     "重新执行复用度 AI 调整，按 XJ-TIMER-E 核对当前行证据；只调整首行 E，后续 R/W/X 独立判断。若只是技术定时器或内部轮询，应排除该非 COSMIC 触发。");
+            timerIssue.setRuleCode("V10");
         }
     }
 
@@ -1278,6 +1297,45 @@ public class RuleValidationService {
         response.setSuggestionCount(0);
         response.setStructureRiskCount(structureRisks);
         response.setExpressionConfirmCount(0);
+        response.setRuleSummaries(summarizeRuleCodes(response.getIssues()));
+    }
+
+    /** 按规则编号汇总命中行数与涉及 CFP，按涉及 CFP 从大到小排序。 */
+    private List<RuleCheckSummary> summarizeRuleCodes(List<RuleValidationIssue> issues) {
+        Map<String, RuleCheckSummary> byCode = new LinkedHashMap<String, RuleCheckSummary>();
+        Map<String, Set<Integer>> rowsByCode = new LinkedHashMap<String, Set<Integer>>();
+        for (RuleValidationIssue issue : issues) {
+            String code = safe(issue.getRuleCode());
+            if (!StringUtils.hasText(code)) {
+                continue;
+            }
+            RuleCheckSummary summary = byCode.get(code);
+            if (summary == null) {
+                summary = new RuleCheckSummary();
+                summary.setRuleCode(code);
+                String title = V28SplitChecks.TITLES.get(code);
+                summary.setTitle(title == null ? code : title);
+                summary.setCategory(safe(issue.getField()));
+                byCode.put(code, summary);
+                rowsByCode.put(code, new LinkedHashSet<Integer>());
+            }
+            if (rowsByCode.get(code).add(issue.getRowIndex())) {
+                summary.setRowCount(summary.getRowCount() + 1);
+                summary.setCfpImpact(summary.getCfpImpact() + issue.getCfpImpact());
+            }
+        }
+        List<RuleCheckSummary> result = new ArrayList<RuleCheckSummary>(byCode.values());
+        for (RuleCheckSummary summary : result) {
+            summary.setCfpImpact(Math.round(summary.getCfpImpact() * 100D) / 100D);
+        }
+        Collections.sort(result, new Comparator<RuleCheckSummary>() {
+            @Override
+            public int compare(RuleCheckSummary left, RuleCheckSummary right) {
+                int byImpact = Double.compare(right.getCfpImpact(), left.getCfpImpact());
+                return byImpact != 0 ? byImpact : Integer.compare(right.getRowCount(), left.getRowCount());
+            }
+        });
+        return result;
     }
 
     private String safe(String value) {

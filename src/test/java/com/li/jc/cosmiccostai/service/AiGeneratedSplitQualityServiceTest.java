@@ -32,12 +32,24 @@ class AiGeneratedSplitQualityServiceTest {
     @Test
     void acceptsCompleteAiGeneratedModifyProcess() {
         ExtractedFunction function = function("修改业务类型节点", "用户提交业务类型修改请求",
-                movement("E", "提交业务类型修改请求", "修改请求", "业务类型编码"),
-                movement("R", "读取原业务类型节点", "业务类型表", "业务类型编码、业务类型名称"),
+                movement("E", "提交业务类型修改请求", "修改请求", "业务类型编码、业务类型名称"),
                 movement("W", "保存修改后的业务类型节点", "业务类型表", "业务类型编码、业务类型名称"),
                 movement("X", "返回业务类型修改结果", "修改结果", "结果状态、结果说明"));
 
         assertTrue(service.validate(Arrays.asList(function)).isEmpty());
+    }
+
+    @Test
+    void reportsFourRowModifySkeletonAsSplitConstraint() {
+        ExtractedFunction function = function("修改业务类型节点", "用户提交业务类型修改请求",
+                movement("E", "提交业务类型修改请求", "修改请求", "业务类型编码、业务类型名称"),
+                movement("R", "读取原业务类型节点", "业务类型表", "业务类型编码、业务类型名称"),
+                movement("W", "保存修改后的业务类型节点", "业务类型表", "业务类型编码、业务类型名称"),
+                movement("X", "返回业务类型修改结果", "修改结果", "结果状态、结果说明"));
+
+        List<RuleValidationIssue> issues = service.validate(Arrays.asList(function));
+
+        assertTrue(hasMessage(issues, "V39"), describe(issues));
     }
 
     @Test

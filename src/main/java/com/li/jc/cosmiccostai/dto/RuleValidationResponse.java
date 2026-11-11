@@ -14,6 +14,8 @@ public class RuleValidationResponse {
     private int expressionConfirmCount;
     private String ruleVersion;
     private List<RuleValidationIssue> issues = new ArrayList<RuleValidationIssue>();
+    /** 按规则编号汇总（命中行数、涉及 CFP），按涉及 CFP 从大到小排序。 */
+    private List<RuleCheckSummary> ruleSummaries = new ArrayList<RuleCheckSummary>();
 
     public int getTotalRows() {
         return totalRows;
@@ -85,5 +87,12 @@ public class RuleValidationResponse {
 
     public void setIssues(List<RuleValidationIssue> issues) {
         this.issues = issues;
+    }
+    public List<RuleCheckSummary> getRuleSummaries() {
+        return ruleSummaries;
+    }
+
+    public void setRuleSummaries(List<RuleCheckSummary> ruleSummaries) {
+        this.ruleSummaries = ruleSummaries;
     }
 }

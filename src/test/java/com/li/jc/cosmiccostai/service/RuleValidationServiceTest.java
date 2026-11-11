@@ -34,11 +34,11 @@ class RuleValidationServiceTest {
     void completeProcessKeywordHitDoesNotCreateIssueWhenStructureIsComplete() {
         RuleValidationService service = new RuleValidationService();
 
-        FunctionSplitRow entry = row("process-b", "E", "request", "id", "\u65b0\u589e");
+        FunctionSplitRow entry = row("process-b", "E", "汇总查询条件", "统计日期", "\u65b0\u589e");
         entry.setSubProcessDescription("\u63a5\u6536\u67e5\u8be2\u6761\u4ef6");
-        FunctionSplitRow read = row("process-b", "R", "source", "amount", "\u65b0\u589e");
+        FunctionSplitRow read = row("process-b", "R", "汇总源数据", "金额", "\u65b0\u589e");
         read.setSubProcessDescription("\u8ba1\u7b97\u6c47\u603b\u6570\u636e");
-        FunctionSplitRow exit = row("process-b", "X", "result", "total", "\u65b0\u589e");
+        FunctionSplitRow exit = row("process-b", "X", "汇总结果", "合计", "\u65b0\u589e");
         exit.setSubProcessDescription("\u8f93\u51fa\u6c47\u603b\u7ed3\u679c");
 
         RuleValidationResponse response = service.validate(Arrays.asList(entry, read, exit));
@@ -56,7 +56,7 @@ class RuleValidationServiceTest {
 
         RuleValidationResponse createResponse = service.validate(Arrays.asList(
                 row("用户新增", "E", "新增请求", "用户名称", "新增"),
-                row("用户新增", "R", "用户数据", "用户编号", "新增"),
+                row("用户新增", "R", "相关数据", "用户编号", "新增"),
                 row("用户新增", "W", "用户记录", "用户编号、用户名称", "新增")));
         RuleValidationResponse exportResponse = service.validate(Arrays.asList(
                 row("用户导出", "E", "导出条件", "用户状态", "新增"),
@@ -191,10 +191,11 @@ class RuleValidationServiceTest {
                 withTrigger(row("定时发送短信", "W", "短信结果表", "发送状态", "新增"), "定时触发"),
                 withTrigger(row("定时发送短信", "X", "短信", "短信内容", "新增"), "定时触发")));
 
-        assertEquals(0, importResponse.getIssueCount());
-        assertEquals(0, exportResponse.getIssueCount());
-        assertEquals(0, statisticsResponse.getIssueCount());
-        assertEquals(0, messageResponse.getIssueCount());
+        assertEquals(0, importResponse.getIssueCount(), describe(importResponse));
+        // 留存导出、带源表 R 的定时汇总、带发送记录的短信：动作组合接受，三行骨架提示 V39
+        assertEquals(0, issuesOtherThan(exportResponse, "V39"), describe(exportResponse));
+        assertEquals(0, issuesOtherThan(statisticsResponse, "V39"), describe(statisticsResponse));
+        assertEquals(0, issuesOtherThan(messageResponse, "V39"), describe(messageResponse));
     }
 
     @Test
@@ -268,9 +269,12 @@ class RuleValidationServiceTest {
                 withTrigger(row("定时文件采集", "W", "采集文件", "文件内容", "新增"), "定时触发"),
                 withTrigger(row("定时文件采集", "W", "业务数据表", "业务字段", "新增"), "定时触发")));
 
-        assertEquals(0, associatedCreate.getIssueCount(), describe(associatedCreate));
-        assertEquals(0, workflow.getIssueCount(), describe(workflow));
-        assertEquals(0, collection.getIssueCount(), describe(collection));
+        assertEquals(0, issuesOtherThan(associatedCreate, "V39"), describe(associatedCreate));
+        assertEquals(0, issuesOtherThan(workflow, "V39"), describe(workflow));
+        assertEquals(0, issuesOtherThan(collection, "V39"), describe(collection));
+        assertTrue(hasRule(associatedCreate, "V39"), describe(associatedCreate));
+        assertTrue(hasRule(workflow, "V39"), describe(workflow));
+        assertTrue(hasRule(collection, "V39"), describe(collection));
     }
 
     @Test
@@ -375,7 +379,8 @@ class RuleValidationServiceTest {
         moduleTwoWrite.setLevel1Module("module-b");
         RuleValidationResponse separateModules = service.validate(Arrays.asList(
                 moduleOneEntry, moduleOneWrite, moduleTwoEntry, moduleTwoWrite));
-        assertEquals(0, separateModules.getIssueCount(), describe(separateModules));
+        assertEquals(0, issuesOtherThan(separateModules, "V44"), describe(separateModules));
+        assertTrue(hasRule(separateModules, "V44"), describe(separateModules));
     }
 
     @Test
@@ -694,13 +699,47 @@ class RuleValidationServiceTest {
         FunctionSplitRow row = new FunctionSplitRow();
         row.setLevel1Module("module-a");
         row.setFunctionProcess(process);
-        row.setSubProcessDescription("sub-process-" + movement);
+        row.setSubProcessDescription(defaultDescription(movement, dataGroup));
         row.setMovementType(movement);
         row.setDataGroup(dataGroup);
         row.setDataAttributes(dataAttributes + "、审计字段二、审计字段三、审计字段四、审计字段五、审计字段六");
         row.setReuseDegree(reuse);
         row.setCfp("复用".equals(reuse) ? 1D / 3D : ("利旧".equals(reuse) ? 0D : 1D));
         return row;
+    }
+
+    private String defaultDescription(String movement, String dataGroup) {
+        if ("E".equals(movement)) {
+            return "接收" + dataGroup;
+        }
+        if ("R".equals(movement)) {
+            return "读取" + dataGroup;
+        }
+        if ("W".equals(movement)) {
+            return "保存" + dataGroup;
+        }
+        return "输出" + dataGroup;
+    }
+
+    /** 除指定 v2.8 规则编号外的问题数。 */
+    private long issuesOtherThan(RuleValidationResponse response, String... codes) {
+        java.util.List<String> excluded = Arrays.asList(codes);
+        long count = 0;
+        for (RuleValidationIssue issue : response.getIssues()) {
+            if (!excluded.contains(issue.getRuleCode())) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private boolean hasRule(RuleValidationResponse response, String code) {
+        for (RuleValidationIssue issue : response.getIssues()) {
+            if (code.equals(issue.getRuleCode())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private FunctionSplitRow withTrigger(FunctionSplitRow row, String triggerEvent) {

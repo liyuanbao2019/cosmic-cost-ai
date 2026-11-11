@@ -8,6 +8,10 @@ public class RuleValidationIssue {
     private String severity;
     private String message;
     private String suggestion;
+    /** v2.8 检查项编号，如 V39；旧检查项为空。 */
+    private String ruleCode;
+    /** 本条问题涉及的 CFP（该行当前 CFP），用于按影响排序。 */
+    private double cfpImpact;
 
     public int getRowIndex() {
         return rowIndex;
@@ -57,4 +61,19 @@ public class RuleValidationIssue {
         this.suggestion = suggestion;
     }
 
+    public String getRuleCode() {
+        return ruleCode;
+    }
+
+    public void setRuleCode(String ruleCode) {
+        this.ruleCode = ruleCode;
+    }
+
+    public double getCfpImpact() {
+        return cfpImpact;
+    }
+
+    public void setCfpImpact(double cfpImpact) {
+        this.cfpImpact = cfpImpact;
+    }
 }
